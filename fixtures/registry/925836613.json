@@ -1,0 +1,107 @@
+{
+  "status": 200,
+  "body": {
+    "organisasjonsnummer": "925836613",
+    "navn": "NORSK TIPPING AS",
+    "organisasjonsform": {
+      "kode": "AS",
+      "beskrivelse": "Aksjeselskap",
+      "_links": {
+        "self": {
+          "href": "https://data.brreg.no/enhetsregisteret/api/organisasjonsformer/AS"
+        }
+      }
+    },
+    "historiskeNavn": [
+      {
+        "navn": "Norsk Tipping a/s",
+        "fraDato": "1995-03-12 16:23:00",
+        "tilDato": "2010-11-11 20:21:23"
+      }
+    ],
+    "hjemmeside": "www.norsk-tipping.no",
+    "postadresse": {
+      "land": "Norge",
+      "landkode": "NO",
+      "postnummer": "2325",
+      "poststed": "HAMAR",
+      "adresse": [
+        "Postboks 4414"
+      ],
+      "kommune": "HAMAR",
+      "kommunenummer": "3403"
+    },
+    "registreringsdatoEnhetsregisteret": "1995-03-12",
+    "registrertIMvaregisteret": true,
+    "naeringskode1": {
+      "kode": "92.000",
+      "beskrivelse": "Lotteri- og gamblingvirksomhet"
+    },
+    "antallAnsatte": 453,
+    "harRegistrertAntallAnsatte": true,
+    "registreringsdatoMerverdiavgiftsregisteret": "1975-07-01",
+    "registreringsdatoMerverdiavgiftsregisteretEnhetsregisteret": "1995-03-12",
+    "registreringsdatoAntallAnsatteEnhetsregisteret": "2026-07-15",
+    "registreringsdatoAntallAnsatteNAVAaregisteret": "2026-07-10",
+    "epostadresse": "e-post@norsk-tipping.no",
+    "telefon": "62 51 40 00",
+    "forretningsadresse": {
+      "land": "Norge",
+      "landkode": "NO",
+      "postnummer": "2315",
+      "poststed": "HAMAR",
+      "adresse": [
+        "Måsåbekkvegen 20"
+      ],
+      "kommune": "HAMAR",
+      "kommunenummer": "3403"
+    },
+    "stiftelsesdato": "1947-01-17",
+    "institusjonellSektorkode": {
+      "kode": "1120",
+      "beskrivelse": "Statlig eide aksjeselskaper mv."
+    },
+    "registrertIForetaksregisteret": true,
+    "registrertIStiftelsesregisteret": false,
+    "registrertIFrivillighetsregisteret": false,
+    "sisteInnsendteAarsregnskap": "2024",
+    "konkurs": false,
+    "underAvvikling": false,
+    "underTvangsavviklingEllerTvangsopplosning": false,
+    "maalform": "Bokmål",
+    "vedtektsdato": "2022-11-22",
+    "vedtektsfestetFormaal": [
+      "Å legge til rette for et ansvarlig pengespilltilbud og å forebygge",
+      "negative konsekvenser av pengespill i samsvar med pengespilloven.",
+      "Innenfor disse rammene skal selskapet drive effektivt, slik at mest",
+      "mulig av inntektene fra selskapets pengespill går til formålene nevnt",
+      "i pengespilloven § 12."
+    ],
+    "aktivitet": [
+      "Selskapet er stiftet med hjemmel i § 2 i lov",
+      "21. juni 1946 nr. 2 om tipping i samband med",
+      "idrettstevlinger, jfr. kgl. resolusjon av 24. okt-",
+      "ober 1946 og 17. januar 1947. Nevnte lov er senere avløst av lov av",
+      "28. august 1992 nr. 103 om pengespill m.v., jfr. kgl. resolusjon av",
+      "28. august 1992. I loven om pengespill er det en rekke bestemmelser",
+      "for selskapet, blant annet at loven om aksjeselskap ikke gjelder, jfr.",
+      "§ 3."
+    ],
+    "registreringsdatoForetaksregisteret": "1988-08-31",
+    "registrertIPartiregisteret": false,
+    "paategninger": [],
+    "erIKonsern": false,
+    "kapital": {
+      "belop": 150000.0,
+      "type": "Aksjekapital",
+      "valuta": "NOK",
+      "innfortDato": "1988-08-31"
+    },
+    "_links": {
+      "self": {
+        "href": "https://data.brreg.no/enhetsregisteret/api/enheter/925836613"
+      }
+    },
+    "respons_klasse": "Enhet"
+  }
+}

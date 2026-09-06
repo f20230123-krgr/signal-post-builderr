@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+*.sqlite3
+.cache/
+signalpost-company-universe-2025.jsonl.gz
+signalpost-starter-kit.tar.gz
+scratch_batch.jsonl
+scratch_results/

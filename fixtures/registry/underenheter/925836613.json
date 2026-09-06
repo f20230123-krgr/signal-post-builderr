@@ -1,0 +1,86 @@
+{
+  "status": 200,
+  "body": {
+    "_embedded": {
+      "underenheter": [
+        {
+          "organisasjonsnummer": "972483672",
+          "navn": "NORSK TIPPING AS",
+          "organisasjonsform": {
+            "kode": "BEDR",
+            "beskrivelse": "Underenhet til næringsdrivende og offentlig forvaltning",
+            "_links": {
+              "self": {
+                "href": "https://data.brreg.no/enhetsregisteret/api/organisasjonsformer/BEDR"
+              }
+            }
+          },
+          "historiskeNavn": [
+            {
+              "navn": "NORSK TIPPING A/S",
+              "fraDato": "1995-03-12 18:46:00",
+              "tilDato": "2010-11-11 20:21:21"
+            }
+          ],
+          "hjemmeside": "www.norsk-tipping.no",
+          "postadresse": {
+            "land": "Norge",
+            "landkode": "NO",
+            "postnummer": "2325",
+            "poststed": "HAMAR",
+            "adresse": [
+              "Postboks 4414"
+            ],
+            "kommune": "HAMAR",
+            "kommunenummer": "3403"
+          },
+          "registreringsdatoEnhetsregisteret": "1995-03-12",
+          "registrertIMvaregisteret": false,
+          "naeringskode1": {
+            "kode": "92.000",
+            "beskrivelse": "Lotteri- og gamblingvirksomhet"
+          },
+          "antallAnsatte": 453,
+          "harRegistrertAntallAnsatte": true,
+          "overordnetEnhet": "925836613",
+          "registreringsdatoAntallAnsatteEnhetsregisteret": "2026-07-14",
+          "registreringsdatoAntallAnsatteNAVAaregisteret": "2026-07-10",
+          "epostadresse": "e-post@norsk-tipping.no",
+          "telefon": "62 51 40 00",
+          "oppstartsdato": "1973-12-01",
+          "beliggenhetsadresse": {
+            "land": "Norge",
+            "landkode": "NO",
+            "postnummer": "2315",
+            "poststed": "HAMAR",
+            "adresse": [
+              "Måsåbekkvegen 20"
+            ],
+            "kommune": "HAMAR",
+            "kommunenummer": "3403"
+          },
+          "_links": {
+            "self": {
+              "href": "https://data.brreg.no/enhetsregisteret/api/underenheter/972483672"
+            },
+            "overordnetEnhet": {
+              "href": "https://data.brreg.no/enhetsregisteret/api/enheter/925836613"
+            }
+          },
+          "respons_klasse": "Underenhet"
+        }
+      ]
+    },
+    "_links": {
+      "self": {
+        "href": "https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet=925836613"
+      }
+    },
+    "page": {
+      "size": 20,
+      "totalElements": 1,
+      "totalPages": 1,
+      "number": 0
+    }
+  }
+}

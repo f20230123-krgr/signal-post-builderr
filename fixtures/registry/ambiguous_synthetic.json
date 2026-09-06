@@ -1,0 +1,29 @@
+{
+  "status": 200,
+  "body": {
+    "organisasjonsnummer": "912345678",
+    "navn": "SYNTHETIC AMBIGUOUS AS",
+    "historiskeNavn": [
+      {
+        "navn": "SYNTHETIC AMBIGUOUS AS",
+        "fraDato": "2020-01-01 00:00:00",
+        "tilDato": null
+      },
+      {
+        "navn": "SYNTHETIC AMBIGUOUS HOLDING AS",
+        "fraDato": "2021-06-15 00:00:00",
+        "tilDato": null
+      }
+    ],
+    "hjemmeside": "www.synthetic-ambiguous-example.test",
+    "forretningsadresse": {
+      "land": "Norge",
+      "landkode": "NO",
+      "postnummer": "0000",
+      "poststed": "TESTBY",
+      "adresse": ["Testveien 1"],
+      "kommune": "TESTBY",
+      "kommunenummer": "0000"
+    }
+  }
+}

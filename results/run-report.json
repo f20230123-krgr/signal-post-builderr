@@ -1,0 +1,11 @@
+{
+  "run_id": "submission-run-3",
+  "input_count": 1000,
+  "profile_count": 1000,
+  "universe_used": true,
+  "chunk_size": 100,
+  "chunk_count": 10,
+  "requests_used": 4284,
+  "spend_used_usd": 0.0,
+  "wall_clock_seconds": 840.983
+}
