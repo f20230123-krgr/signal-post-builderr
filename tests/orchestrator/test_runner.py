@@ -192,3 +192,94 @@ def test_run_in_chunks_reports_aggregate_operations():
     assert report["requests_used"] == 6
     assert round(report["spend_used_usd"], 2) == 0.06
     assert report["chunk_count"] == 2
+
+
+def test_default_process_one_uses_sitemap_ats_and_cache_discovery(tmp_path):
+    """Wiring test: _default_process_one must actually pass the new
+    discovery options through to crawl(), not just have them exist as
+    unused parameters."""
+    from src.storage.cache import ResponseCache
+
+    sitemap_xml = '<urlset><url><loc>https://example.com/careers</loc></url></urlset>'
+    careers_html = '<html><body>Careers. <a href="https://boards.greenhouse.io/examplecorp">Jobs</a></body></html>'
+    call_counts: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        call_counts[url] = call_counts.get(url, 0) + 1
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(
+                200,
+                json={
+                    "organisasjonsnummer": "923609016",
+                    "navn": "EXAMPLE CORP AS",
+                    "hjemmeside": "example.com",
+                    "historiskeNavn": [],
+                },
+            )
+        if url == "https://example.com/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow:\n")
+        if url == "https://example.com/sitemap.xml":
+            return httpx.Response(200, text=sitemap_xml)
+        if url == "https://example.com/careers":
+            return httpx.Response(200, text=careers_html)
+        if url == "https://boards.greenhouse.io/examplecorp":
+            return httpx.Response(200, text="<html>We are hiring: Backend Engineer, Oslo</html>")
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    cache = ResponseCache(tmp_path / "cache.sqlite3")
+    fixed_now = lambda: datetime(2026, 9, 8, tzinfo=timezone.utc)
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client, cache=cache, now=fixed_now)
+
+    assert profile.legal_identity.legal_name.value == "EXAMPLE CORP AS"
+    # reached via sitemap discovery -> ATS link-following, not the fixed
+    # company_owned_paths list alone
+    assert any("greenhouse.io" in c.source for c in profile.activity.hiring_signals if c.source)
+
+    counts_after_first_run = dict(call_counts)
+
+    # Second run, same cache, same date -- every page fetch should be served
+    # from cache, not the network, per "cache hits free".
+    _default_process_one("923609016", BudgetGovernor(), client=client, cache=cache, now=fixed_now)
+
+    page_urls = {"https://example.com/careers", "https://example.com/robots.txt", "https://example.com/sitemap.xml"}
+    for url in page_urls:
+        assert call_counts.get(url, 0) == counts_after_first_run.get(url, 0), f"{url} was re-fetched instead of served from cache"
+
+
+def test_default_process_one_uses_search_discovery_when_no_registry_website():
+    """Wiring test: when the registry has no website on file, discovery.py's
+    DuckDuckGo-backed candidate search must be tried, and a verified
+    candidate must be crawled/used like any other official site."""
+    ddg_response = {
+        "Heading": "Example Corp",
+        "Infobox": {"content": [{"label": "Website", "value": "[example.com]"}]},
+    }
+    org_page_html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"EXAMPLE CORP AS"}</script></head><body>We are hiring: Engineer</body></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(
+                200,
+                json={
+                    "organisasjonsnummer": "923609016",
+                    "navn": "EXAMPLE CORP AS",
+                    "historiskeNavn": [],
+                    # no "hjemmeside" -- no website on file
+                },
+            )
+        if "duckduckgo.com" in url:
+            return httpx.Response(200, json=ddg_response)
+        if url in ("https://example.com", "https://example.com/", "https://example.com/robots.txt"):
+            return httpx.Response(200, text=org_page_html)
+        return httpx.Response(404)  # sitemap.xml, company_owned_paths etc -- fine to be absent
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client)
+
+    assert profile.online_presence.official_site.value in ("https://example.com", "https://example.com/")
+    assert profile.online_presence.official_site.source_class == "external"

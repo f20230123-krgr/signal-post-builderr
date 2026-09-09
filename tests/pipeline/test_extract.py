@@ -69,3 +69,65 @@ def test_never_invents_a_field_absent_from_the_page():
     facts = extract(page)
 
     assert not any(f.field_name in {"official_site", "registered_address", "leader"} for f in facts)
+
+
+def _inline_page(html: str, url: str = "https://example.com/careers") -> FetchedPage:
+    return FetchedPage(url=url, raw_html=html, fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc), fetch_state=EvidenceState.AVAILABLE)
+
+
+def test_jobposting_json_ld_becomes_hiring_signal():
+    html = """<html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"JobPosting","title":"Backend Engineer",
+     "datePosted":"2026-06-20","hiringOrganization":{"@type":"Organization","name":"Kahoot! AS"}}
+    </script></head><body></body></html>"""
+
+    facts = extract(_inline_page(html))
+
+    hiring = [f for f in facts if f.field_name == "hiring_signal"]
+    assert len(hiring) == 1
+    assert "Backend Engineer" in hiring[0].value
+    assert "2026-06-20" in hiring[0].value
+    assert hiring[0].extraction_method == "structured"
+
+
+def test_datepublished_json_ld_becomes_dated_activity():
+    html = """<html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"NewsArticle","headline":"Company wins award",
+     "datePublished":"2026-07-01"}
+    </script></head><body></body></html>"""
+
+    facts = extract(_inline_page(html))
+
+    dated = [f for f in facts if f.field_name == "dated_activity"]
+    assert len(dated) == 1
+    assert "Company wins award" in dated[0].value
+    assert "2026-07-01" in dated[0].value
+    assert dated[0].extraction_method == "structured"
+
+
+def test_opengraph_site_name_becomes_public_brand():
+    html = '<html><head><meta property="og:site_name" content="Kahoot!"></head><body></body></html>'
+
+    facts = extract(_inline_page(html))
+
+    brand = [f for f in facts if f.field_name == "public_brand"]
+    assert len(brand) == 1
+    assert brand[0].value == "Kahoot!"
+    assert brand[0].extraction_method == "structured"
+
+
+def test_canonical_link_becomes_official_site():
+    html = '<html><head><link rel="canonical" href="https://www.kahoot.com/"></head><body></body></html>'
+
+    facts = extract(_inline_page(html))
+
+    sites = [f for f in facts if f.field_name == "official_site"]
+    assert len(sites) == 1
+    assert sites[0].value == "https://www.kahoot.com/"
+
+
+def test_opengraph_and_canonical_absent_when_not_on_page():
+    facts = extract(_inline_page("<html><body>plain text, no meta tags here at all</body></html>"))
+
+    assert not any(f.field_name == "public_brand" for f in facts)
+    assert not any(f.field_name == "official_site" for f in facts)

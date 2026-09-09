@@ -28,6 +28,7 @@ def available_claim(
     source_class: Optional[str] = None,
     extraction_method: Optional[str] = None,
     match_confidence: Optional[float] = None,
+    linked_from: Optional[str] = None,
 ) -> Claim:
     return Claim(
         value=value,
@@ -39,6 +40,7 @@ def available_claim(
         source_class=source_class,
         extraction_method=extraction_method,
         match_confidence=match_confidence,
+        linked_from=linked_from,
     )
 
 

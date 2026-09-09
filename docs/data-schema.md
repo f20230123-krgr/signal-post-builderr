@@ -25,7 +25,15 @@ Claim:
   content_hash: <SHA-256 of the exact source content, or null>
   source_class: <"official_registry" | "company_owned" | "external", or null>
   extraction_method: <"registry" | "structured" | "text", or null>
+  linked_from: <URL of the official-site page this was reached from, or null>
 ```
+
+`linked_from` was added alongside the allow-listed-ATS-platform crawl path
+(see `crawl.py`'s `ats_domains`): a claim sourced from e.g. a Greenhouse job
+board is only ever accepted (`verify.py`) when reached by following a link
+found on the entity's own official site, and this field preserves that link
+as evidence, per evaluator feedback that the link chain itself must be kept.
+Null for every claim sourced directly from the official site or registry.
 
 `content_hash`/`source_class`/`extraction_method` were added after reading the
 real `signalpost-sources.md` ("every claim records source URL..., retrieval

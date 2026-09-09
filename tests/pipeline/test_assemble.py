@@ -27,7 +27,7 @@ def _entity(state=EvidenceState.AVAILABLE, legal_name="EQUINOR ASA", site="https
     )
 
 
-def _fact(field_name, value, confidence=95.0, reporting_period=None, content_hash="fact-hash", extraction_method="structured", source_class="company_owned"):
+def _fact(field_name, value, confidence=95.0, reporting_period=None, content_hash="fact-hash", extraction_method="structured", source_class="company_owned", linked_from=None):
     return ConfirmedFact(
         field_name=field_name,
         value=value,
@@ -38,7 +38,60 @@ def _fact(field_name, value, confidence=95.0, reporting_period=None, content_has
         extraction_method=extraction_method,
         source_class=source_class,
         reporting_period=reporting_period,
+        linked_from=linked_from,
     )
+
+
+def test_official_site_falls_back_to_a_confirmed_fact_when_registry_has_none():
+    """Real gap found during implementation: extract.py's canonical-link
+    detection and discovery.py's search-based discovery both produce a
+    confirmed "official_site" fact, but assemble() was silently discarding
+    it -- only ever reading entity.official_site_candidate. A confirmed fact
+    must now be used as a fallback when the registry itself has no site."""
+    entity = _entity(site=None)  # no website on file in the registry
+    facts = [
+        _fact(
+            "official_site",
+            "https://www.equinor.com",
+            source_class="external",
+            extraction_method="discovery",
+        )
+    ]
+
+    profile = assemble(entity, facts, previous_snapshot=None)
+
+    claim = profile.online_presence.official_site
+    assert claim.state == EvidenceState.AVAILABLE
+    assert claim.value == "https://www.equinor.com"
+    assert claim.source_class == "external"
+
+
+def test_official_site_prefers_registry_value_over_a_confirmed_fact():
+    entity = _entity(site="https://www.equinor.com")
+    facts = [_fact("official_site", "https://www.some-other-candidate.example", source_class="external")]
+
+    profile = assemble(entity, facts, previous_snapshot=None)
+
+    assert profile.online_presence.official_site.value == "https://www.equinor.com"
+    assert profile.online_presence.official_site.source_class == "official_registry"
+
+
+def test_linked_from_is_carried_through_into_the_claim():
+    entity = _entity()
+    facts = [
+        _fact(
+            "hiring_signal",
+            "Backend Engineer (posted 2026-06-20)",
+            source_class="external",
+            linked_from="https://www.equinor.com/careers",
+        )
+    ]
+
+    profile = assemble(entity, facts, previous_snapshot=None)
+
+    hiring = profile.activity.hiring_signals[0]
+    assert hiring.source_class == "external"
+    assert hiring.linked_from == "https://www.equinor.com/careers"
 
 
 def test_full_data_populates_all_sections():

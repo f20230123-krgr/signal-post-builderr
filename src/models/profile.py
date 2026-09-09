@@ -50,6 +50,11 @@ class Claim(BaseModel):
     # 100.0 for registry-sourced facts -- see verify.py/registry_extras.py/
     # resolve.py). Same "populated but not enforced" rationale as above.
     match_confidence: Optional[float] = None
+    # Set only when this claim came from an external platform (e.g. an ATS
+    # like Greenhouse) reached by following a link found on the entity's own
+    # official site -- the URL of that official-site page, preserving the
+    # link chain as evidence (evaluator feedback, 2026-09). None otherwise.
+    linked_from: Optional[str] = None
 
     @model_validator(mode="after")
     def _value_only_when_available(self) -> "Claim":

@@ -83,8 +83,25 @@ def _legal_name_claim(entity: ResolvedEntity) -> Claim:
     return _registry_claim(entity.legal_name, entity)
 
 
-def _official_site_claim(entity: ResolvedEntity) -> Claim:
-    return _registry_claim(entity.official_site_candidate, entity)
+def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[ConfirmedFact]) -> Claim:
+    """Registry value first (authoritative when present). Falls back to a
+    confirmed "official_site" fact -- from extract.py's canonical-link/
+    JSON-LD detection, or src/pipeline/discovery.py's search-based discovery
+    for companies with no website on file -- when the registry has none.
+
+    Real gap found during implementation: this used to ignore confirmed
+    facts entirely, silently discarding anything extract.py/discovery.py
+    found even though it had already passed verify()'s precision gate.
+    """
+    registry_claim = _registry_claim(entity.official_site_candidate, entity)
+    if registry_claim.state == EvidenceState.AVAILABLE:
+        return registry_claim
+
+    discovered = _first_matching(confirmed_facts, "official_site")
+    if discovered:
+        return _confirmed_claim(discovered)
+
+    return registry_claim
 
 
 def _confirmed_claim(fact: ConfirmedFact) -> Claim:
@@ -98,6 +115,7 @@ def _confirmed_claim(fact: ConfirmedFact) -> Claim:
         source_class=fact.source_class,
         extraction_method=fact.extraction_method,
         match_confidence=fact.match_confidence,
+        linked_from=fact.linked_from,
     )
 
 
@@ -123,7 +141,7 @@ def assemble(
     run_timestamp = now()
 
     legal_name_claim = _legal_name_claim(entity)
-    official_site_claim = _official_site_claim(entity)
+    official_site_claim = _official_site_claim(entity, confirmed_facts)
 
     brand_fact = _first_matching(confirmed_facts, "organization_name")
     public_brand_claim = _confirmed_claim(brand_fact) if brand_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)

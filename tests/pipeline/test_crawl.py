@@ -9,6 +9,7 @@ from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
 from src.pipeline.crawl import crawl
 from src.pipeline.resolve import ResolvedEntity
+from src.storage.cache import ResponseCache
 
 PAGES = Path(__file__).parent.parent.parent / "fixtures" / "pages"
 
@@ -139,6 +140,25 @@ def test_malformed_server_redirect_is_reported_failed_not_uncaught():
     assert pages[0].fetch_state == EvidenceState.FAILED
 
 
+def test_too_many_redirects_is_reported_failed_not_uncaught():
+    """Real-world regression, same class as the malformed-redirect one above:
+    a page can redirect in a loop. httpx.TooManyRedirects is an
+    httpx.HTTPError, not an httpx.TransportError -- found running the real
+    1,000-company batch (in discovery.py's verify_discovered_site, which
+    shares this same fetch-error-handling pattern)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, sleep=lambda s: None, allowed_domains=set())
+
+    assert pages[0].fetch_state == EvidenceState.FAILED
+
+
 def test_static_fetch_retries_then_marks_failed_on_persistent_transport_error():
     calls = []
 
@@ -240,3 +260,165 @@ def test_company_owned_paths_respect_budget():
     assert pages[0].fetch_state == EvidenceState.AVAILABLE
     assert pages[1].fetch_state == EvidenceState.BLOCKED
     assert pages[2].fetch_state == EvidenceState.BLOCKED
+
+
+# --- cache wiring (evaluator feedback: "bounded ... crawler with ... caching") ---
+
+
+def test_cache_hit_serves_content_without_spending_budget(tmp_path):
+    cache = ResponseCache(tmp_path / "cache.sqlite3")
+    cache.put("https://example.com/", "2026-09-08", "<html>cached page</html>")
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, text="<html>live page</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor(BudgetLimits(max_requests=0, max_spend_usd=10, max_wall_clock_seconds=1000))
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, cache=cache, date_bucket="2026-09-08", allowed_domains=set())
+
+    assert calls == []  # never hit the network
+    assert pages[0].raw_html == "<html>cached page</html>"
+    assert pages[0].fetch_state == EvidenceState.AVAILABLE
+
+
+def test_cache_miss_fetches_and_stores_result(tmp_path):
+    cache = ResponseCache(tmp_path / "cache.sqlite3")
+    client = _handler_serving({"https://example.com/": "<html>fresh</html>"})
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, cache=cache, date_bucket="2026-09-08", allowed_domains=set())
+
+    assert pages[0].raw_html == "<html>fresh</html>"
+    assert cache.get("https://example.com/", "2026-09-08") == "<html>fresh</html>"
+
+
+# --- sitemap.xml / robots.txt discovery ---
+
+
+def test_sitemap_discovery_adds_priority_pages():
+    sitemap_xml = """<?xml version="1.0"?>
+    <urlset>
+      <url><loc>https://example.com/</loc></url>
+      <url><loc>https://example.com/careers</loc></url>
+      <url><loc>https://example.com/blog/post-1</loc></url>
+      <url><loc>https://example.com/team</loc></url>
+    </urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://example.com/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow:\n")
+        if url == "https://example.com/sitemap.xml":
+            return httpx.Response(200, text=sitemap_xml)
+        return httpx.Response(200, text="<html>page content here, plenty of text</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, use_sitemap=True, allowed_domains=set())
+
+    urls = {p.url for p in pages}
+    assert "https://example.com/careers" in urls
+    assert "https://example.com/team" in urls
+    # not a priority-keyword page -- not worth the budget
+    assert "https://example.com/blog/post-1" not in urls
+
+
+def test_robots_txt_disallow_is_respected(caplog):
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://example.com/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow: /careers\n")
+        if url == "https://example.com/sitemap.xml":
+            return httpx.Response(
+                200,
+                text='<urlset><url><loc>https://example.com/careers</loc></url>'
+                '<url><loc>https://example.com/about</loc></url></urlset>',
+            )
+        return httpx.Response(200, text="<html>page content here, plenty of text</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    with caplog.at_level("WARNING"):
+        pages = crawl(entity, budget, client=client, use_sitemap=True, allowed_domains=set())
+
+    urls = {p.url for p in pages}
+    assert "https://example.com/careers" not in urls
+    assert "https://example.com/about" in urls
+
+
+def test_sitemap_discovery_is_opt_in():
+    """use_sitemap defaults to False -- existing callers unaffected."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, text="<html>hi</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    crawl(entity, budget, client=client, allowed_domains=set())
+
+    assert not any("robots.txt" in u or "sitemap.xml" in u for u in calls)
+
+
+# --- following official outbound links to allow-listed ATS platforms ---
+
+
+def test_follows_official_outbound_link_to_allow_listed_ats_domain():
+    careers_html = '<html><body><a href="https://boards.greenhouse.io/examplecorp">Open roles</a></body></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://example.com/":
+            return httpx.Response(200, text=careers_html)
+        if url == "https://boards.greenhouse.io/examplecorp":
+            return httpx.Response(200, text="<html>Backend Engineer, Oslo</html>")
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, ats_domains={"greenhouse.io"}, allowed_domains=set())
+
+    urls = {p.url for p in pages}
+    assert "https://boards.greenhouse.io/examplecorp" in urls
+    ats_page = next(p for p in pages if p.url == "https://boards.greenhouse.io/examplecorp")
+    assert ats_page.linked_from == "https://example.com/"
+    assert ats_page.fetch_state == EvidenceState.AVAILABLE
+
+
+def test_does_not_follow_outbound_link_to_non_allow_listed_domain():
+    html = '<html><body><a href="https://random-blog.example.net/">Blog</a></body></html>'
+    client = _handler_serving({"https://example.com/": html})
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, ats_domains={"greenhouse.io"}, allowed_domains=set())
+
+    assert not any(p.url.startswith("https://random-blog.example.net") for p in pages)
+
+
+def test_ats_link_following_is_opt_in():
+    """ats_domains defaults to None -- outbound links are never followed
+    unless explicitly requested."""
+    html = '<html><body><a href="https://boards.greenhouse.io/examplecorp">Jobs</a></body></html>'
+    client = _handler_serving({"https://example.com/": html})
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, allowed_domains=set())
+
+    assert len(pages) == 1

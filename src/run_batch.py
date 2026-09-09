@@ -23,6 +23,8 @@ from pathlib import Path
 from src.orchestrator.runner import run_in_chunks
 from src.pipeline.envelope import to_envelope
 from src.pipeline.universe import load_universe
+from src.reporting import render_html_report
+from src.storage.cache import ResponseCache
 from src.storage.snapshots import SnapshotStore
 
 DEFAULT_UNIVERSE_PATH = Path("signalpost-company-universe-2025.jsonl.gz")
@@ -63,6 +65,10 @@ def main() -> None:
     # this is what makes "idempotent refresh" actually happen end-to-end, not
     # just pass in isolated unit tests.
     snapshot_store = SnapshotStore(args.out / "snapshots")
+    # Durable across the whole run (and future runs against the same --out)
+    # so a repeat fetch of the same (url, date) never re-spends budget --
+    # see crawl.py's `cache` param / docs/component-specs.md "cache hits free".
+    cache = ResponseCache(args.out / "cache.sqlite3")
 
     wall_clock_start = time.perf_counter()
     profiles, aggregate = asyncio.run(
@@ -71,6 +77,7 @@ def main() -> None:
             chunk_size=args.chunk_size,
             snapshot_store=snapshot_store,
             universe=universe,
+            cache=cache,
         )
     )
     wall_clock_seconds = time.perf_counter() - wall_clock_start
@@ -101,10 +108,16 @@ def main() -> None:
     }
     (args.out / "run-report.json").write_text(json.dumps(run_report, indent=2), encoding="utf-8")
 
+    # Decision-useful synthesis + a legible desktop/mobile results view --
+    # see src/synthesis.py / src/reporting.py.
+    html_report = render_html_report(profiles, generated_at=datetime.now(timezone.utc))
+    (args.out / "report.html").write_text(html_report, encoding="utf-8")
+
     print(f"Produced {len(profiles)} profiles for {len(org_numbers)} inputs.")
     print(f"  envelopes: {args.out / 'envelopes.jsonl'}")
     print(f"  manifest:  {args.out / 'manifest.txt'}")
     print(f"  report:    {args.out / 'run-report.json'}")
+    print(f"  html view: {args.out / 'report.html'}")
 
 
 if __name__ == "__main__":

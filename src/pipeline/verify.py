@@ -16,11 +16,14 @@ Two independent layers, both must pass:
      entity's own verified official_site_candidate. This is what rejects a
      look-alike/imposter site that reuses the real company's name (see
      tests/pipeline/test_verify.py) -- name similarity alone is not enough.
-  2. Name match (only for prose fields that can restate the company name --
-     organization_name/page_text/hiring_signal/dated_activity) -- RapidFuzz
-     partial_ratio against legal_name must clear NAME_MATCH_THRESHOLD.
-Non-prose fields (registered_address, official_site, leader) don't restate the
-company name in their value, so they're gated on provenance alone.
+  2. Name match (only for freeform prose fields that risk having picked up a
+     DIFFERENT company's name in passing text -- organization_name/page_text)
+     -- RapidFuzz partial_ratio against legal_name must clear
+     NAME_MATCH_THRESHOLD.
+Everything else (registered_address, official_site, leader, company_profile,
+and structured hiring_signal/dated_activity from JobPosting/NewsArticle
+JSON-LD -- job titles and headlines that don't restate a company name by
+construction) is gated on provenance alone.
 """
 from __future__ import annotations
 
@@ -38,7 +41,7 @@ from src.pipeline.resolve import ResolvedEntity
 # must be accompanied by a /self-score run reported in the same PR/summary.
 NAME_MATCH_THRESHOLD = 90  # RapidFuzz token_sort_ratio, 0-100
 
-_NAME_BEARING_FIELDS = {"organization_name", "page_text", "hiring_signal", "dated_activity"}
+_NAME_BEARING_FIELDS = {"organization_name", "page_text"}
 
 
 @dataclass
@@ -66,6 +69,9 @@ class ConfirmedFact:
     content_hash: Optional[str] = None
     extraction_method: Optional[str] = None
     source_class: Optional[str] = None
+    # Set only when accepted via the ATS link-chain path below (evaluator
+    # feedback: "Preserve that link chain as evidence").
+    linked_from: Optional[str] = None
 
 
 def _domain(url: str) -> str:
@@ -73,7 +79,7 @@ def _domain(url: str) -> str:
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 
-def _name_similarity(a: str, b: str) -> float:
+def name_similarity(a: str, b: str) -> float:
     return fuzz.partial_ratio(a.lower(), b.lower())
 
 
@@ -88,11 +94,19 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     if entity.legal_name is None or entity.official_site_candidate is None:
         return None
 
-    if _domain(fact.source_url) != _domain(entity.official_site_candidate):
+    official_domain = _domain(entity.official_site_candidate)
+    on_official_domain = _domain(fact.source_url) == official_domain
+    # Off-domain (e.g. an ATS platform) is only ever acceptable when crawl.py
+    # recorded that this page was reached by following a link FROM a page on
+    # the entity's own official domain -- the chain itself is the provenance,
+    # not the source domain. See crawl.py's `ats_domains` / module docstring.
+    via_official_link_chain = fact.linked_from is not None and _domain(fact.linked_from) == official_domain
+
+    if not on_official_domain and not via_official_link_chain:
         return None
 
     if fact.field_name in _NAME_BEARING_FIELDS:
-        score = _name_similarity(entity.legal_name, fact.value)
+        score = name_similarity(entity.legal_name, fact.value)
         if score < NAME_MATCH_THRESHOLD:
             return None
         confidence = float(score)
@@ -107,5 +121,6 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
         retrieved_at=fact.extracted_at,
         content_hash=fact.content_hash,
         extraction_method=fact.extraction_method,
-        source_class="company_owned",
+        source_class="company_owned" if on_official_domain else "external",
+        linked_from=fact.linked_from if via_official_link_chain else None,
     )

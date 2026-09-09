@@ -130,6 +130,29 @@ def test_run_metadata_and_operations_are_included():
     assert envelope["operations"] == {"requests": 4, "runtime_ms": 8120, "third_party_cost_usd": 0.0}
 
 
+def test_linked_from_is_preserved_in_the_evidence_entry():
+    """Evaluator feedback: a claim sourced from an official ATS platform
+    (only accepted when linked from the entity's own official site -- see
+    verify.py) must preserve that link chain in the submitted evidence."""
+    profile = make_profile(
+        org_number="923609016",
+        hiring_signals=[
+            available_claim(
+                "Backend Engineer (posted 2026-06-20)",
+                source="https://boards.greenhouse.io/equinor",
+                source_class="external",
+                linked_from="https://www.equinor.com/careers",
+            )
+        ],
+    )
+
+    envelope = to_envelope(profile, run_id="run-1")
+
+    hiring_claim = next(c for c in envelope["claims"] if c["field"] == "hiring_signal")
+    evidence = next(e for e in envelope["evidence"] if e["id"] == hiring_claim["evidence_ids"][0])
+    assert evidence["linked_from"] == "https://www.equinor.com/careers"
+
+
 def test_operations_defaults_when_not_provided():
     profile = make_profile(org_number="923609016")
     envelope = to_envelope(profile, run_id="run-1")

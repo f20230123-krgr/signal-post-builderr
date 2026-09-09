@@ -32,6 +32,28 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _HIRING_KEYWORDS_RE = re.compile(r"\b(hiring|career|careers|job opening|recruiting)\b", re.IGNORECASE)
 
+# schema.org JSON-LD types treated as job/dated-activity signals, per
+# evaluator feedback ("JSON-LD Organization, sameAs, JobPosting and
+# datePublished fields"). Kept separate from the Organization-identity
+# handling above -- a page can have both an Organization block and one or
+# more JobPosting/Article blocks.
+_JOB_POSTING_TYPES = {"JobPosting"}
+_DATED_ACTIVITY_TYPES = {"NewsArticle", "Article", "BlogPosting", "PressRelease"}
+
+_META_OG_SITE_NAME_RE = re.compile(
+    r'<meta\b[^>]*\bproperty\s*=\s*["\']og:site_name["\'][^>]*\bcontent\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE
+)
+# content before property is also valid HTML attribute order -- handle both.
+_META_OG_SITE_NAME_RE_ALT = re.compile(
+    r'<meta\b[^>]*\bcontent\s*=\s*["\']([^"\']*)["\'][^>]*\bproperty\s*=\s*["\']og:site_name["\']', re.IGNORECASE
+)
+_CANONICAL_LINK_RE = re.compile(
+    r'<link\b[^>]*\brel\s*=\s*["\']canonical["\'][^>]*\bhref\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE
+)
+_CANONICAL_LINK_RE_ALT = re.compile(
+    r'<link\b[^>]*\bhref\s*=\s*["\']([^"\']*)["\'][^>]*\brel\s*=\s*["\']canonical["\']', re.IGNORECASE
+)
+
 
 @dataclass
 class RawFact:
@@ -43,6 +65,12 @@ class RawFact:
     # SHA-256 of the exact page content this fact was extracted from --
     # signalpost-sources.md: "every claim records ... content hash".
     content_hash: Optional[str] = None
+    # Carried through from FetchedPage.linked_from -- set only when this
+    # page was reached by following an outbound link from a page on the
+    # entity's own official domain (see crawl.py's `ats_domains`). Lets
+    # verify() accept off-domain facts on link-chain provenance instead of
+    # direct-domain provenance. None for every ordinary same-domain page.
+    linked_from: Optional[str] = None
 
 
 _BLOCK_BOUNDARY = "␞"  # sentinel, not real markup -- see docstring below
@@ -60,7 +88,7 @@ def _visible_lines(html: str) -> list[str]:
     return [line for line in lines if line]
 
 
-def _structured_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
+def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
     try:
         data = extruct.extract(html, syntaxes=["json-ld"], errors="ignore")
     except Exception:
@@ -70,6 +98,21 @@ def _structured_facts(html: str, source_url: str, extracted_at: datetime) -> lis
     for obj in data.get("json-ld", []):
         if not isinstance(obj, dict):
             continue
+
+        obj_type = obj.get("@type")
+        obj_types = obj_type if isinstance(obj_type, list) else [obj_type]
+
+        if any(t in _JOB_POSTING_TYPES for t in obj_types) and obj.get("title"):
+            date_posted = obj.get("datePosted")
+            value = f"{obj['title']} (posted {date_posted})" if date_posted else obj["title"]
+            facts.append(RawFact("hiring_signal", value, source_url, "structured", extracted_at))
+
+        if any(t in _DATED_ACTIVITY_TYPES for t in obj_types) and obj.get("datePublished"):
+            headline = obj.get("headline") or obj.get("name") or "activity"
+            facts.append(
+                RawFact("dated_activity", f"{headline} ({obj['datePublished']})", source_url, "structured", extracted_at)
+            )
+
         if obj.get("name"):
             facts.append(RawFact("organization_name", obj["name"], source_url, "structured", extracted_at))
         if obj.get("url"):
@@ -96,7 +139,25 @@ def _structured_facts(html: str, source_url: str, extracted_at: datetime) -> lis
     return facts
 
 
-def _text_fallback_fact(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
+def _meta_tag_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
+    """OpenGraph og:site_name and <link rel="canonical">, per evaluator
+    feedback ("OpenGraph metadata; canonical links"). Regex-based like the
+    rest of this module's lightweight HTML scanning -- these are single,
+    well-formed tags, not full document structure."""
+    facts: list[RawFact] = []
+
+    site_name = _META_OG_SITE_NAME_RE.search(html) or _META_OG_SITE_NAME_RE_ALT.search(html)
+    if site_name and site_name.group(1):
+        facts.append(RawFact("public_brand", site_name.group(1), source_url, "structured", extracted_at))
+
+    canonical = _CANONICAL_LINK_RE.search(html) or _CANONICAL_LINK_RE_ALT.search(html)
+    if canonical and canonical.group(1):
+        facts.append(RawFact("official_site", canonical.group(1), source_url, "structured", extracted_at))
+
+    return facts
+
+
+def text_fallback_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
     try:
         text = trafilatura.extract(html)
     except Exception:
@@ -128,14 +189,16 @@ def extract(
       - Invent a field that wasn't actually present on the page.
     """
     extracted_at = now()
-    facts = _structured_facts(page.raw_html, page.url, extracted_at)
+    facts = structured_facts(page.raw_html, page.url, extracted_at)
 
     if not facts:
-        facts = _text_fallback_fact(page.raw_html, page.url, extracted_at)
+        facts = text_fallback_facts(page.raw_html, page.url, extracted_at)
 
+    facts += _meta_tag_facts(page.raw_html, page.url, extracted_at)
     facts += _activity_facts(page.raw_html, page.url, extracted_at)
 
     content_hash = hashlib.sha256(page.raw_html.encode("utf-8")).hexdigest()
     for fact in facts:
         fact.content_hash = content_hash
+        fact.linked_from = page.linked_from
     return facts

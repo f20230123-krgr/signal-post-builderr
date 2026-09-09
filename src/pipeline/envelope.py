@@ -90,6 +90,7 @@ def to_envelope(
                         "retrieved_at": _iso(claim.retrieved_at) if claim.retrieved_at else None,
                         "content_sha256": claim.content_hash,
                         "claim_span": claim.value,
+                        "linked_from": claim.linked_from,
                     }
                 )
             evidence_ids = [evidence_id]
