@@ -156,13 +156,16 @@ def _page_organization_name(json_ld_objects: list) -> Optional[str]:
     (whose identity comes from the SAME object as the data), a dated_activity
     signal's identity has to be found elsewhere on the page."""
     for obj in _flatten_json_ld(json_ld_objects):
-        if not isinstance(obj, dict) or not obj.get("name"):
+        if not isinstance(obj, dict):
+            continue
+        name = _as_str(obj.get("name"))
+        if not name:
             continue
         obj_type = obj.get("@type")
         obj_types = set(obj_type if isinstance(obj_type, list) else [obj_type])
         if obj_types & _NON_ORGANIZATION_TYPES:
             continue
-        return obj["name"]
+        return name
     return None
 
 
@@ -182,6 +185,19 @@ def _page_organization_name_from_html(html: str) -> Optional[str]:
     return site_name.group(1) if site_name and site_name.group(1) else None
 
 
+def _as_str(value: object) -> Optional[str]:
+    """A JSON-LD text-typed property should be a string, but schema.org
+    legally allows several of these (name, title, headline, jobTitle...) to
+    be a LIST of alternates instead (real-world regression: crashed a real
+    1,000-company batch with "AttributeError: 'list' object has no
+    attribute 'lower'" deep inside name-matching, since a list value flowed
+    all the way from here into a RawFact and then into RapidFuzz). Treat
+    anything that isn't a non-empty string as absent -- same "reject, don't
+    guess" discipline already used for sameAs links -- rather than crash or
+    silently pick one of several asserted alternate values."""
+    return value if isinstance(value, str) and value else None
+
+
 def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
     try:
         data = extruct.extract(html, syntaxes=["json-ld"], errors="ignore")
@@ -199,17 +215,19 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
         obj_type = obj.get("@type")
         obj_types = obj_type if isinstance(obj_type, list) else [obj_type]
 
-        if any(t in _JOB_POSTING_TYPES for t in obj_types) and obj.get("title"):
+        title = _as_str(obj.get("title"))
+        if any(t in _JOB_POSTING_TYPES for t in obj_types) and title:
             date_posted = obj.get("datePosted")
-            value = f"{obj['title']} (posted {date_posted})" if date_posted else obj["title"]
+            value = f"{title} (posted {date_posted})" if date_posted else title
             hiring_org = obj.get("hiringOrganization")
-            hiring_org_name = hiring_org.get("name") if isinstance(hiring_org, dict) else None
+            hiring_org_name = _as_str(hiring_org.get("name")) if isinstance(hiring_org, dict) else None
             facts.append(
                 RawFact("hiring_signal", value, source_url, "structured", extracted_at, context_name=hiring_org_name)
             )
 
+        obj_name = _as_str(obj.get("name"))
+        headline = _as_str(obj.get("headline")) or obj_name or "activity"
         if any(t in _DATED_ACTIVITY_TYPES for t in obj_types) and obj.get("datePublished"):
-            headline = obj.get("headline") or obj.get("name") or "activity"
             facts.append(
                 RawFact(
                     "dated_activity",
@@ -221,10 +239,11 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
                 )
             )
 
-        if obj.get("name"):
-            facts.append(RawFact("organization_name", obj["name"], source_url, "structured", extracted_at))
-        if obj.get("url"):
-            facts.append(RawFact("official_site", obj["url"], source_url, "structured", extracted_at))
+        if obj_name:
+            facts.append(RawFact("organization_name", obj_name, source_url, "structured", extracted_at))
+        site_url = _as_str(obj.get("url"))
+        if site_url:
+            facts.append(RawFact("official_site", site_url, source_url, "structured", extracted_at))
         addr = obj.get("address")
         if isinstance(addr, dict):
             addr_str = ", ".join(
@@ -232,13 +251,14 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
             )
             if addr_str:
                 facts.append(RawFact("registered_address", addr_str, source_url, "structured", extracted_at))
-        context_name = obj.get("name")
+        context_name = obj_name
         employees = obj.get("employee")
         if isinstance(employees, list):
             for emp in employees:
-                if isinstance(emp, dict) and emp.get("name"):
-                    title = emp.get("jobTitle")
-                    value = f"{emp['name']} ({title})" if title else emp["name"]
+                emp_name = _as_str(emp.get("name")) if isinstance(emp, dict) else None
+                if emp_name:
+                    emp_title = _as_str(emp.get("jobTitle"))
+                    value = f"{emp_name} ({emp_title})" if emp_title else emp_name
                     facts.append(RawFact("leader", value, source_url, "structured", extracted_at, context_name=context_name))
         same_as = obj.get("sameAs")
         if isinstance(same_as, list):

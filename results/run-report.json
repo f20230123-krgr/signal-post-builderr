@@ -1,10 +1,11 @@
 {
-  "run_id": "submission-run-final",
+  "run_id": "submission-run-final-v3",
   "input_count": 1000,
   "profile_count": 1000,
   "universe_used": true,
   "chunk_size": 100,
-  "requests_used_this_assembly": 1663,
+  "chunk_count": 10,
+  "requests_used": 16253,
   "spend_used_usd": 0.0,
-  "note": "This 1,000-profile output was assembled in three passes against the same append-only snapshot store (never overwritten, only added to): (1) an initial run processed 799/1000 companies before being interrupted; (2) a resume pass completed the remaining 201 (1627 requests, 664s); (3) after finding a housing-cooperative attribution bug via code review, 3 affected companies (948543303, 950011904, 975809153) were cleared and reprocessed (36 requests, 11s) with the fix applied, then all 1,000 latest snapshots were reassembled into this envelopes.jsonl. Total requests across all passes: 790+831+6+36 = 1663. This aggregate does NOT represent a single continuous 100-company daily-batch run and should not be read against the 2,000-request/45-min/$10 hard gate directly -- those gates are independently verified via clean, complete, single-run 100-company batches (see the submission report), each well within all three caps."
+  "wall_clock_seconds": 3453.428
 }

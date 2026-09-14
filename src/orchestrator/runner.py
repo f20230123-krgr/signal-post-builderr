@@ -33,11 +33,11 @@ from src.models.profile import CompanyProfile, EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
 from src.pipeline.assemble import assemble
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
-from src.pipeline.discovery import discover_candidate_site, verify_discovered_site
+from src.pipeline.discovery import discover_candidate_site, strip_leader_role_title, verify_discovered_site
 from src.pipeline.extract import extract
-from src.pipeline.registry_extras import fetch_registry_extras
+from src.pipeline.registry_extras import fetch_leadership_only, fetch_registry_extras
 from src.pipeline.resolve import ResolvedEntity, resolve
-from src.pipeline.verify import verify
+from src.pipeline.verify import ConfirmedFact, verify
 from src.storage.cache import ResponseCache
 from src.storage.snapshots import SnapshotStore
 
@@ -97,17 +97,56 @@ def _default_process_one(
         # one place that resolves them from the environment.
         real_client = client or httpx.Client()
         try:
-            candidate = discover_candidate_site(
-                entity.legal_name,
-                real_client,
-                budget,
-                exa_api_key=os.environ.get("EXA_API_KEY"),
-                parallel_api_key=os.environ.get("PARALLEL_API_KEY"),
-            )
-            if candidate:
-                discovered_site_fact = verify_discovered_site(
+            exa_api_key = os.environ.get("EXA_API_KEY")
+            parallel_api_key = os.environ.get("PARALLEL_API_KEY")
+
+            def _discover_and_verify(query_name: str) -> Optional[ConfirmedFact]:
+                candidate = discover_candidate_site(
+                    query_name, real_client, budget, exa_api_key=exa_api_key, parallel_api_key=parallel_api_key
+                )
+                if not candidate:
+                    return None
+                return verify_discovered_site(
                     candidate, entity.legal_name, real_client, budget, now=now, org_number=entity.org_number
                 )
+
+            discovered_site_fact = _discover_and_verify(entity.legal_name)
+
+            if discovered_site_fact is None:
+                # Leader/founder bridge (agent playbook §2): a verified CEO/
+                # board-chair name (free, 100%-confidence, from Brreg's own
+                # roller endpoint) is a fallback search seed when the
+                # company name alone doesn't produce a VERIFIED site -- a
+                # generic/short legal name is common among small Norwegian
+                # holding/shell companies. Real-world regression: retrying
+                # only when discover_candidate_site found nothing (rather
+                # than when the whole discover+verify attempt failed) missed
+                # the common case where a candidate WAS found but then
+                # failed identity verification -- measured zero improvement
+                # on a real batch until fixed to retry here instead. See
+                # discover_candidate_site's docstring.
+                #
+                # fetch_registry_extras() below still re-fetches leadership
+                # normally as part of its own flow -- one small, bounded
+                # duplicate roles request, see fetch_leadership_only's
+                # docstring for why that trade-off is acceptable.
+                leadership_facts = fetch_leadership_only(entity, budget, client=real_client, now=now)
+                for leader_fact in leadership_facts[:1]:
+                    leader_name = strip_leader_role_title(leader_fact.value)
+                    if leader_name:
+                        discovered_site_fact = _discover_and_verify(f"{leader_name} {entity.legal_name}")
+
+            if discovered_site_fact is None:
+                # Third and last fallback tier: the exact 9-digit org number
+                # itself as the query seed. An org number is a much stronger
+                # match signal than any fuzzy name -- Norwegian business
+                # directories, chambers of commerce and official filings
+                # commonly cite it verbatim, so a page that mentions it is a
+                # far more reliable candidate than a name-similarity match
+                # could ever be. Still only a candidate: goes through the
+                # exact same verify_discovered_site identity check (by legal
+                # name, not the org number) as every other discovery result.
+                discovered_site_fact = _discover_and_verify(entity.org_number)
         finally:
             if client is None:
                 real_client.close()

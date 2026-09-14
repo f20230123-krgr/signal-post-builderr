@@ -288,3 +288,167 @@ def test_default_process_one_uses_search_discovery_when_no_registry_website():
 
     assert profile.online_presence.official_site.value in ("https://example.com", "https://example.com/")
     assert profile.online_presence.official_site.source_class == "external"
+
+
+def test_default_process_one_falls_back_to_leader_name_when_company_name_search_finds_nothing():
+    """End-to-end wiring test for the leader/founder bridge (agent playbook
+    §2): a generic legal name search finds nothing, but the verified CEO
+    name (fetched from Brreg's roller endpoint before discovery runs)
+    succeeds. Confirms fetch_leadership_only is actually wired into
+    _default_process_one, not just unit-tested in isolation."""
+    roller_response = {
+        "rollegrupper": [
+            {
+                "type": {"kode": "DAGL"},
+                "roller": [
+                    {
+                        "type": {"kode": "DAGL", "beskrivelse": "Daglig leder"},
+                        "person": {"navn": {"fornavn": "Anders", "etternavn": "Opedal"}},
+                    }
+                ],
+            }
+        ]
+    }
+    org_page_html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"GENERIC HOLDING AS"}</script></head></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(
+                200,
+                json={"organisasjonsnummer": "923609016", "navn": "GENERIC HOLDING AS", "historiskeNavn": []},
+            )
+        if url.endswith("/roller"):
+            return httpx.Response(200, json=roller_response)
+        if "duckduckgo.com" in url:
+            query = dict(request.url.params).get("q", "")
+            if "Opedal" in query:
+                return httpx.Response(
+                    200,
+                    json={"Heading": "x", "Infobox": {"content": [{"label": "Website", "value": "[example.com]"}]}},
+                )
+            return httpx.Response(200, json={"Heading": "x", "Infobox": None})
+        if url in ("https://example.com", "https://example.com/", "https://example.com/robots.txt"):
+            return httpx.Response(200, text=org_page_html)
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client)
+
+    assert profile.online_presence.official_site.value in ("https://example.com", "https://example.com/")
+    assert profile.online_presence.official_site.source_class == "external"
+
+
+def test_default_process_one_falls_back_to_leader_name_when_company_name_candidate_fails_verification():
+    """Real-world regression, found by re-measuring on a real unseen batch:
+    an earlier version of this fallback lived entirely inside
+    discover_candidate_site and only retried when it found NOTHING at all --
+    missing the far more common case where the legal-name search finds SOME
+    candidate that then fails verify_discovered_site's identity check
+    (wrong company, unrelated page). Measured literally zero coverage
+    improvement on 92 real companies until fixed. This test pins the fix:
+    the company-name search finds a real page for a DIFFERENT company
+    (fails verification), and only the leader-name retry finds the actual
+    right site."""
+    roller_response = {
+        "rollegrupper": [
+            {
+                "type": {"kode": "DAGL"},
+                "roller": [
+                    {
+                        "type": {"kode": "DAGL", "beskrivelse": "Daglig leder"},
+                        "person": {"navn": {"fornavn": "Anders", "etternavn": "Opedal"}},
+                    }
+                ],
+            }
+        ]
+    }
+    wrong_company_html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"TOTALLY UNRELATED AS"}</script></head></html>'
+    right_company_html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"GENERIC HOLDING AS"}</script></head></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(
+                200,
+                json={"organisasjonsnummer": "923609016", "navn": "GENERIC HOLDING AS", "historiskeNavn": []},
+            )
+        if url.endswith("/roller"):
+            return httpx.Response(200, json=roller_response)
+        if "duckduckgo.com" in url:
+            query = dict(request.url.params).get("q", "")
+            if "Opedal" in query:
+                return httpx.Response(
+                    200,
+                    json={"Heading": "x", "Infobox": {"content": [{"label": "Website", "value": "[right.example]"}]}},
+                )
+            # legal name alone finds a real page -- for the WRONG company
+            return httpx.Response(
+                200,
+                json={"Heading": "x", "Infobox": {"content": [{"label": "Website", "value": "[wrong.example]"}]}},
+            )
+        if url in ("https://wrong.example", "https://wrong.example/"):
+            return httpx.Response(200, text=wrong_company_html)
+        if url in ("https://right.example", "https://right.example/", "https://right.example/robots.txt"):
+            return httpx.Response(200, text=right_company_html)
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client)
+
+    assert profile.online_presence.official_site.value in ("https://right.example", "https://right.example/")
+    assert profile.online_presence.official_site.source_class == "external"
+
+
+def test_default_process_one_falls_back_to_org_number_search_when_leader_name_also_fails():
+    """End-to-end wiring test for the third discovery fallback tier: an
+    exact 9-digit org number is a much stronger match signal than a fuzzy
+    name (Norwegian company/business directories, chambers and official
+    filings commonly cite it verbatim), so it's tried as a last-resort query
+    seed after BOTH the legal name and the leader name fail to produce a
+    verified site."""
+    roller_response = {
+        "rollegrupper": [
+            {
+                "type": {"kode": "DAGL"},
+                "roller": [
+                    {
+                        "type": {"kode": "DAGL", "beskrivelse": "Daglig leder"},
+                        "person": {"navn": {"fornavn": "Anders", "etternavn": "Opedal"}},
+                    }
+                ],
+            }
+        ]
+    }
+    right_company_html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"GENERIC HOLDING AS"}</script></head></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(
+                200,
+                json={"organisasjonsnummer": "923609016", "navn": "GENERIC HOLDING AS", "historiskeNavn": []},
+            )
+        if url.endswith("/roller"):
+            return httpx.Response(200, json=roller_response)
+        if "duckduckgo.com" in url:
+            query = dict(request.url.params).get("q", "")
+            if "923609016" in query:
+                return httpx.Response(
+                    200,
+                    json={"Heading": "x", "Infobox": {"content": [{"label": "Website", "value": "[org-number.example]"}]}},
+                )
+            # neither the legal name nor the leader name find anything
+            return httpx.Response(200, json={"Heading": "x", "Infobox": None})
+        if url in ("https://org-number.example", "https://org-number.example/", "https://org-number.example/robots.txt"):
+            return httpx.Response(200, text=right_company_html)
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client)
+
+    assert profile.online_presence.official_site.value in ("https://org-number.example", "https://org-number.example/")
+    assert profile.online_presence.official_site.source_class == "external"

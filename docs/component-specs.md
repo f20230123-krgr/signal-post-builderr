@@ -119,6 +119,20 @@ agent playbook and learning harness both explicitly prioritise
 (`/about`, `/careers`, `/contact`, `/news`, `/investor`, etc.) — same domain
 as the official site, no new allow-list risk, and a real coverage lever for
 the leadership/hiring/activity sections a homepage alone rarely has.
+`/aktuelt`/`/nyheter` (Norwegian for "current/topical"/"news") added after
+independent review: a Norwegian-only site can have neither `/news` nor a
+sitemap-keyword match under either name (unlike `/presse`, already covered
+since `"press"` is a substring of `"presse"`).
+
+**Must (ATS domains):** verify a candidate ATS domain actually renders real
+structured `JobPosting` data before adding it to `DEFAULT_ATS_DOMAINS` —
+real-world lesson, independent review: webcruiter.no (a major Norwegian ATS)
+was proposed, checked live by fetching a real listing, and found to have NO
+JSON-LD or microdata at all — only basic OpenGraph tags. Adding it would
+have spent crawl budget for zero extraction benefit. `recman.no` and
+`jobylon.com` were checked the same way (a real listing fetched and
+inspected directly) and confirmed to render genuine `"@type": "JobPosting"`
+JSON-LD before being added.
 
 **Must (sitemap discovery):** `_is_priority_sitemap_url` must reject any
 `<loc>` entry whose path ends in `.xml` before checking priority keywords —
@@ -183,6 +197,16 @@ site.
 
 **Must not:**
 - Never invent a field that wasn't present on the page.
+- Never treat a JSON-LD text-typed property (`name`, `title`, `headline`,
+  `jobTitle`...) as guaranteed to be a string — real-world regression,
+  crashed a real 1,000-company batch with `AttributeError: 'list' object
+  has no attribute 'lower'` (caught by `runner.py`'s outer safety net, so
+  it degraded that one company rather than crashing the batch, but it's a
+  real, fixable gap). schema.org's `name` is typed `Text` but also legally
+  accepts `[Text]` (multiple alternate names) — a real site used this.
+  `_as_str(value)` treats anything that isn't a non-empty string as absent,
+  same "reject, don't guess" discipline already used for `sameAs` links,
+  rather than crash or silently pick one of several asserted values.
 - Reject a free-text `dated_activity` line longer than
   `_MAX_FREETEXT_LINE_LENGTH` (300 chars) — real-world regression, found by
   independent review of a real 100-company batch: a directory-listing domain
@@ -200,7 +224,9 @@ stage, structured and free-text `dated_activity` both carry the page's own
 long free-text line is rejected while a normal-length one is still accepted,
 `@graph`-wrapped JSON-LD is unwrapped before extraction, a specialized
 business subtype is still recognized as an organization while a bare WebPage
-title is not, `og:site_name` is used as a last-resort context_name fallback.
+title is not, `og:site_name` is used as a last-resort context_name fallback,
+a list-valued `name`/`title` never crashes extraction and produces no fact
+for that field rather than a malformed one.
 
 ---
 
@@ -359,6 +385,16 @@ risk for `verify.py` to gate — routing these through `verify.py` would be a
 no-op at best and a spurious rejection risk at worst (registry prose doesn't
 restate the company name the way a crawled page does).
 
+Also exports `fetch_leadership_only(entity, budget, client=None, sleep=...,
+now=...) -> list[ConfirmedFact]` — leadership only, no accounts/workplaces.
+Used by `runner.py` to fetch leader names BEFORE `discovery.py` runs, so a
+verified CEO/board-chair name is available as the "leader/founder bridge"
+fallback search seed (see `discovery.py`'s section) for companies with no
+registered site. `fetch_registry_extras()` still re-fetches leadership
+normally later in the same company's pipeline run — one small, bounded
+duplicate roles request for that subset of companies, accepted as simpler
+and safer than restructuring the pipeline order to share a single fetch.
+
 The second tuple element is specifically the annual-accounts fetch outcome
 (`AVAILABLE`/`NOT_AVAILABLE`/`FAILED`) — added after real evaluator feedback
 that a transient fetch error and a confirmed "no accounts filed" both
@@ -407,6 +443,21 @@ passed explicitly (never read from `os.environ` inside this module — see
 `discover_candidate_site`'s docstring for why an explicit `None` must mean
 "provider disabled," not "check the environment").
 
+`discover_candidate_site` stays a plain single-query function — it does NOT
+own the "leader/founder bridge" retry (a verified CEO/board-chair name, from
+Brreg's own `roller` endpoint, as a fallback search seed when the company
+name alone fails — from the real agent playbook, re-confirmed by re-reading
+the live builderr.ai brief while investigating a real, low coverage score).
+That retry lives in `runner.py._default_process_one` instead. Real-world
+regression: an earlier version put the retry inside this module, only
+firing when the legal-name search found NOTHING at all — but the far more
+common failure is finding SOME candidate that then fails
+`verify_discovered_site`'s identity check (wrong company, unrelated page).
+Measured literally zero coverage improvement across 92 real companies until
+the retry was moved to the one place (`runner.py`) that sees both this
+function's result AND whether verification actually accepted it. See
+`strip_leader_role_title`'s docstring.
+
 **Output:** `discover_candidate_site` -> `Optional[str]` (a URL, never itself
 evidence). `verify_discovered_site` -> `Optional[ConfirmedFact]`
 (`field_name="official_site"`, `source_class="external"`,
@@ -443,6 +494,16 @@ evidence). `verify_discovered_site` -> `Optional[ConfirmedFact]`
   77.8 under `token_sort_ratio`, below threshold). The embedded-org-number
   check is a domain-agnostic signal independent of name similarity entirely,
   so it also generalizes to a directory site not yet in the blacklist.
+- Never retry a 401/402/403 response (`_PERMANENT_FAILURE_STATUSES`) —
+  real-world regression, confirmed live against the real Exa API mid-session
+  (quota exhausted → 402 on every call): unlike a 5xx or network blip, these
+  are permanent for the rest of the billing/auth period, so retrying wastes
+  real wall-clock time and a full unit of request budget on a call already
+  known to be doomed. With three discovery tiers each hitting this provider
+  first, that waste multiplied 3x per company across a real 1,000-company
+  batch — a large factor in both why that run took ~78 minutes instead of
+  the usual ~22, and why fewer companies got real coverage (wasted budget
+  that should have reached Parallel or crawling instead).
 
 **Must not:**
 - Fall back to `os.environ` for a key that was explicitly passed as `None`.
@@ -518,8 +579,27 @@ respecting the concurrency model in `architecture.md`.
 batch, even if some companies fail every stage (they still get a profile,
 correctly marked with failure states).
 
+**Must (discovery retry):** `_default_process_one` owns a three-tier discovery
+retry, trying `discover_candidate_site` + `verify_discovered_site` together
+as one attempt per tier, in order: (1) the legal name, (2) the most senior
+leader's name (from `registry_extras.fetch_leadership_only`, fetched before
+discovery) — the "leader/founder bridge," (3) the entity's own 9-digit org
+number — a much stronger match signal than any fuzzy name, since Norwegian
+directories, chambers and official filings commonly cite it verbatim. Each
+tier only runs if the previous one's whole attempt failed (nothing found, OR
+something found but rejected by verification). This orchestration must live
+here, not inside `discovery.py`, because only this function sees both what
+discovery found AND whether verification accepted it — see
+`discover_candidate_site`'s docstring for the real, measured bug (zero
+coverage improvement across 92 companies) that resulted from putting the
+retry in the wrong place.
+
 **Tests to write:** batch of 100 with a mix of successes/failures still yields
-100 output records; concurrency cap is respected under load.
+100 output records; concurrency cap is respected under load; each retry tier
+fires both when the previous tier's search finds nothing AND when it finds a
+candidate that fails verification (the second case is the one that matters
+in practice and was the actual bug); the org-number tier only fires after
+both the legal-name and leader-name tiers fail.
 
 ---
 

@@ -161,6 +161,20 @@ def _normalize_site(value: str) -> str:
     return f"https://{value}"
 
 
+# Real-world regression, confirmed live against the real Exa API mid-
+# session (quota exhausted -> 402 on every call): a 401/402/403 is a
+# PERMANENT failure for the rest of the billing/auth period, not a
+# transient one -- unlike a 5xx or network blip, retrying it can never
+# succeed. Retrying it anyway wastes real wall-clock time (backoff sleep)
+# and a full unit of request budget per doomed attempt; with three
+# discovery tiers each hitting this provider first, that waste multiplied
+# 3x per company across a real 1,000-company batch -- a large factor in
+# why that run took ~78 minutes instead of the usual ~22, and why fewer
+# companies got real coverage (wasted budget that should have reached
+# Parallel or crawling instead).
+_PERMANENT_FAILURE_STATUSES = {401, 402, 403}
+
+
 def _post_json_with_retries(
     client: httpx.Client,
     url: str,
@@ -171,7 +185,8 @@ def _post_json_with_retries(
     """Shared POST-with-retry helper for the Exa/Parallel tiers: retries on
     transport failure or an empty/undecodable body (both observed as
     transient in production -- see the DuckDuckGo tier's own history of the
-    same symptoms), gives up cleanly after MAX_FETCH_RETRIES."""
+    same symptoms), gives up cleanly after MAX_FETCH_RETRIES. Never retries
+    a 401/402/403 -- see _PERMANENT_FAILURE_STATUSES."""
     for attempt in range(MAX_FETCH_RETRIES):
         try:
             response = client.post(url, json=json_body, headers=headers, timeout=10.0)
@@ -183,6 +198,9 @@ def _post_json_with_retries(
                 return response.json()
             except ValueError:
                 pass
+
+        if response is not None and response.status_code in _PERMANENT_FAILURE_STATUSES:
+            return None
 
         if attempt < MAX_FETCH_RETRIES - 1:
             sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
@@ -298,6 +316,21 @@ def _discover_via_duckduckgo(
     return None
 
 
+_ROLE_TITLE_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def strip_leader_role_title(leader_value: str) -> str:
+    """"Anders Opedal (Daglig leder)" -> "Anders Opedal" -- registry_extras.py
+    formats a leader ConfirmedFact.value as "name (title)"; only the name is
+    useful as a search seed for the "leader/founder bridge" (see
+    src/orchestrator/runner.py, which owns the retry-with-verification loop
+    this feeds -- discover_candidate_site itself stays a single-query
+    function; a candidate that's found but then fails independent
+    verification must still trigger the leader-name retry, which only the
+    caller that also runs verify_discovered_site can know about)."""
+    return _ROLE_TITLE_RE.sub("", leader_value).strip()
+
+
 def discover_candidate_site(
     legal_name: str,
     client: httpx.Client,
@@ -321,7 +354,18 @@ def discover_candidate_site(
     session. Reading the environment is the caller's job (see
     src/orchestrator/runner.py) -- same pattern as `client`/`cache` already
     being resolved by the caller, not this function.
-    """
+
+    Real-world regression: an earlier version of the "leader/founder bridge"
+    lived entirely inside this function, retrying with a leader name only
+    when the legal name found NOTHING at all. Measured zero improvement on a
+    real, unseen 100-company batch -- because when the legal-name search
+    finds SOME candidate that then fails verify_discovered_site's identity
+    check (wrong company, blacklisted domain, etc.), this function had
+    already returned that candidate, so the leader-name retry never got a
+    chance to run at all. The retry now lives in runner.py, which is the
+    only place that sees BOTH this function's result AND whether
+    verify_discovered_site actually accepted it -- see
+    strip_leader_role_title's docstring."""
     if exa_api_key:
         candidate = _discover_via_exa(legal_name, client, budget, sleep, exa_api_key)
         if candidate:

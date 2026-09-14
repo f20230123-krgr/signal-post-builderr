@@ -367,6 +367,48 @@ def test_sitemap_discovery_never_treats_a_nested_sitemap_as_a_content_page():
     assert "https://example.com/sitemap/news/sitemap.xml" not in urls
 
 
+def test_sitemap_discovery_recognizes_norwegian_only_news_page_paths():
+    """Real-world gap, confirmed by independent review: our priority-keyword
+    list had the English "/news" but no Norwegian-only equivalent -- a
+    Norwegian-language site can have "/aktuelt" or "/nyheter" with no
+    "/news" at all, and neither word is a substring of any existing keyword
+    (unlike "/presse", already covered since "press" is a substring of
+    "presse"). Missing this meant sitemap discovery silently skipped a
+    real, common category of Norwegian company pages."""
+    sitemap_xml = """<?xml version="1.0"?>
+    <urlset>
+      <url><loc>https://example.com/aktuelt</loc></url>
+      <url><loc>https://example.com/nyheter/2026-vekst</loc></url>
+      <url><loc>https://example.com/blog/unrelated-post</loc></url>
+    </urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://example.com/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow:\n")
+        if url == "https://example.com/sitemap.xml":
+            return httpx.Response(200, text=sitemap_xml)
+        return httpx.Response(200, text="<html>page content here, plenty of text</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, use_sitemap=True, allowed_domains=set())
+
+    urls = {p.url for p in pages}
+    assert "https://example.com/aktuelt" in urls
+    assert "https://example.com/nyheter/2026-vekst" in urls
+    assert "https://example.com/blog/unrelated-post" not in urls
+
+
+def test_default_company_owned_paths_include_norwegian_news_variants():
+    from src.pipeline.crawl import DEFAULT_COMPANY_OWNED_PATHS
+
+    assert "/aktuelt" in DEFAULT_COMPANY_OWNED_PATHS
+    assert "/nyheter" in DEFAULT_COMPANY_OWNED_PATHS
+
+
 def test_robots_txt_disallow_is_respected(caplog):
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -434,6 +476,46 @@ def test_follows_official_outbound_link_to_allow_listed_ats_domain():
     ats_page = next(p for p in pages if p.url == "https://boards.greenhouse.io/examplecorp")
     assert ats_page.linked_from == "https://example.com/"
     assert ats_page.fetch_state == EvidenceState.AVAILABLE
+
+
+def test_default_ats_domains_include_recman_and_jobylon():
+    """recman.no and jobylon.com added after independent review, verified
+    live before adding (unlike webcruiter.no, checked the same way and
+    found to render NO structured data at all): a real recman.no listing
+    (apply.recman.no/job_post.php, for POWER Norge AS) and a real
+    jobylon.com listing (emp.jobylon.com, for Hotel Norge by Scandic) were
+    each fetched and inspected directly -- both render a genuine
+    "@type": "JobPosting" JSON-LD block our extractor already knows how to
+    read. Norwegian-market ATS platforms, unlike the mostly US-centric
+    prior list (greenhouse/lever/workable/teamtailor/workday)."""
+    from src.pipeline.crawl import DEFAULT_ATS_DOMAINS
+
+    assert "recman.no" in DEFAULT_ATS_DOMAINS
+    assert "jobylon.com" in DEFAULT_ATS_DOMAINS
+
+
+def test_follows_official_outbound_link_to_recman_subdomain():
+    """recman.no listings commonly live on a per-customer subdomain (e.g.
+    apply.recman.no) -- must match via the same subdomain rule already used
+    for boards.greenhouse.io."""
+    careers_html = '<html><body><a href="https://apply.recman.no/job_post.php?id=1">Ledige stillinger</a></body></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://example.com/":
+            return httpx.Response(200, text=careers_html)
+        if url == "https://apply.recman.no/job_post.php?id=1":
+            return httpx.Response(200, text="<html>Salgstalent, Oslo</html>")
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, ats_domains={"recman.no"}, allowed_domains=set())
+
+    urls = {p.url for p in pages}
+    assert "https://apply.recman.no/job_post.php?id=1" in urls
 
 
 def test_does_not_follow_outbound_link_to_non_allow_listed_domain():

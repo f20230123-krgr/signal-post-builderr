@@ -195,6 +195,39 @@ def test_page_organization_name_ignores_a_bare_webpage_title():
     assert _page_organization_name_from_html(html) is None
 
 
+def test_a_list_valued_json_ld_name_does_not_crash_extraction():
+    """Real-world regression, found running a real 1,000-company batch: one
+    company's page crashed the entire pipeline run with
+    "AttributeError: 'list' object has no attribute 'lower'" (caught by
+    runner.py's outer safety net, so that one company got a degraded
+    profile rather than crashing the batch -- but it's a real, fixable
+    gap). schema.org's "name" property is typed Text, but ALSO legally
+    accepts [Text] (multiple alternate names) per the spec -- a real site
+    apparently used this. structured_facts() treated obj["name"] as
+    guaranteed to be a string and fed it straight into organization_name's
+    value, which later reaches name_similarity()'s .lower() call and
+    crashes. Must not crash -- and must not invent a value either; a
+    non-string name is treated as absent, same discipline already used for
+    sameAs links (isinstance(link, str) and link)."""
+    html = """<html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","name":["Example AS","Example Company"]}
+    </script></head></html>"""
+
+    facts = extract(_inline_page(html))  # must not raise
+
+    assert not any(f.field_name == "organization_name" for f in facts)
+
+
+def test_a_list_valued_json_ld_title_does_not_crash_hiring_signal_extraction():
+    html = """<html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"JobPosting","title":["Engineer","Utvikler"],"datePosted":"2026-06-20"}
+    </script></head></html>"""
+
+    facts = extract(_inline_page(html))  # must not raise
+
+    assert not any(f.field_name == "hiring_signal" for f in facts)
+
+
 def test_leader_and_company_profile_facts_carry_the_colocated_org_name():
     """Real-world regression, from real evaluator feedback: a shared/
     multi-tenant domain (e.g. a Norwegian housing-cooperative property

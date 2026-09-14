@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 import httpx
 
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
-from src.pipeline.discovery import discover_candidate_site, verify_discovered_site
+from src.pipeline.discovery import MAX_FETCH_RETRIES, discover_candidate_site, strip_leader_role_title, verify_discovered_site
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -412,6 +412,80 @@ def test_exa_network_failure_does_not_crash():
     assert candidate is None
 
 
+def test_exa_402_payment_required_is_not_retried_and_falls_through_immediately():
+    """Real-world regression, confirmed live against the real Exa API mid-
+    session: a 402 Payment Required (quota exhausted) is a PERMANENT
+    failure for the rest of the billing period, not a transient one --
+    unlike a 5xx or network blip, retrying it can never succeed. The old
+    code retried it anyway (MAX_FETCH_RETRIES times, with backoff sleep),
+    wasting real wall-clock time on a call already known to be doomed, and
+    still spent a full unit of request budget per attempt. With three
+    discovery tiers (legal name, leader name, org number) each hitting Exa
+    first, that waste multiplied 3x per company across a real 1,000-company
+    batch -- a large factor in why that run took ~78 minutes instead of the
+    usual ~22. Must call the endpoint exactly ONCE, not MAX_FETCH_RETRIES
+    times, and fall through to Parallel immediately."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if "exa.ai" in str(request.url):
+            return httpx.Response(402)
+        return httpx.Response(200, json=_parallel_response("https://equinor.com"))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    candidate = discover_candidate_site(
+        "EQUINOR ASA", client, budget, sleep=lambda s: None,
+        exa_api_key="fake-exa-key", parallel_api_key="fake-parallel-key",
+    )
+
+    exa_calls = [c for c in calls if "exa.ai" in c]
+    assert len(exa_calls) == 1
+    assert candidate == "https://equinor.com"
+
+
+def test_exa_401_and_403_are_also_not_retried():
+    for status in (401, 403):
+        calls = []
+
+        def handler(request: httpx.Request, status=status) -> httpx.Response:
+            calls.append(str(request.url))
+            return httpx.Response(status)
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        budget = BudgetGovernor()
+
+        discover_candidate_site(
+            "EQUINOR ASA", client, budget, sleep=lambda s: None, exa_api_key="fake-exa-key", parallel_api_key=None
+        )
+
+        exa_calls = [c for c in calls if "exa.ai" in c]
+        assert len(exa_calls) == 1, f"status {status} was retried"
+
+
+def test_5xx_and_network_errors_are_still_retried():
+    """Backward-compatible: a genuinely transient failure (server error,
+    transport blip) must still get the existing retry behavior -- only
+    permanent auth/payment failures skip retries."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(500)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    discover_candidate_site(
+        "EQUINOR ASA", client, budget, sleep=lambda s: None, exa_api_key="fake-exa-key", parallel_api_key=None
+    )
+
+    exa_calls = [c for c in calls if "exa.ai" in c]
+    assert len(exa_calls) == MAX_FETCH_RETRIES
+
+
 def test_explicit_none_key_is_never_overridden_by_the_real_environment(monkeypatch):
     """Real-world regression: exa_api_key=None must mean "this provider is
     explicitly disabled," never "not specified, fall back to the real
@@ -560,6 +634,24 @@ def test_all_three_providers_absent_or_empty_returns_none():
     budget = BudgetGovernor()
 
     assert discover_candidate_site("SOME SMALL COMPANY AS", client, budget, **_no_keys()) is None
+
+
+# --- Leader/founder bridge (agent playbook §2, learning harness §1) ---
+#
+# The retry-with-a-leader-name orchestration lives in runner.py, not here --
+# see discover_candidate_site's and strip_leader_role_title's docstrings for
+# why (a real, measured bug: retrying only when THIS function finds nothing
+# misses the common case where it finds something that then fails
+# verify_discovered_site's identity check). This module just provides the
+# name-formatting helper and stays a plain single-query function.
+
+
+def test_strip_leader_role_title_removes_the_parenthetical():
+    assert strip_leader_role_title("Anders Opedal (Daglig leder)") == "Anders Opedal"
+
+
+def test_strip_leader_role_title_leaves_a_bare_name_unchanged():
+    assert strip_leader_role_title("Anders Opedal") == "Anders Opedal"
 
 
 def test_only_attempted_providers_spend_budget():

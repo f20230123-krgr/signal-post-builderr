@@ -50,9 +50,15 @@ RETRY_BACKOFF_SECONDS = 0.5
 # and the learning harness's matching list. Opt-in via `company_owned_paths`
 # (see crawl() signature) -- not fetched unless a caller asks for them, so
 # existing single-URL tests/behavior are unaffected by default.
+#
+# "/aktuelt" and "/nyheter" (Norwegian for "current/topical" and "news")
+# added after independent review: a Norwegian-only site can have neither
+# "/news" nor anything matching an existing keyword under these names --
+# unlike "/presse" ("press" is already a substring match), there was no
+# coverage at all for this common Norwegian page-naming pattern.
 DEFAULT_COMPANY_OWNED_PATHS = [
     "/about", "/om-oss", "/contact", "/kontakt", "/leadership", "/ledelse",
-    "/locations", "/careers", "/jobs", "/news", "/investor",
+    "/locations", "/careers", "/jobs", "/news", "/investor", "/aktuelt", "/nyheter",
 ]
 
 # Keywords a sitemap.xml URL's path must contain to be worth spending budget
@@ -60,13 +66,33 @@ DEFAULT_COMPANY_OWNED_PATHS = [
 SITEMAP_PRIORITY_KEYWORDS = [
     "about", "om-oss", "contact", "kontakt", "team", "leadership", "ledelse",
     "location", "career", "jobs", "job", "news", "press", "investor",
+    "aktuelt", "nyheter",
 ]
-MAX_SITEMAP_URLS = 15
+# Raised from 15: real batches consistently use well under half the 2,000-
+# request/100-company budget (~1,000-1,100 typical), and this cap only ever
+# binds for the minority of companies that both have a registered site AND
+# a sitemap listing more than 15 priority-keyword pages -- there's room to
+# check more of exactly that same already-vetted, same-domain content
+# without meaningful budget risk.
+MAX_SITEMAP_URLS = 20
 
 # Official ATS (applicant tracking system) platforms companies commonly link
 # their own careers page to. Only ever fetched when linked FROM the entity's
 # own official domain -- see `ats_domains` on crawl() and module docstring.
-DEFAULT_ATS_DOMAINS = {"greenhouse.io", "lever.co", "workable.com", "teamtailor.com", "myworkdayjobs.com"}
+#
+# "recman.no" and "jobylon.com" added after independent review, verified
+# LIVE before adding -- unlike webcruiter.no (checked the same way, found to
+# render NO JSON-LD or microdata at all: only basic OpenGraph tags, so
+# adding it would spend crawl budget for zero extraction benefit), a real
+# recman.no listing (apply.recman.no, for POWER Norge AS) and a real
+# jobylon.com listing (emp.jobylon.com, for Hotel Norge by Scandic) were
+# each fetched and inspected directly, and both render a genuine
+# "@type": "JobPosting" JSON-LD block. Norwegian-market platforms, unlike
+# the rest of this list, which is mostly US-centric.
+DEFAULT_ATS_DOMAINS = {
+    "greenhouse.io", "lever.co", "workable.com", "teamtailor.com", "myworkdayjobs.com",
+    "recman.no", "jobylon.com",
+}
 
 # A fetched page whose visible text (tags/scripts/styles stripped) is shorter
 # than this is treated as a JS-shell candidate for the Playwright fallback.

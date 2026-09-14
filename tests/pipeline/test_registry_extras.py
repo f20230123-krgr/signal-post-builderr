@@ -15,7 +15,7 @@ import httpx
 
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
-from src.pipeline.registry_extras import fetch_registry_extras
+from src.pipeline.registry_extras import fetch_leadership_only, fetch_registry_extras
 from src.pipeline.resolve import ResolvedEntity
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "registry"
@@ -82,6 +82,37 @@ def test_leadership_roles_are_extracted_and_filtered():
         assert fact.source_class == "official_registry"
         assert fact.extraction_method == "registry"
         assert fact.content_hash
+
+
+def test_fetch_leadership_only_returns_just_leaders_and_spends_one_request():
+    """New: used by the discovery-stage "leader/founder bridge" (agent
+    playbook §2), which needs leader names BEFORE the rest of
+    fetch_registry_extras() normally runs later in the pipeline. Must not
+    fetch accounts or workplaces -- those still come from the normal
+    fetch_registry_extras() call downstream; this is leadership only."""
+    entity = _entity()
+    budget = BudgetGovernor()
+
+    facts = fetch_leadership_only(entity, budget, client=_client_for("997770234"))
+
+    assert facts and all(f.field_name == "leader" for f in facts)
+    assert budget.requests_used == 1
+
+
+def test_fetch_leadership_only_returns_nothing_when_entity_not_resolved():
+    entity = _entity()
+    entity.resolution_state = EvidenceState.NOT_AVAILABLE
+    budget = BudgetGovernor()
+
+    assert fetch_leadership_only(entity, budget) == []
+    assert budget.requests_used == 0
+
+
+def test_fetch_leadership_only_respects_budget():
+    entity = _entity()
+    budget = BudgetGovernor(BudgetLimits(max_requests=0, max_spend_usd=10, max_wall_clock_seconds=1000))
+
+    assert fetch_leadership_only(entity, budget, client=_client_for("997770234")) == []
 
 
 def test_annual_accounts_latest_and_history_are_extracted():

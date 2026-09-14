@@ -244,6 +244,38 @@ def _workplace_facts(
     return facts
 
 
+def fetch_leadership_only(
+    entity: ResolvedEntity,
+    budget: BudgetGovernor,
+    client: Optional[httpx.Client] = None,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> list[ConfirmedFact]:
+    """Leadership only, no accounts/workplaces -- used by discovery.py's
+    "leader/founder bridge" (agent playbook §2: a verified CEO/board-chair
+    name as a secondary search seed when the company name alone finds
+    nothing), which needs leader names BEFORE fetch_registry_extras()
+    normally runs later in the pipeline. The normal fetch_registry_extras()
+    call still re-fetches leadership as part of its own flow -- one small,
+    bounded duplicate roles request for the subset of companies with no
+    registered site, acceptable given the ample per-company budget
+    headroom, and far simpler/safer than restructuring the whole pipeline
+    order to share a single fetch."""
+    if entity.resolution_state != EvidenceState.AVAILABLE:
+        return []
+    owns_client = client is None
+    client = client or httpx.Client()
+    try:
+        if not budget.can_spend_request():
+            return []
+        facts = _leadership_facts(entity, client, sleep, now())
+        budget.record_request()
+        return facts
+    finally:
+        if owns_client:
+            client.close()
+
+
 def fetch_registry_extras(
     entity: ResolvedEntity,
     budget: BudgetGovernor,
