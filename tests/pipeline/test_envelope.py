@@ -157,3 +157,24 @@ def test_operations_defaults_when_not_provided():
     profile = make_profile(org_number="923609016")
     envelope = to_envelope(profile, run_id="run-1")
     assert envelope["operations"] == {"requests": 0, "runtime_ms": 0, "third_party_cost_usd": 0.0}
+
+
+def test_envelope_embeds_the_synthesis_answers():
+    """Real gap found investigating a "decision-useful synthesis" score of
+    0/10 despite src/synthesis.py being built and tested: its answers were
+    only ever consumed by src/reporting.py's separate report.html, which
+    never leaves the machine that generated it -- the actual submitted
+    artifact is envelopes.jsonl, and to_envelope() never included them.
+    Synthesis answers must be embedded directly in the envelope so the
+    evaluator (which only ever sees the submitted JSONL) can see them."""
+    profile = make_profile(
+        org_number="923609016",
+        legal_name=available_claim("EQUINOR ASA"),
+        official_site=available_claim("https://www.equinor.com"),
+    )
+
+    envelope = to_envelope(profile, run_id="run-1")
+
+    from src.synthesis import answer_business_questions
+
+    assert envelope["answers"] == answer_business_questions(profile)

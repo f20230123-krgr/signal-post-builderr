@@ -120,6 +120,18 @@ agent playbook and learning harness both explicitly prioritise
 as the official site, no new allow-list risk, and a real coverage lever for
 the leadership/hiring/activity sections a homepage alone rarely has.
 
+**Must (sitemap discovery):** `_is_priority_sitemap_url` must reject any
+`<loc>` entry whose path ends in `.xml` before checking priority keywords —
+real-world regression, found auditing a real 100-company batch: a sitemap
+index's own entries can point at OTHER sitemap files (e.g.
+`/sitemap/news/sitemap.xml`), and "news" is a priority keyword, so that
+nested sitemap URL was crawled and `extract()`'d as if it were a normal HTML
+page. With no HTML block tags to split on, its raw XML (hundreds of
+concatenated `<loc>`/`<lastmod>` pairs) became a single giant garbage
+`dated_activity` fact. A real content page's path essentially never ends in
+`.xml`, so this check is safe and general, not a one-off patch for this one
+site.
+
 ---
 
 ## `src/pipeline/extract.py`
@@ -134,12 +146,61 @@ the leadership/hiring/activity sections a homepage alone rarely has.
 **Must:**
 - Prefer `extruct` (schema.org/JSON-LD/microdata) before falling back to
   `Trafilatura` text extraction — cheaper and more reliable when available.
+- Attach `context_name` (the page's own co-located JSON-LD Organization
+  `name`, via `_page_organization_name`) to every `leader`, `company_profile`,
+  and `dated_activity` fact — real-world regression, found auditing a real
+  1,000-company batch: a housing co-op (borettslag) with a shared property
+  manager (OBOS/USBL) as its registered website inherited that manager's own
+  "Om oss"/"Ledige stillinger"/"Presserom" pages as its `dated_activity` (a
+  CMS-generated Article-type JSON-LD block, separate from the page's own
+  Organization block). `leader`/`company_profile` already carried
+  `context_name` from an earlier fix; `dated_activity` — both the structured
+  (JSON-LD `NewsArticle`/etc) and free-text (`_activity_facts`) producers —
+  did not, so it slipped past `verify()`'s `context_name` gate untouched.
+  `verify.py` itself needed no change; the gate already existed, it was just
+  never fed for this field.
+- Unwrap `"@graph"`-wrapped JSON-LD (via `_flatten_json_ld`) before doing
+  anything else with it — real-world regression, found by independent review:
+  extruct returns a `@graph` block (a common real-world pattern, e.g. from
+  SEO plugins) as ONE opaque object with keys `["@context", "@graph"]`; every
+  `@type`/`name`/`datePublished` etc. lives on the objects NESTED inside the
+  `@graph` array. Without unwrapping first, EVERY structured fact type
+  (`organization_name`, `leader`, `company_profile`, `hiring_signal`,
+  `dated_activity`) was silently invisible on any page using this pattern —
+  not a context-metadata nuance, a total blind spot for the whole page.
+- Determine `_page_organization_name` by EXCLUDING known non-organization
+  content types (`_NON_ORGANIZATION_TYPES`: `JobPosting`/`NewsArticle`-family,
+  `WebPage`, `Product`, `Person`, etc.), not by allow-listing organization
+  types — real-world regression, found by independent review: schema.org has
+  dozens of Organization/LocalBusiness subtypes Norwegian sites commonly use
+  (`AutomotiveBusiness`, `FinancialService`, `Store`, ...); an allow-list is
+  the same losing game as a domain blacklist. Safe to broaden this way: a
+  missing or wrong `context_name` can only make `verify()` over-reject (lost
+  coverage), never wrongly accept (lost precision).
+- Fall back to the page's `og:site_name` meta tag for `_page_organization_name`
+  when no JSON-LD organization block is found at all, before giving up — same
+  safe-direction reasoning as the deny-list above.
 
 **Must not:**
 - Never invent a field that wasn't present on the page.
+- Reject a free-text `dated_activity` line longer than
+  `_MAX_FREETEXT_LINE_LENGTH` (300 chars) — real-world regression, found by
+  independent review of a real 100-company batch: a directory-listing domain
+  (1881.no, since blacklisted in `discovery.py`) with no HTML block tags to
+  split on produced one ~8,000-character line concatenating dozens of
+  unrelated businesses' URLs/dates, published whole as a single claim.
+  Defense in depth alongside the domain blacklist, so the next unblacklisted
+  directory site can't reproduce the same failure — a genuine headline never
+  approaches this length.
 
 **Tests to write:** page with JSON-LD present (uses structured path), page
-without it (falls back to text extraction), malformed HTML doesn't crash the stage.
+without it (falls back to text extraction), malformed HTML doesn't crash the
+stage, structured and free-text `dated_activity` both carry the page's own
+`context_name` when a co-located Organization block has one, an abnormally
+long free-text line is rejected while a normal-length one is still accepted,
+`@graph`-wrapped JSON-LD is unwrapped before extraction, a specialized
+business subtype is still recognized as an organization while a bare WebPage
+title is not, `og:site_name` is used as a last-resort context_name fallback.
 
 ---
 
@@ -159,13 +220,32 @@ for it once a fact reaches this stage.
 - Use RapidFuzz name matching against `legal_name` (and known aliases) with an
   explicit, documented threshold. This is the code that enforces the 95%
   precision hard gate — treat threshold changes as gate-risk changes, not minor tuning.
+- Hard-reject `company_profile`/`hiring_signal`/`dated_activity` facts sourced
+  from a known housing-manager domain (`_KNOWN_HOUSING_MANAGER_DOMAINS`) when
+  the entity looks like a housing co-op (`_is_housing_coop`) — regardless of
+  `context_name`. Real-world regression, confirmed at full 1,000-company batch
+  scale (51 leaked claims): `context_name` (see `extract.py`) only protects a
+  fact when the SPECIFIC page it came from carries identifying metadata; a
+  property manager's own per-article page (e.g. usbl.no's "nyheter" posts)
+  can carry none at all, even though its homepage does. When `context_name`
+  is `None`, provenance-only acceptance is exactly correct for a genuinely-
+  owned domain but wrong for a shared one — the manager's generic content
+  must never attach to one specific co-op it manages, independent of any
+  single page's metadata. Same known-incompleteness caveat as `discovery.py`'s
+  `AGGREGATOR_DOMAIN_BLACKLIST` — a hard-coded manager list will always lag a
+  network not yet seen. Never blocks the co-op's own `official_site` claim —
+  that's exactly how it legitimately registers the shared domain in the first
+  place.
 
 **Must not:**
 - Never accept a fact when the source page's company identity doesn't clearly
   match — when in doubt, reject and let the field be `ambiguous`, don't guess.
 
 **Tests to write:** exact name match accepted, near-miss (different company,
-similar name) rejected, threshold boundary case documented and tested explicitly.
+similar name) rejected, threshold boundary case documented and tested
+explicitly, a housing co-op's manager-domain fact is rejected even with no
+`context_name` present, the co-op's own `official_site` claim on that same
+domain is unaffected, a non-co-op entity on its own domain is unaffected.
 
 ---
 
@@ -173,7 +253,10 @@ similar name) rejected, threshold boundary case documented and tested explicitly
 
 **Responsibility:** build the final validated profile from confirmed facts.
 
-**Input:** `ResolvedEntity`, list of `ConfirmedFact`, prior snapshot (if any)
+**Input:** `ResolvedEntity`, list of `ConfirmedFact`, prior snapshot (if any),
+`accounts_state: EvidenceState` (default `NOT_AVAILABLE`) — the annual-accounts
+fetch outcome from `registry_extras.fetch_registry_extras()`'s second return
+value.
 
 **Output:** `CompanyProfile` (see `data-schema.md`), Pydantic-validated.
 
@@ -182,10 +265,31 @@ similar name) rejected, threshold boundary case documented and tested explicitly
   section with no confirmed facts — never omit a section.
 - Never let validation fail silently — a schema violation is a bug to fix, not
   a profile to drop from the batch.
+- For `annual_accounts.latest` specifically (real evaluator feedback: "a
+  temporary source error was also recorded as information being unavailable
+  ... keep the last known value and mark a failed fetch as a temporary
+  error"): a fresh confirmed fact always wins; otherwise, when
+  `accounts_state == FAILED`, carry forward the prior snapshot's `latest`
+  claim if it was `AVAILABLE`, else mark this run's claim `FAILED`; a
+  confirmed absence (`accounts_state == NOT_AVAILABLE`, e.g. a 404) is never
+  carried forward — that is a different, current-run-confirmed signal.
+- Deduplicate every list-of-claims section (`leader`, `workplace`,
+  `company_profile`, `hiring_signal`, `dated_activity`,
+  `annual_accounts_history`) by `(value, reporting_period)`, keeping the first
+  occurrence — real-world regression, found auditing a real 1,000-company
+  batch: a site embedding the same generic JSON-LD JobPosting snippet on every
+  page produced 11+ near-identical "Careers" hiring_signal claims for one
+  company, pure noise rather than real signals. Keyed on `(value,
+  reporting_period)`, not `value` alone, so two different filed years that
+  legitimately report an identical figure are never collapsed into one.
 
 **Tests to write:** full data present (all sections populated), sparse data
 (missing sections correctly marked `not_available`), schema violation is caught
-and raised loudly in tests.
+and raised loudly in tests, a `FAILED` accounts fetch carries forward the last
+known value when one exists and is marked `FAILED` (not `NOT_AVAILABLE`) when
+it doesn't, a confirmed absence never triggers carry-forward, exact-duplicate
+facts of the same field collapse to one claim, two claims with the same value
+but different `reporting_period` are both kept.
 
 ---
 
@@ -202,7 +306,12 @@ output JSONL, not `CompanyProfile.model_dump_json()` directly.
 
 **Input:** `CompanyProfile`, a `run_id`, optional `operations`/`started_at`/`completed_at`.
 
-**Output:** `dict` matching `OUTPUT_CONTRACT.md`'s shape exactly.
+**Output:** `dict` matching `OUTPUT_CONTRACT.md`'s shape, plus one addition:
+an `answers` key holding `src/synthesis.py`'s `answer_business_questions()`
+output. `OUTPUT_CONTRACT.md` itself doesn't document this field, but it's the
+only way the rubric's "decision-useful synthesis" answers reach the actual
+submitted artifact — `src/reporting.py`'s `report.html` is a local-only view,
+never part of the submission (real gap found chasing a synthesis score of 0/10).
 
 **Must:**
 - Deduplicate evidence by `(source_url, content_hash)` — claims sharing a
@@ -211,6 +320,8 @@ output JSONL, not `CompanyProfile.model_dump_json()` directly.
 - Map every section of `CompanyProfile` to a flat claim, including list
   sections (one claim entry per list item).
 - Surface `failed`/`blocked` claims in `errors` in addition to `claims`.
+- Embed `answer_business_questions(profile)` under `answers` — never leave
+  synthesis output reachable only through `report.html`.
 
 **Must not:** drop a claim because it's `not_available`/etc — it still
 appears in `claims` (value `null`, empty `evidence_ids`), per the "missing
@@ -240,13 +351,21 @@ registered sub-units (workplaces) for an already-resolved entity, from Brreg's
 
 **Input:** `ResolvedEntity`, `BudgetGovernor`
 
-**Output:** `list[ConfirmedFact]` — already confirmed (`match_confidence=100.0`),
-not `RawFact`, because these are fetched by org_number directly against the
-official registry that already identified the entity. There is no page to
-misattribute, so there is no identity-matching risk for `verify.py` to gate —
-routing these through `verify.py` would be a no-op at best and a spurious
-rejection risk at worst (registry prose doesn't restate the company name the
-way a crawled page does).
+**Output:** `tuple[list[ConfirmedFact], EvidenceState]` — the facts are already
+confirmed (`match_confidence=100.0`), not `RawFact`, because these are fetched
+by org_number directly against the official registry that already identified
+the entity. There is no page to misattribute, so there is no identity-matching
+risk for `verify.py` to gate — routing these through `verify.py` would be a
+no-op at best and a spurious rejection risk at worst (registry prose doesn't
+restate the company name the way a crawled page does).
+
+The second tuple element is specifically the annual-accounts fetch outcome
+(`AVAILABLE`/`NOT_AVAILABLE`/`FAILED`) — added after real evaluator feedback
+that a transient fetch error and a confirmed "no accounts filed" both
+collapsed into the same empty-facts result, so `assemble.py` had no way to
+tell them apart. `assemble.py` uses this to mark a transient failure honestly
+(`FAILED`) instead of `NOT_AVAILABLE`, and to carry forward the last known
+good value on refresh when the current fetch fails — see that section below.
 
 **Must:**
 - Check `budget` before each of the three calls; skip remaining calls once
@@ -270,7 +389,82 @@ included, REVI/VARA excluded, no birthdate leaked), latest + historical annual
 accounts extracted with correct `reporting_period`, workplaces extracted,
 budget exhaustion skips remaining calls (not already-fetched ones), no calls
 made when the entity wasn't resolved, network failure degrades to no facts
-rather than raising.
+rather than raising, the accounts-state signal is `AVAILABLE` when accounts are
+found, `NOT_AVAILABLE` on a confirmed 404/empty response, and `FAILED` on a
+transport error or exhausted-retry 5xx.
+
+---
+
+## `src/pipeline/discovery.py`
+
+**Responsibility:** find a candidate official-site URL for a company with none
+on file in the registry (~89% of a random sample of the company universe), via
+a search-provider chain (Exa -> Parallel -> DuckDuckGo, each skipped without an
+API key), then independently re-verify that candidate before it's ever trusted.
+
+**Input:** `legal_name: str`, `httpx.Client`, `BudgetGovernor`; provider keys
+passed explicitly (never read from `os.environ` inside this module — see
+`discover_candidate_site`'s docstring for why an explicit `None` must mean
+"provider disabled," not "check the environment").
+
+**Output:** `discover_candidate_site` -> `Optional[str]` (a URL, never itself
+evidence). `verify_discovered_site` -> `Optional[ConfirmedFact]`
+(`field_name="official_site"`, `source_class="external"`,
+`extraction_method="discovery"`).
+
+**Must:**
+- Treat a search hit as a candidate only — never publish it without
+  independently fetching it and clearing the same `NAME_MATCH_THRESHOLD`
+  `verify.py` uses.
+- Reject a candidate whose domain is a known directory/aggregator/government-
+  lookup page (`AGGREGATOR_DOMAIN_BLACKLIST`), client-side, regardless of which
+  provider returned it — **must not** rely solely on a provider's own
+  server-side exclusion feature (real evaluator-adjacent regression, found
+  auditing a real 1,000-company batch: Exa has no exclude-domains parameter at
+  all and is tried first in the chain, so a directory hit sailed through
+  completely unfiltered; only Parallel's request body carried
+  `exclude_domains`, and even that covers Parallel alone). A directory page
+  echoes the target company's exact legal name verbatim, so it trivially
+  clears the name-match threshold — domain filtering is the only thing that
+  actually stops it, not name similarity.
+- Reject a blacklisted domain in `verify_discovered_site` itself too (not just
+  in `_first_webpage_url`), before spending a request — defense in depth for
+  any future call site.
+- Reject a candidate URL that embeds a 9-digit (Norwegian org-number-shaped)
+  sequence different from the entity's own `org_number`, when given —
+  independent-review finding, confirmed against a real 1,000-company batch:
+  org 836296222 ("GRE HOLDING AS") was linked to a page for org 929396855
+  ("GREVE HOLDING AS"). Name-similarity alone cannot reliably catch this:
+  short/generic Norwegian holding-company names score 92-93 under every
+  RapidFuzz metric tested (`partial_ratio`/`token_sort_ratio`/
+  `token_set_ratio`/`WRatio`), all above `NAME_MATCH_THRESHOLD` — switching
+  metrics does not fix this case and was verified to actively regress a
+  different, currently-working case (`"EQUINOR ASA"` vs `"EQUINOR"` drops to
+  77.8 under `token_sort_ratio`, below threshold). The embedded-org-number
+  check is a domain-agnostic signal independent of name similarity entirely,
+  so it also generalizes to a directory site not yet in the blacklist.
+
+**Must not:**
+- Fall back to `os.environ` for a key that was explicitly passed as `None`.
+- Blacklist a domain just because it's shared by multiple entities — a large
+  Norwegian company/federation (OBOS, USBL, Vibbo, Storebrand) can legitimately
+  be the registered site of many entities it manages; that case belongs to
+  `verify()`'s `context_name` check, not this module's blacklist. Only
+  blacklist a domain that is never plausibly one company's own site (a
+  directory, data aggregator, or government lookup page).
+- Change `NAME_MATCH_THRESHOLD` or swap the RapidFuzz metric as a fix for a
+  specific false-positive case without first checking it against the whole
+  test suite's existing near-match cases (see the Equinor regression above) —
+  a metric/threshold change is a gate-risk change per `verify.py`'s own
+  docstring, not a targeted fix for one observed case.
+
+**Tests to write:** provider chain order and fallback, budget respected, network
+failures degrade to `None`, non-webpage results (PDFs, images) skipped, a
+blacklisted domain is skipped by `_first_webpage_url` regardless of which
+provider returned it, `verify_discovered_site` rejects a blacklisted domain
+without spending a request even when the fetched page's name matches exactly,
+a candidate URL embedding a different company's org number is rejected, one
+embedding the entity's own org number (or no org number at all) is unaffected.
 
 ---
 

@@ -224,7 +224,12 @@ def test_default_process_one_uses_sitemap_ats_and_cache_discovery(tmp_path):
         if url == "https://example.com/careers":
             return httpx.Response(200, text=careers_html)
         if url == "https://boards.greenhouse.io/examplecorp":
-            return httpx.Response(200, text="<html>We are hiring: Backend Engineer, Oslo</html>")
+            return httpx.Response(
+                200,
+                text='<html><head><script type="application/ld+json">'
+                '{"@type":"JobPosting","title":"Backend Engineer, Oslo","datePosted":"2026-06-20"}'
+                "</script></head></html>",
+            )
         return httpx.Response(404)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))

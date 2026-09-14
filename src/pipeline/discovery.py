@@ -37,7 +37,6 @@ only." Never hardcode a key or commit one to the repo.
 """
 from __future__ import annotations
 
-import os
 import re
 import time
 from datetime import datetime, timezone
@@ -81,10 +80,50 @@ _NON_WEBPAGE_EXTENSIONS = (
 # and purehelp.no are excluded there for robots.txt/bot-blocking reasons;
 # see LIMITATIONS.md). A "candidate official site" that's actually one of
 # these isn't the company's own site at all.
+#
+# Real-world regression, found auditing a real 1,000-company batch: every
+# domain below appeared in the "official_website" field of multiple wholly
+# unrelated companies (a business directory/accounts-data aggregator lists
+# many companies and echoes each one's exact legal name verbatim, which
+# trivially clears verify_discovered_site's name-match threshold) -- ~40% of
+# all discovered sites in that batch landed on one of these instead of the
+# company's actual site. `virksomhet.brreg.no` and `sgregister.dibk.no` are
+# government registry/approval-lookup pages (same failure mode: a page ABOUT
+# the company, not the company's own site). Deliberately NOT included:
+# large Norwegian companies/federations (obos.no, usbl.no, vibbo.no,
+# storebrand.no) that can legitimately be the registered site of many
+# entities they manage -- that case is handled by verify()'s `context_name`
+# check, not a blacklist, since blacklisting them would incorrectly reject
+# genuine claims.
 AGGREGATOR_DOMAIN_BLACKLIST = [
     "proff.no", "purehelp.no", "gulesider.no", "180.no",
     "facebook.com", "linkedin.com", "wikipedia.org",
+    "rosa.no", "regnskapstall.no", "regnskapsbasen.no", "firmadatabasen.no",
+    "opencompanydatabase.com", "biztrac.no", "io.no", "21st.ai",
+    "virksomhet.brreg.no", "sgregister.dibk.no", "generate.no", "1881.no",
 ]
+
+
+_ORG_NUMBER_RE = re.compile(r"(?<!\d)(\d{9})(?!\d)")
+
+
+def _url_embeds_a_different_org_number(url: str, org_number: Optional[str]) -> bool:
+    """True if `url` contains a 9-digit (Norwegian org-number-shaped)
+    sequence that does NOT match `org_number`. Independent review finding,
+    confirmed against a real 1,000-company batch: a candidate that fuzzy-
+    matches the target company's name can still belong to a DIFFERENT
+    company -- short/generic Norwegian holding-company names ("GRE HOLDING
+    AS" vs "GREVE HOLDING AS") score 92-93 under every RapidFuzz metric
+    tested (partial_ratio/token_sort_ratio/token_set_ratio/WRatio), all
+    above NAME_MATCH_THRESHOLD. The candidate URL itself embedding the OTHER
+    company's real org number is a far more reliable, domain-agnostic
+    signal than any name-similarity metric or threshold tweak -- and unlike
+    a domain blacklist, it generalizes to directory sites not seen yet. A
+    URL with no embedded 9-digit sequence at all (the common case -- most
+    homepages are just a bare domain) is unaffected."""
+    if not org_number:
+        return False
+    return any(match != org_number for match in _ORG_NUMBER_RE.findall(url))
 
 
 def _looks_like_webpage(url: str) -> bool:
@@ -92,10 +131,21 @@ def _looks_like_webpage(url: str) -> bool:
     return not path.endswith(_NON_WEBPAGE_EXTENSIONS)
 
 
+def _is_blacklisted_domain(url: str) -> bool:
+    """True if `url`'s host is (or is a subdomain of) a blacklisted
+    directory/aggregator/government-lookup domain. Suffix-matched, not a
+    plain substring check, so e.g. "io.no" doesn't also match "studio.no",
+    while "stage.purehelp.no" still correctly matches "purehelp.no"."""
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url).netloc.lower().split(":", 1)[0]
+    return any(host == domain or host.endswith("." + domain) for domain in AGGREGATOR_DOMAIN_BLACKLIST)
+
+
 def _first_webpage_url(results: list[dict]) -> Optional[str]:
     for result in results:
         url = result.get("url")
-        if url and _looks_like_webpage(url):
+        if url and _looks_like_webpage(url) and not _is_blacklisted_domain(url):
             return url
     return None
 
@@ -258,12 +308,20 @@ def discover_candidate_site(
 ) -> Optional[str]:
     """One best-effort candidate URL for `legal_name`, tried across the
     provider chain in module-docstring order, or None. Never itself treated
-    as evidence -- see module docstring. `exa_api_key`/`parallel_api_key`
-    default to EXA_API_KEY/PARALLEL_API_KEY from the environment; pass an
-    explicit value (including None) to override for testing."""
-    exa_api_key = exa_api_key if exa_api_key is not None else os.environ.get("EXA_API_KEY")
-    parallel_api_key = parallel_api_key if parallel_api_key is not None else os.environ.get("PARALLEL_API_KEY")
+    as evidence -- see module docstring.
 
+    `exa_api_key`/`parallel_api_key` are used exactly as given -- None means
+    that provider is skipped, full stop. This function deliberately does NOT
+    fall back to os.environ itself: real-world regression, an earlier
+    version treated an explicit None the same as "not provided" and read
+    EXA_API_KEY/PARALLEL_API_KEY from the environment instead, which is
+    invisible in a dev session where a just-`setx`-set var isn't yet
+    inherited by the running process, but silently overrides an explicit
+    "don't use this provider" once it naturally propagates to a fresh
+    session. Reading the environment is the caller's job (see
+    src/orchestrator/runner.py) -- same pattern as `client`/`cache` already
+    being resolved by the caller, not this function.
+    """
     if exa_api_key:
         candidate = _discover_via_exa(legal_name, client, budget, sleep, exa_api_key)
         if candidate:
@@ -284,10 +342,28 @@ def verify_discovered_site(
     budget: BudgetGovernor,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    org_number: Optional[str] = None,
 ) -> Optional[ConfirmedFact]:
     """Independently fetch `url` and confirm it's actually `legal_name`'s
     site (same NAME_MATCH_THRESHOLD as verify.py) before ever treating the
-    discovery hit as real. None on any failure or name mismatch."""
+    discovery hit as real. None on any failure or name mismatch.
+
+    Rejects a blacklisted directory/aggregator/government-lookup domain
+    outright, without spending a request -- defense in depth against any
+    future call site that bypasses `_first_webpage_url`'s own filtering
+    (see AGGREGATOR_DOMAIN_BLACKLIST's docstring for why this matters: those
+    pages echo the exact legal name and would otherwise pass the name-match
+    check below every time).
+
+    Also rejects a URL embedding a DIFFERENT company's org number, when
+    `org_number` (this entity's own) is given -- see
+    `_url_embeds_a_different_org_number`'s docstring for the confirmed
+    real-world case this closes, independent of name-similarity entirely."""
+    if _is_blacklisted_domain(url):
+        return None
+    if _url_embeds_a_different_org_number(url, org_number):
+        return None
+
     if not budget.can_spend_request():
         return None
 

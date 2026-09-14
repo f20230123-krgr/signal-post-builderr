@@ -94,6 +94,52 @@ def test_linked_from_is_carried_through_into_the_claim():
     assert hiring.linked_from == "https://www.equinor.com/careers"
 
 
+def test_duplicate_hiring_signals_from_multiple_pages_are_collapsed_to_one_claim():
+    """Real-world regression, found auditing a real 1,000-company batch: one
+    company's site embedded the same generic JSON-LD JobPosting snippet
+    (title "Careers", no distinguishing detail) on every page of the site --
+    with no dedup, that produced 11+ near-identical "Careers" hiring_signal
+    claims in the published envelope, pure noise rather than 11 real hiring
+    signals. Exact-duplicate (value, reporting_period) facts of the same
+    field must collapse into a single claim, keeping the first one seen."""
+    entity = _entity()
+    facts = [_fact("hiring_signal", "Careers") for _ in range(11)] + [
+        _fact("hiring_signal", "Backend Engineer (posted 2026-06-20)")
+    ]
+
+    profile = assemble(entity, facts, previous_snapshot=None)
+
+    values = [c.value for c in profile.activity.hiring_signals]
+    assert values == ["Careers", "Backend Engineer (posted 2026-06-20)"]
+
+
+def test_duplicate_workplaces_are_collapsed_to_one_claim():
+    entity = _entity()
+    facts = [_fact("workplace", "EXAMPLE AS (OSLO)") for _ in range(3)]
+
+    profile = assemble(entity, facts, previous_snapshot=None)
+
+    assert len(profile.leadership.workplaces) == 1
+
+
+def test_annual_accounts_history_entries_with_the_same_value_but_different_reporting_periods_are_both_kept():
+    """Must not regress the reporting-period-materiality fix: two different
+    filed years can legitimately report an identical figure (e.g. flat
+    revenue) -- deduping by value alone would silently drop a real distinct
+    year's filing, exactly the class of bug already fixed once in
+    diff_material_changes()."""
+    entity = _entity()
+    facts = [
+        _fact("annual_accounts_history", "Revenue: 100,000 NOK", reporting_period="FY2023"),
+        _fact("annual_accounts_history", "Revenue: 100,000 NOK", reporting_period="FY2024"),
+    ]
+
+    profile = assemble(entity, facts, previous_snapshot=None)
+
+    periods = [c.reporting_period for c in profile.annual_accounts.history]
+    assert periods == ["FY2023", "FY2024"]
+
+
 def test_full_data_populates_all_sections():
     entity = _entity()
     facts = [
@@ -211,6 +257,73 @@ def test_refresh_against_unchanged_previous_snapshot_has_no_material_changes():
 
     assert profile.refresh_metadata.is_first_run is False
     assert profile.refresh_metadata.material_changes == []
+
+
+def test_accounts_fetch_failure_carries_forward_the_last_known_value_on_refresh():
+    """Real evaluator feedback: "keep the last known value and mark a failed
+    fetch as a temporary error." A transient accounts-endpoint failure on a
+    refresh run must not blank out a previously-confirmed figure -- the
+    company still has that value on file, we just couldn't re-confirm it
+    this run."""
+    entity = _entity()
+    previous_claim = available_claim(
+        "Revenue: 67,956,000,000 USD",
+        source="https://data.brreg.no/regnskapsregisteret/regnskap/923609016",
+        reporting_period="FY2024",
+    )
+    previous = make_profile(org_number="923609016", annual_latest=previous_claim)
+
+    profile = assemble(
+        entity, confirmed_facts=[], previous_snapshot=previous, accounts_state=EvidenceState.FAILED
+    )
+
+    assert profile.annual_accounts.latest.state == EvidenceState.AVAILABLE
+    assert profile.annual_accounts.latest.value == previous_claim.value
+    assert profile.annual_accounts.latest.reporting_period == "FY2024"
+
+
+def test_accounts_fetch_failure_with_no_prior_value_is_marked_failed():
+    """No last known value to carry forward -- the fetch problem must be
+    reported honestly as FAILED (temporary error), never as NOT_AVAILABLE
+    (which would falsely claim we confirmed the company has no accounts)."""
+    entity = _entity()
+
+    profile = assemble(entity, confirmed_facts=[], previous_snapshot=None, accounts_state=EvidenceState.FAILED)
+
+    assert profile.annual_accounts.latest.state == EvidenceState.FAILED
+    assert profile.annual_accounts.latest.value is None
+
+
+def test_accounts_confirmed_absent_stays_not_available_even_with_a_prior_value():
+    """A confirmed "no accounts filed" this run (accounts_state=NOT_AVAILABLE,
+    e.g. a 404 from regnskapsregisteret) is a different signal from a fetch
+    failure and must NOT trigger carry-forward -- only a FAILED fetch does."""
+    entity = _entity()
+    previous = make_profile(
+        org_number="923609016",
+        annual_latest=available_claim("Revenue: 1,000,000 USD", reporting_period="FY2024"),
+    )
+
+    profile = assemble(
+        entity, confirmed_facts=[], previous_snapshot=previous, accounts_state=EvidenceState.NOT_AVAILABLE
+    )
+
+    assert profile.annual_accounts.latest.state == EvidenceState.NOT_AVAILABLE
+    assert profile.annual_accounts.latest.value is None
+
+
+def test_accounts_state_is_irrelevant_when_a_fresh_fact_was_actually_found():
+    entity = _entity()
+    facts = [_fact("annual_accounts_latest", "Revenue: 70,000,000,000 USD", reporting_period="FY2025")]
+    previous = make_profile(
+        org_number="923609016",
+        annual_latest=available_claim("Revenue: 67,956,000,000 USD", reporting_period="FY2024"),
+    )
+
+    profile = assemble(entity, facts, previous_snapshot=previous, accounts_state=EvidenceState.FAILED)
+
+    assert profile.annual_accounts.latest.value == "Revenue: 70,000,000,000 USD"
+    assert profile.annual_accounts.latest.reporting_period == "FY2025"
 
 
 def test_schema_violation_raises_loudly(monkeypatch):

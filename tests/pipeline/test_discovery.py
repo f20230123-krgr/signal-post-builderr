@@ -178,11 +178,123 @@ def test_verify_discovered_site_handles_too_many_redirects_gracefully():
     assert confirmed is None
 
 
+def test_verify_discovered_site_rejects_a_url_that_embeds_a_different_companys_org_number():
+    """Real-world regression, confirmed in a real 1,000-company batch: org
+    836296222 ("GRE HOLDING AS") was linked to
+    https://21st.ai/en/companies/306155/no/oslo/-/org-number-929396855-greve-holding-as/summary
+    -- a page for a DIFFERENT company, org 929396855 ("GREVE HOLDING AS").
+    Name-similarity alone can't reliably catch this: RapidFuzz scores "GRE
+    HOLDING AS" vs "GREVE HOLDING AS" at 92-93 under every metric tested
+    (partial_ratio, token_sort_ratio, token_set_ratio, WRatio), all above
+    NAME_MATCH_THRESHOLD=90 -- short, generic Norwegian holding-company names
+    are inherently prone to this. But the candidate URL itself embeds the
+    OTHER company's real 9-digit Norwegian org number, which is a much more
+    reliable, domain-agnostic signal (works even on a directory site not yet
+    in AGGREGATOR_DOMAIN_BLACKLIST): if a URL contains a 9-digit sequence
+    that isn't this entity's own org number, it belongs to someone else."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Greve Holding AS"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://21st.ai/en/companies/306155/no/oslo/-/org-number-929396855-greve-holding-as/summary",
+        "GRE HOLDING AS",
+        client,
+        budget,
+        org_number="836296222",
+    )
+
+    assert confirmed is None
+
+
+def test_verify_discovered_site_accepts_a_url_that_embeds_this_companys_own_org_number():
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Equinor ASA"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.equinor.com/about/org-number-923609016",
+        "EQUINOR ASA",
+        client,
+        budget,
+        org_number="923609016",
+    )
+
+    assert confirmed is not None
+
+
+def test_verify_discovered_site_with_no_org_number_mismatch_signal_still_works_as_before():
+    """A candidate URL with no embedded 9-digit number at all (the normal
+    case -- most homepages are just a bare domain) must be unaffected."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Equinor ASA"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site("https://www.equinor.com", "EQUINOR ASA", client, budget, org_number="923609016")
+
+    assert confirmed is not None
+
+
 def test_verify_discovered_site_respects_budget():
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html></html>")))
     budget = BudgetGovernor(BudgetLimits(max_requests=0, max_spend_usd=10, max_wall_clock_seconds=1000))
 
     assert verify_discovered_site("https://equinor.com", "EQUINOR ASA", client, budget) is None
+
+
+def test_1881_no_is_blacklisted():
+    """Real-world regression, found via independent review of a real
+    100-company batch: org 816981522 (BERATO INVEST AS, no site of its own)
+    was attributed 1881.no -- a Norwegian phone/business-directory site --
+    as its official_website, and subsequent crawling of that shared
+    directory domain scraped OTHER, wholly unrelated businesses' own
+    listing pages (ama-trykkluft-as, advokatfellesskapet-drift-as,
+    soermaskin-swt-as, ...) as if they were BERATO INVEST AS's own dated
+    activity. Same directory-domain class as rosa.no/regnskapstall.no."""
+    from src.pipeline.discovery import _is_blacklisted_domain
+
+    assert _is_blacklisted_domain("https://www.1881.no/tlf/example-as/123456789")
+
+
+def test_generate_no_is_blacklisted():
+    """Real-world regression, found auditing a real 1,000-company batch and
+    confirmed against the live Brreg API and the frozen universe file: 88
+    unrelated shell/holding companies (all with NO registered website in
+    either source -- e.g. org 818842422 ARTING EIENDOM AS, hjemmeside=None,
+    universe website="") were all attributed "https://www.generate.no" as
+    their official_website, and it cascaded into repeated duplicate
+    company_profile facts too once the pipeline treated it as that entity's
+    confirmed domain. generate.no lists/manages many unrelated companies
+    (a company-formation/administration service), so it belongs on the same
+    blacklist as rosa.no/21st.ai/etc, not treated as anyone's own site."""
+    from src.pipeline.discovery import _is_blacklisted_domain
+
+    assert _is_blacklisted_domain("https://www.generate.no")
+    assert _is_blacklisted_domain("https://www.generate.no/about")
+
+
+def test_verify_discovered_site_rejects_a_blacklisted_directory_domain_even_when_the_name_matches_exactly():
+    """Real-world regression, found auditing a real 1,000-company batch:
+    business-directory/aggregator pages (e.g. rosa.no, regnskapstall.no,
+    virksomhet.brreg.no -- a government registry lookup page, not the
+    company's own site) always echo the exact legal name verbatim, so they
+    trivially clear NAME_MATCH_THRESHOLD and get published as
+    "official_website" -- ~40% of discovered sites in that batch were one of
+    these, none of them the company's actual site. A directory hit must be
+    rejected on domain alone, before ever spending a request to fetch it."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a blacklisted domain at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.rosa.no/tlf/equinor-asa/923609016", "EQUINOR ASA", client, budget
+    )
+
+    assert confirmed is None
+    assert budget.requests_used == 0
 
 
 # --- Exa (primary provider) ---
@@ -244,6 +356,37 @@ def test_skips_non_webpage_results_like_pdfs():
     assert candidate == "https://example.com/"
 
 
+def test_exa_skips_blacklisted_aggregator_domains_and_falls_through_to_the_next_result():
+    """Real-world regression: unlike Parallel, Exa's request body has no
+    exclude-domains parameter at all, and Exa is tried FIRST in the provider
+    chain -- so a directory/aggregator hit from Exa sailed straight through
+    with zero filtering. _first_webpage_url must reject a blacklisted domain
+    client-side (defense in depth, not dependent on any one provider's own
+    exclusion feature) and try the next result instead."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "requestId": "req-1",
+                "results": [
+                    {"title": "Directory listing", "url": "https://www.rosa.no/tlf/example-as/923609016"},
+                    {"title": "Government registry lookup", "url": "https://virksomhet.brreg.no/nb/oppslag/enheter/923609016"},
+                    {"title": "Homepage", "url": "https://example.no/"},
+                ],
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    candidate = discover_candidate_site(
+        "EXAMPLE AS", client, budget, exa_api_key="fake-exa-key", parallel_api_key=None
+    )
+
+    assert candidate == "https://example.no/"
+
+
 def test_exa_no_results_returns_none():
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_exa_response(None))))
     budget = BudgetGovernor()
@@ -267,6 +410,29 @@ def test_exa_network_failure_does_not_crash():
     )
 
     assert candidate is None
+
+
+def test_explicit_none_key_is_never_overridden_by_the_real_environment(monkeypatch):
+    """Real-world regression: exa_api_key=None must mean "this provider is
+    explicitly disabled," never "not specified, fall back to the real
+    environment." A previous version of discover_candidate_site treated an
+    explicit None the same as "not provided" and silently read os.environ
+    instead -- invisible in a dev session where the env var wasn't yet
+    inherited by the running process, but a real problem once a persistent
+    setx-set key naturally propagates to a fresh session."""
+    monkeypatch.setenv("EXA_API_KEY", "a-real-key-that-must-be-ignored")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, json=_ddg_response(None))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    discover_candidate_site("EQUINOR ASA", client, budget, **_no_keys())
+
+    assert not any("exa.ai" in u for u in calls)
 
 
 def test_exa_skipped_entirely_without_a_key():

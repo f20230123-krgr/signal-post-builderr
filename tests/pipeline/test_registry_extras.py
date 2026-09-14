@@ -59,7 +59,7 @@ def _client_for(org_number: str) -> httpx.Client:
 
 def test_leadership_roles_are_extracted_and_filtered():
     entity = _entity()
-    facts = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("997770234"))
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("997770234"))
 
     leaders = [f for f in facts if f.field_name == "leader"]
     values = {f.value for f in leaders}
@@ -86,7 +86,7 @@ def test_leadership_roles_are_extracted_and_filtered():
 
 def test_annual_accounts_latest_and_history_are_extracted():
     entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
-    facts = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("923609016"))
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("923609016"))
 
     latest = [f for f in facts if f.field_name == "annual_accounts_latest"]
     assert len(latest) == 1
@@ -99,12 +99,70 @@ def test_annual_accounts_latest_and_history_are_extracted():
 
 def test_workplaces_are_extracted():
     entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
-    facts = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("923609016"))
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("923609016"))
 
     workplaces = [f for f in facts if f.field_name == "workplace"]
     assert len(workplaces) > 0
     assert any("SOTRA" in f.value for f in workplaces)
     assert all(f.match_confidence == 100.0 for f in workplaces)
+
+
+def test_workplaces_follow_pagination_across_multiple_pages():
+    """Real evaluator feedback: "the workplace collector reads only the
+    first results page. That missed 116 workplaces across three companies.
+    Follow pagination until there are no more results." Brreg's
+    underenheter endpoint uses real Spring-style pagination (_links.next),
+    confirmed against the live API."""
+    page0 = {
+        "_embedded": {"underenheter": [{"navn": "Workplace A", "beliggenhetsadresse": {"kommune": "OSLO"}}]},
+        "_links": {"next": {"href": "https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet=923609016&page=1"}},
+        "page": {"totalPages": 2},
+    }
+    page1 = {
+        "_embedded": {"underenheter": [{"navn": "Workplace B", "beliggenhetsadresse": {"kommune": "BERGEN"}}]},
+        "_links": {},
+        "page": {"totalPages": 2},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "page=1" in url:
+            return httpx.Response(200, json=page1)
+        if "underenheter" in url:
+            return httpx.Response(200, json=page0)
+        return httpx.Response(404)
+
+    entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=client)
+
+    workplaces = {f.value for f in facts if f.field_name == "workplace"}
+    assert any("Workplace A" in v for v in workplaces)
+    assert any("Workplace B" in v for v in workplaces)
+
+
+def test_workplace_pagination_stops_cleanly_when_budget_runs_out():
+    page0 = {
+        "_embedded": {"underenheter": [{"navn": "Workplace A"}]},
+        "_links": {"next": {"href": "https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet=923609016&page=1"}},
+    }
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, json=page0)
+
+    entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    # 3 requests: roles + accounts + exactly one workplace page, then exhausted
+    budget = BudgetGovernor(BudgetLimits(max_requests=3, max_spend_usd=10, max_wall_clock_seconds=1000))
+
+    facts, _ = fetch_registry_extras(entity, budget, client=client)
+
+    workplace_calls = [c for c in calls if "underenheter" in c]
+    assert len(workplace_calls) == 1  # stopped before following "next"
+    assert any(f.field_name == "workplace" for f in facts)
 
 
 def test_budget_exhausted_skips_remaining_registry_calls():
@@ -113,7 +171,7 @@ def test_budget_exhausted_skips_remaining_registry_calls():
     # calls (roles) should go through; accounts and workplaces are skipped.
     budget = BudgetGovernor(BudgetLimits(max_requests=1, max_spend_usd=10, max_wall_clock_seconds=1000))
 
-    facts = fetch_registry_extras(entity, budget, client=_client_for("923609016"))
+    facts, _ = fetch_registry_extras(entity, budget, client=_client_for("923609016"))
 
     assert any(f.field_name == "leader" for f in facts)
     assert not any(f.field_name.startswith("annual_accounts") for f in facts)
@@ -123,8 +181,9 @@ def test_budget_exhausted_skips_remaining_registry_calls():
 def test_no_facts_when_entity_not_resolved():
     entity = _entity()
     entity.resolution_state = EvidenceState.NOT_AVAILABLE
-    facts = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("997770234"))
+    facts, accounts_state = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("997770234"))
     assert facts == []
+    assert accounts_state == EvidenceState.NOT_AVAILABLE
 
 
 def test_network_failure_degrades_gracefully_to_no_facts():
@@ -133,5 +192,51 @@ def test_network_failure_degrades_gracefully_to_no_facts():
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     entity = _entity()
-    facts = fetch_registry_extras(entity, BudgetGovernor(), client=client, sleep=lambda s: None)
+    facts, accounts_state = fetch_registry_extras(entity, BudgetGovernor(), client=client, sleep=lambda s: None)
     assert facts == []
+    # Real evaluator feedback: "a temporary source error was also recorded as
+    # information being unavailable." A transport failure must be reported
+    # honestly as FAILED, never conflated with a confirmed "no accounts
+    # filed" (NOT_AVAILABLE).
+    assert accounts_state == EvidenceState.FAILED
+
+
+def test_accounts_state_is_available_when_accounts_are_found():
+    entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
+    _, accounts_state = fetch_registry_extras(entity, BudgetGovernor(), client=_client_for("923609016"))
+    assert accounts_state == EvidenceState.AVAILABLE
+
+
+def test_accounts_state_is_not_available_when_registry_confirms_no_accounts_filed():
+    """A 404 from regnskapsregisteret means Brreg genuinely has no accounts on
+    file for this org number (e.g. a newly-formed company) -- a confirmed
+    absence, not a fetch problem, so this must stay NOT_AVAILABLE."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "regnskapsregisteret" in url:
+            return httpx.Response(404)
+        return httpx.Response(404)
+
+    entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    facts, accounts_state = fetch_registry_extras(entity, BudgetGovernor(), client=client)
+
+    assert not any(f.field_name.startswith("annual_accounts") for f in facts)
+    assert accounts_state == EvidenceState.NOT_AVAILABLE
+
+
+def test_accounts_state_is_failed_when_the_accounts_endpoint_returns_a_server_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "regnskapsregisteret" in url:
+            return httpx.Response(503)
+        return httpx.Response(404)
+
+    entity = _entity(org_number="923609016", legal_name="EQUINOR ASA")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    facts, accounts_state = fetch_registry_extras(entity, BudgetGovernor(), client=client, sleep=lambda s: None)
+
+    assert not any(f.field_name.startswith("annual_accounts") for f in facts)
+    assert accounts_state == EvidenceState.FAILED

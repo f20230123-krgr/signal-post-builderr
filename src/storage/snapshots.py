@@ -63,8 +63,17 @@ def diff_material_changes(
 
     old_latest = _normalized(previous.annual_accounts.latest.value)
     new_latest = _normalized(new.annual_accounts.latest.value)
+    old_period = previous.annual_accounts.latest.reporting_period
+    new_period = new.annual_accounts.latest.reporting_period
     if old_latest != new_latest:
         changes.append(f"annual_accounts.latest: {old_latest!r} -> {new_latest!r}")
+    elif old_period != new_period and (old_period is not None or new_period is not None):
+        # A new filing can report an identical figure to the prior year --
+        # still new information (real evaluator feedback: "a new financial
+        # reporting period was missed when the amount stayed the same").
+        # Compared separately from the value so this can't be masked by the
+        # value-equality check above.
+        changes.append(f"annual_accounts.latest reporting_period: {old_period!r} -> {new_period!r}")
 
     old_leaders = _claim_values(previous.leadership.leaders)
     new_leaders = _claim_values(new.leadership.leaders)

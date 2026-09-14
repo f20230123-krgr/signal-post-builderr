@@ -61,6 +61,14 @@ def _client_for(org_number: str) -> httpx.Client:
             return _respond(regnskap_fixture)
         if underenheter_fixture and url == f"https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org_number}":
             return _respond(underenheter_fixture)
+        # Real fixture data for 923609016 has genuine pagination
+        # (_links.next) -- only page 0 was recorded, so any further
+        # underenheter page must 404 like a real "no more data" response,
+        # never fall through to the HTML-page fixture below (which caused a
+        # JSONDecodeError: registry_extras.py tried to parse an HTML page as
+        # the next JSON page).
+        if "underenheter" in url:
+            return httpx.Response(404)
         if page_html is not None:
             return httpx.Response(200, text=page_html)
         return httpx.Response(404)
@@ -74,6 +82,7 @@ def _process(org_number: str):
 
     raw_facts = []
     confirmed = []
+    accounts_state = EvidenceState.NOT_AVAILABLE
     if entity.resolution_state == EvidenceState.AVAILABLE:
         budget = BudgetGovernor(BudgetLimits(max_requests=20, max_spend_usd=10, max_wall_clock_seconds=60))
         # The mocked page is served at the entity's own resolved domain, so
@@ -83,9 +92,10 @@ def _process(org_number: str):
             if page.fetch_state == EvidenceState.AVAILABLE:
                 raw_facts.extend(extract(page))
         confirmed = [c for c in (verify(f, entity) for f in raw_facts) if c is not None]
-        confirmed += fetch_registry_extras(entity, budget, client=client)
+        registry_facts, accounts_state = fetch_registry_extras(entity, budget, client=client)
+        confirmed += registry_facts
 
-    return assemble(entity, confirmed, previous_snapshot=None)
+    return assemble(entity, confirmed, previous_snapshot=None, accounts_state=accounts_state)
 
 
 def _all_claims(profile):

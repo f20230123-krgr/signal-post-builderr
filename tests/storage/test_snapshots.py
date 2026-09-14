@@ -85,3 +85,27 @@ def test_diffing_detects_hiring_signal_added():
 def test_diffing_against_no_previous_snapshot_is_empty():
     new = make_profile(legal_name=available_claim("Some AS"))
     assert diff_material_changes(None, new) == []
+
+
+def test_diffing_detects_a_new_reporting_period_even_when_the_amount_is_unchanged():
+    """Real evaluator feedback: "a new financial reporting period was missed
+    when the amount stayed the same." A company can file a new year's accounts
+    that happen to report an identical revenue/net-result figure -- that's
+    still new information (a new filing exists) and must not be silently
+    dropped just because diffing only compared the formatted value string."""
+    previous = make_profile(
+        annual_latest=available_claim("Revenue: 100,000 NOK", reporting_period="FY2024")
+    )
+    new = make_profile(
+        annual_latest=available_claim("Revenue: 100,000 NOK", reporting_period="FY2025")
+    )
+
+    changes = diff_material_changes(previous, new)
+    assert any("annual_accounts.latest" in c and "FY2024" in c and "FY2025" in c for c in changes)
+
+
+def test_diffing_does_not_flag_a_reporting_period_change_when_both_are_none():
+    previous = make_profile(annual_latest=available_claim("Revenue: 100,000 NOK"))
+    new = make_profile(annual_latest=available_claim("Revenue: 100,000 NOK"))
+
+    assert diff_material_changes(previous, new) == []

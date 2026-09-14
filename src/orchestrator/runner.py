@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -84,14 +85,29 @@ def _default_process_one(
         and entity.legal_name is not None
     ):
         # No website on file in the registry (~89% of a random universe
-        # sample) -- try free, no-key candidate discovery. Never trusted on
-        # its own: verify_discovered_site independently re-fetches and
-        # name-matches before anything is accepted. See discovery.py.
+        # sample) -- try candidate discovery. Never trusted on its own:
+        # verify_discovered_site independently re-fetches and name-matches
+        # before anything is accepted. See discovery.py.
+        #
+        # Reading EXA_API_KEY/PARALLEL_API_KEY here, not inside discovery.py
+        # itself, is deliberate -- per the evaluation-harness brief,
+        # "server-side secrets supplied through documented environment
+        # variables only." discovery.py stays a pure function of its
+        # explicit inputs (same pattern as client/cache above); this is the
+        # one place that resolves them from the environment.
         real_client = client or httpx.Client()
         try:
-            candidate = discover_candidate_site(entity.legal_name, real_client, budget)
+            candidate = discover_candidate_site(
+                entity.legal_name,
+                real_client,
+                budget,
+                exa_api_key=os.environ.get("EXA_API_KEY"),
+                parallel_api_key=os.environ.get("PARALLEL_API_KEY"),
+            )
             if candidate:
-                discovered_site_fact = verify_discovered_site(candidate, entity.legal_name, real_client, budget, now=now)
+                discovered_site_fact = verify_discovered_site(
+                    candidate, entity.legal_name, real_client, budget, now=now, org_number=entity.org_number
+                )
         finally:
             if client is None:
                 real_client.close()
@@ -128,8 +144,9 @@ def _default_process_one(
         confirmed_facts.append(discovered_site_fact)
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
-    confirmed_facts += fetch_registry_extras(entity, budget, client=client)
-    return assemble(entity, confirmed_facts, previous_snapshot, now=now)
+    registry_facts, accounts_state = fetch_registry_extras(entity, budget, client=client)
+    confirmed_facts += registry_facts
+    return assemble(entity, confirmed_facts, previous_snapshot, accounts_state=accounts_state, now=now)
 
 
 async def run_batch(

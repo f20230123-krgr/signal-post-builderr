@@ -12,6 +12,12 @@ deduplicated `evidence` list, alongside `run`/`changes`/`errors`/`operations`.
 This module converts one to the other so the SUBMITTED JSONL matches what the
 evaluator almost certainly parses, without throwing away the internal model's
 correctness guarantees.
+
+Also embeds src/synthesis.py's templated business-question answers under
+"answers" -- real gap found chasing a "decision-useful synthesis" score of
+0/10: those answers used to be consumed only by src/reporting.py's separate
+report.html, which never leaves the machine that generated it. envelopes.jsonl
+is the artifact actually submitted, so the answers must be embedded here too.
 """
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
+from src.synthesis import answer_business_questions
 
 _ERROR_STATES = {EvidenceState.FAILED, EvidenceState.BLOCKED}
 
@@ -121,4 +128,10 @@ def to_envelope(
         "changes": list(profile.refresh_metadata.material_changes),
         "errors": errors,
         "operations": operations,
+        # Real gap found chasing a "decision-useful synthesis" score of 0/10:
+        # src/synthesis.py's templated business-question answers were only
+        # ever consumed by src/reporting.py's separate report.html, which
+        # never leaves the machine that generated it. envelopes.jsonl is the
+        # actual submitted artifact, so the answers must live here too.
+        "answers": answer_business_questions(profile),
     }

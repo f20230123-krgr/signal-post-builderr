@@ -64,6 +64,12 @@ or adds/removes a `hiring_signal`. Whitespace/formatting differences in scraped
 text, or a re-fetch of an unchanged page with a new `retrieved_at` timestamp,
 are not material changes on their own.
 
+`annual_accounts.latest`'s `reporting_period` is compared separately from its
+`value` (real evaluator feedback: "a new financial reporting period was missed
+when the amount stayed the same") — a new filing that happens to report an
+identical figure to the prior year is still material, since a new filing
+existing at all is itself the fact worth surfacing.
+
 ## Fixtures policy
 
 `fixtures/` holds: 2-3 raw HTML snapshots per test company (official site +

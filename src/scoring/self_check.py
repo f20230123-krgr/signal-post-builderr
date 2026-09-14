@@ -102,8 +102,9 @@ def _default_process_company(org_number: str) -> CompanyProfile:
             if page.fetch_state == EvidenceState.AVAILABLE:
                 raw_facts.extend(extract(page))
     confirmed = [c for c in (verify(f, entity) for f in raw_facts) if c is not None]
-    confirmed += fetch_registry_extras(entity, budget)
-    return assemble(entity, confirmed, previous_snapshot=None)
+    registry_facts, accounts_state = fetch_registry_extras(entity, budget)
+    confirmed += registry_facts
+    return assemble(entity, confirmed, previous_snapshot=None, accounts_state=accounts_state)
 
 
 def run_self_check(

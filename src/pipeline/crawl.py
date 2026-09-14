@@ -206,6 +206,17 @@ def _parse_robots_disallow(robots_txt: str) -> tuple[set[str], list[str]]:
 
 def _is_priority_sitemap_url(url: str) -> bool:
     path = urlsplit(url).path.lower()
+    # A <loc> entry ending in .xml is always itself another sitemap file
+    # (e.g. a sitemap index pointing at "/sitemap/news/sitemap.xml"), never
+    # a real content page -- real-world regression, found auditing a real
+    # 100-company batch: "news" is a priority keyword, so that nested
+    # sitemap URL was crawled and extract()'d as if it were an HTML page.
+    # With no HTML block tags to split on, its raw XML (hundreds of
+    # concatenated <loc>/<lastmod> pairs) became a single giant garbage
+    # dated_activity fact. Must be excluded before the keyword check, not
+    # after -- a real page's path essentially never ends in .xml.
+    if path.endswith(".xml"):
+        return False
     return any(keyword in path for keyword in SITEMAP_PRIORITY_KEYWORDS)
 
 

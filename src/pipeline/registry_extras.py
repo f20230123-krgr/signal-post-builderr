@@ -146,15 +146,27 @@ def _reporting_period(entry: dict) -> Optional[str]:
 
 def _accounts_facts(
     entity: ResolvedEntity, client: httpx.Client, sleep: Callable[[float], None], now: datetime
-) -> list[ConfirmedFact]:
+) -> tuple[list[ConfirmedFact], EvidenceState]:
+    """Returns (facts, state) instead of a bare list -- real evaluator
+    feedback: "a temporary source error was also recorded as information
+    being unavailable." A transport failure or exhausted-retry 5xx must be
+    distinguishable from Brreg genuinely having no accounts on file (404, or
+    a 200 with an empty list), so the caller (assemble.py) can honestly mark
+    a fetch problem as FAILED rather than a confirmed NOT_AVAILABLE, and can
+    optionally carry forward the last known good value on refresh."""
     url = ACCOUNTS_URL.format(org=entity.org_number)
     response = _get(client, url, sleep)
-    if response is None or response.status_code != 200:
-        return []
+
+    if response is None or response.status_code >= 500:
+        return [], EvidenceState.FAILED
+    if response.status_code == 404:
+        return [], EvidenceState.NOT_AVAILABLE
+    if response.status_code != 200:
+        return [], EvidenceState.FAILED
 
     entries = response.json()
     if not isinstance(entries, list) or not entries:
-        return []
+        return [], EvidenceState.NOT_AVAILABLE
 
     content_hash = _content_hash(response)
     entries = sorted(entries, key=lambda e: (e.get("regnskapsperiode") or {}).get("tilDato") or "", reverse=True)
@@ -172,7 +184,7 @@ def _accounts_facts(
                 content_hash=content_hash, extraction_method="registry", source_class="official_registry",
             )
         )
-    return facts
+    return facts, (EvidenceState.AVAILABLE if facts else EvidenceState.NOT_AVAILABLE)
 
 
 def _workplace_value(entry: dict) -> Optional[str]:
@@ -187,29 +199,48 @@ def _workplace_value(entry: dict) -> Optional[str]:
 
 
 def _workplace_facts(
-    entity: ResolvedEntity, client: httpx.Client, sleep: Callable[[float], None], now: datetime
+    entity: ResolvedEntity,
+    client: httpx.Client,
+    sleep: Callable[[float], None],
+    now: datetime,
+    budget: BudgetGovernor,
 ) -> list[ConfirmedFact]:
-    url = SUBUNITS_URL.format(org=entity.org_number)
-    response = _get(client, url, sleep)
-    if response is None or response.status_code != 200:
-        return []
+    """Follows Brreg's own pagination (`_links.next`, confirmed against the
+    live API to be real Spring-style paging) until there are no more pages.
+    Real evaluator feedback: reading only the first page missed 116
+    workplaces across three companies in the submitted batch. Each
+    additional page is its own budget-gated request, same as any other
+    outbound call -- stops cleanly (partial results kept) if the budget
+    runs out mid-pagination, never fetches indefinitely."""
+    url: Optional[str] = SUBUNITS_URL.format(org=entity.org_number)
+    facts: list[ConfirmedFact] = []
 
-    body = response.json()
-    content_hash = _content_hash(response)
-    entries = (body.get("_embedded") or {}).get("underenheter", [])
+    while url is not None:
+        if not budget.can_spend_request():
+            break
+        response = _get(client, url, sleep)
+        budget.record_request()
+        if response is None or response.status_code != 200:
+            break
 
-    facts = []
-    for entry in entries:
-        value = _workplace_value(entry)
-        if not value:
-            continue
-        source_url = (entry.get("_links") or {}).get("self", {}).get("href", url)
-        facts.append(
-            ConfirmedFact(
-                "workplace", value, source_url, 100.0, now,
-                content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+        body = response.json()
+        content_hash = _content_hash(response)
+        entries = (body.get("_embedded") or {}).get("underenheter", [])
+
+        for entry in entries:
+            value = _workplace_value(entry)
+            if not value:
+                continue
+            source_url = (entry.get("_links") or {}).get("self", {}).get("href", url)
+            facts.append(
+                ConfirmedFact(
+                    "workplace", value, source_url, 100.0, now,
+                    content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+                )
             )
-        )
+
+        url = (body.get("_links") or {}).get("next", {}).get("href")
+
     return facts
 
 
@@ -219,32 +250,42 @@ def fetch_registry_extras(
     client: Optional[httpx.Client] = None,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-) -> list[ConfirmedFact]:
+) -> tuple[list[ConfirmedFact], EvidenceState]:
     """
     Fetch leadership roles, filed annual accounts, and registered sub-units
     for `entity` from Brreg's own endpoints, gated by `budget` like any other
-    outbound request. Returns [] if the entity wasn't resolved, if the
-    budget is exhausted before a given call, or if that endpoint has no data
-    for this company (e.g. a newly-formed company with no filed accounts yet)
-    -- never fabricated, never raises on a missing/failed endpoint.
+    outbound request. Returns ([], NOT_AVAILABLE) if the entity wasn't
+    resolved or the budget ran out before the accounts call was even
+    attempted -- never fabricated, never raises on a missing/failed endpoint.
+
+    The second return value is specifically the annual-accounts fetch
+    outcome (AVAILABLE/NOT_AVAILABLE/FAILED) -- assemble.py needs this to
+    distinguish "Brreg confirms no accounts filed" from "the call failed",
+    which a plain fact list can't express since both look like "no facts".
     """
     if entity.resolution_state != EvidenceState.AVAILABLE:
-        return []
+        return [], EvidenceState.NOT_AVAILABLE
 
     owns_client = client is None
     client = client or httpx.Client()
     retrieved_at = now()
 
-    fetchers = (_leadership_facts, _accounts_facts, _workplace_facts)
     facts: list[ConfirmedFact] = []
+    accounts_state = EvidenceState.NOT_AVAILABLE
     try:
-        for fetcher in fetchers:
-            if not budget.can_spend_request():
-                break
-            new_facts = fetcher(entity, client, sleep, retrieved_at)
-            budget.record_request()
-            facts.extend(new_facts)
-        return facts
+        if not budget.can_spend_request():
+            return facts, accounts_state
+        facts.extend(_leadership_facts(entity, client, sleep, retrieved_at))
+        budget.record_request()
+
+        if not budget.can_spend_request():
+            return facts, accounts_state
+        accounts_facts, accounts_state = _accounts_facts(entity, client, sleep, retrieved_at)
+        budget.record_request()
+        facts.extend(accounts_facts)
+
+        facts.extend(_workplace_facts(entity, client, sleep, retrieved_at, budget))
+        return facts, accounts_state
     finally:
         if owns_client:
             client.close()

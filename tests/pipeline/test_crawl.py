@@ -331,6 +331,42 @@ def test_sitemap_discovery_adds_priority_pages():
     assert "https://example.com/blog/post-1" not in urls
 
 
+def test_sitemap_discovery_never_treats_a_nested_sitemap_as_a_content_page():
+    """Real-world regression, found auditing a real 100-company batch: a
+    sitemap index's own <loc> entries can point at OTHER sitemap files (e.g.
+    "/sitemap/news/sitemap.xml"), not just real content pages. "news" is a
+    priority keyword, so that nested sitemap URL was being crawled and
+    extract()'d as if it were a normal HTML page -- with no HTML block tags
+    to split on, its raw XML (hundreds of concatenated <loc>/<lastmod>
+    pairs) became a single giant garbage "dated_activity" fact. A URL whose
+    path ends in .xml is always itself a sitemap, never a content page --
+    must never be added to the discovered page list, regardless of whether
+    it also happens to match a priority keyword."""
+    sitemap_xml = """<?xml version="1.0"?>
+    <urlset>
+      <url><loc>https://example.com/news</loc></url>
+      <url><loc>https://example.com/sitemap/news/sitemap.xml</loc></url>
+    </urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://example.com/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow:\n")
+        if url == "https://example.com/sitemap.xml":
+            return httpx.Response(200, text=sitemap_xml)
+        return httpx.Response(200, text="<html>page content here, plenty of text</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    entity = _entity("https://example.com/")
+
+    pages = crawl(entity, budget, client=client, use_sitemap=True, allowed_domains=set())
+
+    urls = {p.url for p in pages}
+    assert "https://example.com/news" in urls
+    assert "https://example.com/sitemap/news/sitemap.xml" not in urls
+
+
 def test_robots_txt_disallow_is_respected(caplog):
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)

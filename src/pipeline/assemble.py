@@ -127,10 +127,34 @@ def _all_matching(facts: list[ConfirmedFact], field_name: str) -> list[Confirmed
     return [f for f in facts if f.field_name == field_name]
 
 
+def _dedup_claims(claims: list[Claim]) -> list[Claim]:
+    """Collapse exact-duplicate claims (same value AND same reporting_period)
+    into the first one seen, keeping order.
+
+    Real-world regression, found auditing a real 1,000-company batch: a site
+    that embeds the same generic JSON-LD JobPosting snippet on every page
+    produced 11+ near-identical "Careers" hiring_signal claims for one
+    company -- noise, not 11 real signals. Keyed on (value, reporting_period)
+    rather than value alone so this never regresses the reporting-period
+    materiality fix: two different filed years can legitimately report an
+    identical figure, and that must NOT collapse into one claim.
+    """
+    seen: set[tuple[str, Optional[str]]] = set()
+    deduped: list[Claim] = []
+    for claim in claims:
+        key = (claim.value, claim.reporting_period)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(claim)
+    return deduped
+
+
 def assemble(
     entity: ResolvedEntity,
     confirmed_facts: list[ConfirmedFact],
     previous_snapshot: Optional[CompanyProfile],
+    accounts_state: EvidenceState = EvidenceState.NOT_AVAILABLE,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> CompanyProfile:
     """
@@ -146,20 +170,45 @@ def assemble(
     brand_fact = _first_matching(confirmed_facts, "organization_name")
     public_brand_claim = _confirmed_claim(brand_fact) if brand_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)
 
-    leader_claims = [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "leader")]
-    company_profile_claims = [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "company_profile")]
-    hiring_claims = [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")]
-    dated_activity_claims = [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")]
-    workplace_claims = [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "workplace")]
-    annual_history_claims = [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "annual_accounts_history")]
+    leader_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "leader")])
+    company_profile_claims = _dedup_claims(
+        [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "company_profile")]
+    )
+    hiring_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
+    dated_activity_claims = _dedup_claims(
+        [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")]
+    )
+    workplace_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "workplace")])
+    annual_history_claims = _dedup_claims(
+        [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "annual_accounts_history")]
+    )
 
     # src/pipeline/registry_extras.py wires these from Brreg's own accounts
     # endpoint when available; honestly NOT_AVAILABLE otherwise, never
     # fabricated (see module docstring).
+    #
+    # `accounts_state` (from fetch_registry_extras) distinguishes a
+    # transient fetch problem from a confirmed "no accounts filed" -- real
+    # evaluator feedback: "a temporary source error was also recorded as
+    # information being unavailable. Compare reporting periods separately;
+    # keep the last known value and mark a failed fetch as a temporary
+    # error." A fresh fact always wins outright. Otherwise: a FAILED fetch
+    # carries forward the last known good value from the prior snapshot when
+    # one exists (still true, just unconfirmed this run); with nothing to
+    # carry forward it's reported as FAILED, not NOT_AVAILABLE. A confirmed
+    # absence (accounts_state == NOT_AVAILABLE, e.g. a 404) is never carried
+    # forward -- that's a different, current-run-confirmed signal.
     latest_accounts_fact = _first_matching(confirmed_facts, "annual_accounts_latest")
-    annual_latest_claim = (
-        _confirmed_claim(latest_accounts_fact) if latest_accounts_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)
-    )
+    if latest_accounts_fact:
+        annual_latest_claim = _confirmed_claim(latest_accounts_fact)
+    elif accounts_state == EvidenceState.FAILED:
+        previous_latest = previous_snapshot.annual_accounts.latest if previous_snapshot else None
+        if previous_latest is not None and previous_latest.state == EvidenceState.AVAILABLE:
+            annual_latest_claim = previous_latest
+        else:
+            annual_latest_claim = _unavailable_claim(EvidenceState.FAILED)
+    else:
+        annual_latest_claim = _unavailable_claim(EvidenceState.NOT_AVAILABLE)
 
     legal_identity = LegalIdentity(legal_name=legal_name_claim, public_brand=public_brand_claim)
     annual_accounts = AnnualAccounts(latest=annual_latest_claim, history=annual_history_claims)
