@@ -86,6 +86,74 @@ def _changes_answer(profile: CompanyProfile) -> dict:
     return _answer("What has changed since the last run?", "; ".join(meta.material_changes), EvidenceState.AVAILABLE)
 
 
+def _optional_value(claim) -> str | None:
+    """Value of an optional identity Claim, or None when the claim isn't
+    present at all (company outside Builderr's universe manifest) or isn't
+    AVAILABLE. Never guesses a stand-in."""
+    if claim is None:
+        return None
+    return _value_or_none(claim)
+
+
+def _business_answer(profile: CompanyProfile) -> dict:
+    """What the company actually does, plus how big it is -- the two things
+    a job seeker or a BD rep asks first. Both come free from the registry
+    record (registry_extras.universe_identity_facts), so this costs nothing
+    beyond the templating."""
+    industry = _optional_value(profile.legal_identity.industry)
+    employees = _optional_value(profile.legal_identity.employee_count)
+
+    if industry is None and employees is None:
+        return _answer(
+            "What does the company do, and how big is it?",
+            "No registered industry or employee count available.",
+            EvidenceState.NOT_AVAILABLE,
+        )
+
+    parts = []
+    if industry:
+        parts.append(f"Registered industry: {industry}")
+    if employees:
+        parts.append(f"{employees} registered employees")
+    return _answer("What does the company do, and how big is it?", "; ".join(parts), EvidenceState.AVAILABLE)
+
+
+def _status_answer(profile: CompanyProfile) -> dict:
+    """Whether the entity is actually operating -- the single most
+    decision-relevant fact for an investor or a job seeker, and one the
+    registry answers definitively (bankrupt / in liquidation / active)."""
+    status = _optional_value(profile.legal_identity.operating_status)
+    legal_form = _optional_value(profile.legal_identity.legal_form)
+
+    if status is None:
+        return _answer(
+            "Is the company still operating?", "No registered operating status available.", EvidenceState.NOT_AVAILABLE
+        )
+    text = f"{status}" + (f" ({legal_form})" if legal_form else "")
+    return _answer("Is the company still operating?", text, EvidenceState.AVAILABLE)
+
+
+def _founded_answer(profile: CompanyProfile) -> dict:
+    """How long the company has existed -- a basic trust signal for anyone
+    evaluating an employer, a partner or an investment."""
+    founded = _optional_value(profile.legal_identity.founded_date)
+    if founded is None:
+        return _answer("When was the company founded?", "No founding date available.", EvidenceState.NOT_AVAILABLE)
+    return _answer("When was the company founded?", f"Founded {founded}", EvidenceState.AVAILABLE)
+
+
+def _recent_activity_answer(profile: CompanyProfile) -> dict:
+    """Most recent dated public activity. With registry update events now
+    feeding dated_activity, this is answerable even for the ~89% of
+    companies that have no website at all."""
+    activity = _list_values(profile.activity.dated_activity)
+    if not activity:
+        return _answer(
+            "What is the most recent public activity?", "No dated public activity found.", EvidenceState.NOT_AVAILABLE
+        )
+    return _answer("What is the most recent public activity?", activity[0], EvidenceState.AVAILABLE)
+
+
 def answer_business_questions(profile: CompanyProfile) -> list[dict]:
     """Fixed set of business questions, each answered strictly from Claims
     already in `profile` -- see module docstring. Returns a list of
@@ -93,10 +161,14 @@ def answer_business_questions(profile: CompanyProfile) -> list[dict]:
     order."""
     return [
         _identity_answer(profile),
+        _business_answer(profile),
+        _status_answer(profile),
+        _founded_answer(profile),
         _website_answer(profile),
         _leadership_answer(profile),
         _hiring_answer(profile),
         _accounts_answer(profile),
         _workplaces_answer(profile),
+        _recent_activity_answer(profile),
         _changes_answer(profile),
     ]

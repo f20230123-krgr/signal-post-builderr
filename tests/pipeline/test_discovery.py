@@ -20,9 +20,17 @@ can never make a test flaky.
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
-from src.pipeline.discovery import MAX_FETCH_RETRIES, discover_candidate_site, strip_leader_role_title, verify_discovered_site
+from src.pipeline.discovery import (
+    MAX_FETCH_RETRIES,
+    ProviderHealth,
+    check_provider_keys,
+    discover_candidate_site,
+    strip_leader_role_title,
+    verify_discovered_site,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -295,6 +303,241 @@ def test_verify_discovered_site_rejects_a_blacklisted_directory_domain_even_when
 
     assert confirmed is None
     assert budget.requests_used == 0
+
+
+def test_verify_discovered_site_rejects_prospeo_lead_gen_aggregator():
+    """Real-world regression, found running a genuinely unseen 100-company
+    batch (org numbers not in the submitted entry-companies.jsonl, sampled
+    from companies the universe file lists with no website on file --
+    the hardest discovery case). Exa returned
+    https://prospeo.io/c/sykkelkomponenter-no-revenue for "SYKKELKOMPONENTER
+    AS" -- confirmed live (browser fetch) to be a B2B contact/lead-gen
+    company-database page ("Sykkelkomponenter.no Revenue, Funding &
+    Valuation"), not the company's own site. It genuinely is about the
+    right company (so name-match alone would accept it), which is exactly
+    why a domain blacklist -- not a name/identity check -- is the correct
+    layer to reject it at."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a blacklisted domain at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://prospeo.io/c/sykkelkomponenter-no-revenue", "SYKKELKOMPONENTER AS", client, budget
+    )
+
+    assert confirmed is None
+    assert budget.requests_used == 0
+
+
+def test_verify_discovered_site_rejects_a_nav_job_posting_as_an_official_site():
+    """Real-world regression, found in a fourth re-run of the same general
+    unseen batch: Exa returned
+    https://arbeidsplassen.nav.no/stillinger/stilling/1e484d11-0782-4b10-8e9f-221658d4a745
+    for "TEMPTATION RESTAURANT AS" -- confirmed live to be a specific NAV
+    (Norway's labor/welfare directorate) job posting ("Erfaren à la
+    carte-kokk søkes..."), not the restaurant's own site."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a blacklisted domain at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://arbeidsplassen.nav.no/stillinger/stilling/1e484d11-0782-4b10-8e9f-221658d4a745",
+        "TEMPTATION RESTAURANT AS", client, budget,
+    )
+
+    assert confirmed is None
+    assert budget.requests_used == 0
+
+
+def test_verify_discovered_site_rejects_a_generic_directory_listing_url_shape():
+    """Real-world regression, found re-running the same batch a third time:
+    ipqwery.com (an IP/trademark database, "ipowner/en/owner/profile/...")
+    and pappers.no (a French company-registry aggregator's Norwegian arm,
+    "company/<name>-<org-number>") were both new, previously-unseen domains
+    -- yet every confirmed aggregator/directory found across three separate
+    unseen batches this session shares one structural trait: a generic
+    "listing/profile" word as its OWN url path segment (company, bedrift,
+    selskap, firma, owner, profile, ...). A real company's own homepage
+    essentially never structures its URL this way. This is a domain-agnostic
+    defense-in-depth -- it would have caught most of the domain-specific
+    blacklist entries above even before they were individually identified,
+    and should catch the next one not yet seen."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a directory-shaped URL at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    assert verify_discovered_site(
+        "https://www.ipqwery.com/ipowner/en/owner/profile/1800975-seastate-7-as.html",
+        "SEASTATE 7 AS", client, budget,
+    ) is None
+    assert verify_discovered_site(
+        "https://www.pappers.no/company/tibtek-as-928649628", "TIBTEK AS", client, budget
+    ) is None
+    assert budget.requests_used == 0
+
+
+def test_verify_discovered_site_directory_path_check_does_not_reject_real_sites():
+    """Guards against over-rejection: a real company's own '/about'-style
+    page, a housing co-op's own slug on its manager's platform, and the
+    existing org-number-in-path positive-control test must all still pass."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Equinor ASA"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    assert verify_discovered_site(
+        "https://www.equinor.com/about/org-number-923609016", "EQUINOR ASA", client, budget, org_number="923609016"
+    ) is not None
+
+
+def test_verify_discovered_site_rejects_the_second_wave_of_confirmed_aggregators():
+    """Real-world regression: re-running the same general unseen 100-company
+    batch (live discovery results are not deterministic run-to-run) surfaced
+    14 more real aggregator/lead-gen/SaaS-profile-page hits not caught by
+    the blacklist at the time, each confirmed live before being added -- see
+    AGGREGATOR_DOMAIN_BLACKLIST's docstring for what each one actually is.
+    The same URL (opplysning.byndle.no) was returned as the "official site"
+    for four different companies in one run -- the clearest possible signal
+    it's a directory, not anyone's own site."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a blacklisted domain at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    second_wave_domains = [
+        ("https://opplysning.byndle.no", "TORES TRANSPORT AS"),
+        ("https://nyeselskaper.no/companies/69342306-d17b-4da4-9dd0-9566007671a9", "TOMTEVEIEN 51 A AS"),
+        ("https://allebedrifter.no/companies/58e259ae-81b9-422e-b7ed-aea4aae1e666", "KOPPERUDS AS"),
+        ("https://www.1850.no/bedrifter/annet/annet/oslo/oslo/tibtek-as-928649628", "TIBTEK AS"),
+        ("https://flowfirma.no/firma/handverker-jan-erik-moxness-hjem-as-914826098", "HANDVERKER JAN-ERIK MOXNESS, HJEM AS"),
+        ("https://haandverkerportalen.no/bedrift/byggmester-atle-fjaereide-as-915709818", "BYGGMESTER ATLE FJAEREIDE AS"),
+        ("https://mittanbud.no/bedrift/9231606", "BYGGMESTER AKERSVEEN AS"),
+        ("https://eiendomssjekk.no/bedrift/933303586", "M-DRIFT AS"),
+        ("https://www.fagfolkguiden.no/bedrift/j-m-transport-as-991565086", "J.M TRANSPORT AS"),
+        ("https://firmview.no/company/926544063", "KIKO INVEST AS"),
+        ("https://www.vexter.no/selskap/selo-holding-as/923185283", "SELO HOLDING AS"),
+        ("https://agama.no/bedrift/behr-invest-as-998178924", "BEHR INVEST AS"),
+        ("https://elinnweb.no/1437/about", "NIKOLAISEN ELEKTRO AS"),
+        ("https://thehub.io/startups/seastate-7", "SEASTATE 7 AS"),
+        ("https://stipendportalen.no", "STIFTELSEN STAVANGER HAVNEMISJON"),
+    ]
+    for url, legal_name in second_wave_domains:
+        assert verify_discovered_site(url, legal_name, client, budget) is None, url
+    assert budget.requests_used == 0
+
+
+def test_verify_discovered_site_rejects_northdata_and_merinfo_aggregators():
+    """Real-world regression, found running a general (not website-filtered)
+    unseen 100-company batch: northdata.com ("North Data Smart Research", a
+    European company-research aggregator) and merinfo.no (a Norwegian
+    business-lookup directory) were both discovered and would have passed
+    name-matching (they legitimately are about the right company), which is
+    exactly why the domain blacklist -- not name similarity -- is the right
+    layer to reject them at."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a blacklisted domain at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    assert verify_discovered_site("https://northdata.com/Gilje+Group+AS", "GILJE GROUP AS", client, budget) is None
+    assert verify_discovered_site(
+        "http://merinfo.no/bedrift/AS/929431650/0186-BARDRIFT-AS", "0186 BARDRIFT AS", client, budget
+    ) is None
+    assert budget.requests_used == 0
+
+
+def test_verify_discovered_site_rejects_a_page_showing_a_different_labeled_org_number():
+    """Real-world regression, same unseen-batch run as above: Exa returned
+    https://adnor.no ("Adnor Advokat AS", org 996399869, confirmed live via
+    Brreg) for "ADVOKAT VIBEKE MELAND" (a different, separately registered
+    entity, org 989750291). Name-matching can't catch this -- a law firm's
+    site plausibly mentions an associated lawyer's name -- and the URL
+    itself carries no org number. Norwegian law requires a business to
+    display its own org number on its site, and adnor.no's footer does:
+    "Org.nr: 996 399 869" -- a different number than this entity's own,
+    which is exactly the signal that should reject it."""
+    html = (
+        "<html><body><footer>Org.nr: 996 399 869<br>"
+        "Adnor Advokat, Dronningens gate 9, Trondheim</footer></body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://adnor.no", "ADVOKAT VIBEKE MELAND", client, budget, now=lambda: NOW, org_number="989750291"
+    )
+
+    assert confirmed is None
+
+
+def test_verify_discovered_site_rejects_labeled_org_number_split_by_a_real_html_tag():
+    """Real-world regression: re-running the exact adnor.no case above
+    against the REAL live site (not the synthetic HTML in the test above)
+    found this check silently failing to fire. The real page renders
+    "<strong>Org.nr:</strong> 996 399 869" -- a closing tag sits between
+    the label and the digits, which the original whitespace-only regex
+    never matched. The synthetic test's hand-written HTML happened not to
+    include any markup there, so it passed without exercising the real
+    shape. Confirmed via a direct fetch of the live page before fixing."""
+    html = (
+        "<html><body><p><a href='mailto:x'>advokat@adnor.no</a></p>"
+        "<p><strong>Org.nr:</strong> 996 399 869</p></body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.adnor.no", "ADVOKAT VIBEKE MELAND", client, budget, now=lambda: NOW, org_number="989750291"
+    )
+
+    assert confirmed is None
+
+
+def test_verify_discovered_site_accepts_a_page_showing_its_own_matching_org_number():
+    html = (
+        '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Adnor Advokat"}</script>'
+        "</head><body><footer>Org.nr: 996 399 869</footer></body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://adnor.no", "ADNOR ADVOKAT AS", client, budget, now=lambda: NOW, org_number="996399869"
+    )
+
+    assert confirmed is not None
+
+
+def test_verify_discovered_site_rejects_a_short_near_miss_company_name():
+    """Real-world regression, same unseen-batch run as the prospeo.io case
+    above: Exa returned https://fanison.fi/en/company/ for "FANSON AS" --
+    confirmed live to be "Fanison Oy", an unrelated Finnish ventilation
+    company in Lahti, Finland. The page's structured organization_name is
+    the bare word "Fanison" (7 chars); partial_ratio("FANSON AS",
+    "Fanison") scores 92.3 -- above NAME_MATCH_THRESHOLD (90) -- purely
+    because a 1-character edit distance on a short string produces a high
+    substring-alignment score, not because the names actually match. See
+    name_similarity's docstring in verify.py for the fix: a short candidate
+    must match (near-)exactly, not just fuzzily, to be accepted."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Fanison"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site("https://fanison.fi/en/company/", "FANSON AS", client, budget, now=lambda: NOW)
+
+    assert confirmed is None
 
 
 # --- Exa (primary provider) ---
@@ -665,3 +908,510 @@ def test_only_attempted_providers_spend_budget():
     discover_candidate_site("EQUINOR ASA", client, budget, exa_api_key="fake-exa-key", parallel_api_key="fake-parallel-key")
 
     assert budget.requests_used == 1
+
+
+def test_verify_discovered_site_requires_positive_identity_confirmation():
+    """2-factor gate, second factor: a discovered candidate must POSITIVELY
+    confirm whose site it is -- either the entity's own 9-digit org number
+    appears on the page (Norwegian businesses are legally required to
+    publish it), or the legal name itself does. This is the generalization
+    of the lillemarkens.no case: a shopping mall's own site genuinely
+    mentions none of its tenants' legal names or org numbers, yet fuzzy
+    name-matching accepted it as one tenant's official website."""
+    mall_html = (
+        "<html><body><h1>Lillemarkens</h1>"
+        "<p>Midt i hjertet av Kristiansand - 30 butikker under ett tak.</p>"
+        "</body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=mall_html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.lillemarkens.no", "SANS & SMAK AS", client, budget, now=lambda: NOW, org_number="915621279"
+    )
+
+    assert confirmed is None
+
+
+def test_verify_discovered_site_accepts_a_page_confirming_identity_by_org_number():
+    """The org number is the strongest possible confirmation -- accept on it
+    even when the site trades under a brand name that looks nothing like the
+    registered legal name (very common for small Norwegian companies)."""
+    html = (
+        "<html><body><h1>Snekkersentralen</h1>"
+        "<footer>Org.nr: 914 826 098</footer></body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://snekkersentralen.no",
+        "HANDVERKER JAN-ERIK MOXNESS, HJEM AS",
+        client, budget, now=lambda: NOW, org_number="914826098",
+    )
+
+    assert confirmed is not None
+    assert confirmed.match_confidence == 100.0
+
+
+def test_verify_discovered_site_accepts_a_page_confirming_identity_by_legal_name():
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Equinor ASA"}</script></head><body><p>Equinor ASA is a Norwegian energy company.</p></body></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.equinor.com", "EQUINOR ASA", client, budget, now=lambda: NOW, org_number="923609016"
+    )
+
+    assert confirmed is not None
+
+
+def test_verify_discovered_site_rejects_directory_and_search_path_segments():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a directory-shaped URL at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    assert verify_discovered_site("https://example.no/directory/acme-as", "ACME AS", client, budget) is None
+    assert verify_discovered_site("https://example.no/search/acme", "ACME AS", client, budget) is None
+    assert budget.requests_used == 0
+
+
+def test_short_named_company_on_a_foreign_domain_is_rejected_by_name_matching_alone():
+    """The real "FANSON AS" vs Finnish "Fanison Oy" collision. A separate
+    foreign-TLD rule was considered for this (reject .fi/.se/.dk for short
+    names) and measured against the real registry -- only 0.2% (14 of 6,665)
+    of short-named Norwegian companies with a website use one, so the cost
+    would have been small. It was NOT implemented: the short-candidate
+    exact-match rule in verify.name_similarity already rejects every real
+    case found across three unseen batches, so the TLD rule would add a
+    coverage cost and more code for no measured benefit. This test pins that
+    the existing rule is what carries the case."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Fanison"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://fanison.fi", "FANSON AS", client, budget, now=lambda: NOW, org_number="875368532"
+    )
+
+    assert confirmed is None
+
+
+def test_a_norwegian_company_on_a_foreign_domain_is_accepted_via_org_number():
+    """Real registry data: 14 short-named Norwegian companies genuinely
+    operate on .fi/.se/.dk domains (e.g. SKOGEX AS on skogex.se). Hard
+    org-number evidence must beat any heuristic about which TLD a Norwegian
+    company "should" use."""
+    html = "<html><body><h1>Skogex</h1><footer>Org.nr: 917 860 025</footer></body></html>"
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://skogex.se", "SKOGEX AS", client, budget, now=lambda: NOW, org_number="917860025"
+    )
+
+    assert confirmed is not None
+
+
+def test_verify_discovered_site_rejects_a_shared_venue_listing_many_organizations():
+    """Closes the last confirmed open false positive: lillemarkens.no is a
+    shopping mall's own site (30 tenant shops in Kristiansand) that was
+    accepted as the official website of SANS & SMAK AS, one of its tenants.
+    Generalizes past that one domain: a page whose structured data declares
+    many distinct organizations is a venue/marketplace/portal listing other
+    businesses, not any single one of them's own site. A real company site
+    declares itself, not a directory of its neighbours."""
+    tenants = ",".join(
+        f'{{"@type":"Organization","name":"Tenant {i} AS"}}' for i in range(6)
+    )
+    html = (
+        '<html><head><script type="application/ld+json">'
+        f'[{{"@type":"Organization","name":"Sans & Smak AS"}},{tenants}]'
+        "</script></head><body></body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.lillemarkens.no", "SANS & SMAK AS", client, budget, now=lambda: NOW, org_number="915621279"
+    )
+
+    assert confirmed is None
+
+
+def test_a_normal_company_page_with_a_couple_of_organizations_is_still_accepted():
+    """Must not over-reject: a real company page legitimately carries its own
+    Organization plus e.g. a parent or a publisher block. Only a page listing
+    MANY distinct organizations looks like a venue directory."""
+    html = (
+        '<html><head><script type="application/ld+json">'
+        '[{"@type":"Organization","name":"Equinor ASA"},'
+        '{"@type":"Organization","name":"Equinor Energy AS"}]'
+        "</script></head><body></body></html>"
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.equinor.com", "EQUINOR ASA", client, budget, now=lambda: NOW, org_number="923609016"
+    )
+
+    assert confirmed is not None
+
+
+def test_verify_discovered_site_rejects_a_foreign_country_tld_without_org_number_proof():
+    """Real-world regression: Exa returned https://lasventures.in/ ("LAS
+    Ventures - Where Opportunity Meets Capital", an Indian firm, no mention
+    of Norway, no matching org number) for Norwegian "LAS VENTURES AS".
+
+    The name matches EXACTLY, so neither name-similarity nor the
+    short-candidate exact-match rule can catch it -- a foreign country-code
+    domain is the only remaining signal. Measured against the real registry:
+    foreign ccTLDs account for ~0.3% of registered Norwegian company
+    websites, and this rule applies only to search-DISCOVERED candidates
+    (registry-provided sites never reach it) and is waived outright by
+    org-number proof, so the real cost is smaller still."""
+    html = "<html><head><title>LAS Ventures</title></head><body><h1>LAS Ventures</h1></body></html>"
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://lasventures.in/", "LAS VENTURES AS", client, budget, now=lambda: NOW, org_number="927662558"
+    )
+
+    assert confirmed is None
+
+
+def test_generic_tlds_and_norwegian_as_domains_are_unaffected():
+    """.com/.io/.as are used by real Norwegian companies constantly (anti.as
+    is a real, confirmed example) -- the rule targets foreign COUNTRY codes,
+    not every non-.no domain. Blanket non-.no rejection would have hit 13.5%
+    of real registered websites."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Anticoach AS"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    budget = BudgetGovernor()
+
+    assert verify_discovered_site(
+        "https://anti.as/", "ANTICOACH AS", client, budget, now=lambda: NOW, org_number="923413812"
+    ) is not None
+
+
+def test_verify_discovered_site_rejects_a_government_registry_lookup_page():
+    """Real-world regression: finanstilsynet.no (Norway's Financial
+    Supervisory Authority) registry-detail page was returned as a company's
+    official website -- and the page was for a DIFFERENT company entirely
+    ("ERGO FORSIKRING A/S NUF"). Same class as virksomhet.brreg.no and
+    sgregister.dibk.no, already blacklisted: a government register lookup is
+    never any company's own site."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not fetch a blacklisted domain at all")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    confirmed = verify_discovered_site(
+        "https://www.finanstilsynet.no/en/finanstilsynets-registry/details?id=253935",
+        "SOME COMPANY AS", client, budget,
+    )
+
+    assert confirmed is None
+
+
+def test_a_permanent_provider_failure_disables_that_provider_for_the_whole_run():
+    """Real-world regression, hit twice in one session: once Exa's credits
+    run out it returns 402 on EVERY call for the rest of the billing period.
+    Not retrying a single 402 (already fixed) isn't enough -- the chain still
+    made one doomed Exa call per tier, per company. Across a 100-company
+    batch with three discovery tiers that's ~270 guaranteed-useless calls,
+    each burning a unit of request budget and real wall-clock, and starving
+    the tiers that DO work. One permanent failure must disable the provider
+    for the remainder of the run."""
+    exa_calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "exa.ai" in url:
+            exa_calls.append(url)
+            return httpx.Response(402, json={"error": "NO_MORE_CREDITS"})
+        if "parallel.ai" in url:
+            return httpx.Response(200, json={"results": [{"url": "https://acme.no"}]})
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+    health = ProviderHealth()
+
+    for _ in range(5):
+        discover_candidate_site(
+            "ACME AS", client, budget, sleep=lambda s: None,
+            exa_api_key="k", parallel_api_key="k", provider_health=health,
+        )
+
+    assert len(exa_calls) == 1, f"Exa should be tried once then disabled, got {len(exa_calls)}"
+    assert not health.is_available("exa")
+    assert "exa" in health.disabled
+    # Parallel is untouched and still serving.
+    assert health.is_available("parallel")
+
+
+def test_a_transient_provider_failure_does_not_disable_the_provider():
+    """A 5xx or a network blip is exactly what retries exist for -- it must
+    not take the provider out for the rest of the run."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(503)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    health = ProviderHealth()
+
+    for _ in range(2):
+        discover_candidate_site(
+            "ACME AS", client, BudgetGovernor(), sleep=lambda s: None,
+            exa_api_key="k", parallel_api_key=None, provider_health=health,
+        )
+
+    assert health.is_available("exa")
+    assert len(calls) > 2
+
+
+def test_discovery_works_without_a_provider_health_object():
+    """provider_health is optional -- existing callers and tests must be
+    unaffected."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_ddg_response("acme.no"))))
+
+    assert discover_candidate_site("ACME AS", client, BudgetGovernor(), **_no_keys()) == "https://acme.no"
+
+
+# --- Startup key check ---
+
+
+def test_check_provider_keys_reports_an_exhausted_key_as_dead():
+    """One tiny search per configured key before any company is processed, so
+    a dead key is reported in seconds instead of after a whole batch."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "exa.ai" in str(request.url):
+            return httpx.Response(402, json={"error": "NO_MORE_CREDITS"})
+        return httpx.Response(200, json={"results": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    dead, requests_used = check_provider_keys(client, exa_api_key="k", parallel_api_key="k")
+
+    assert set(dead) == {"exa"}
+    assert "402" in dead["exa"]
+    assert requests_used == 2
+
+
+def test_check_provider_keys_does_not_call_a_transient_failure_dead():
+    """A 5xx or a network blip at startup says nothing about the key -- only
+    401/402/403 do. Calling a healthy key dead would stop a local run (or
+    skip a working provider) for no reason."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "exa.ai" in str(request.url):
+            return httpx.Response(503)
+        raise httpx.TransportError("boom")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    dead, _ = check_provider_keys(client, exa_api_key="k", parallel_api_key="k", sleep=lambda s: None)
+
+    assert dead == {}
+
+
+def test_check_provider_keys_skips_unconfigured_providers_entirely():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not call a provider with no key")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    assert check_provider_keys(client, exa_api_key=None, parallel_api_key=None) == ({}, 0)
+
+
+# --- Search result cache ---
+
+
+class _DictCache:
+    """In-memory stand-in for ResponseCache with the same get/put contract."""
+
+    def __init__(self):
+        self.store = {}
+
+    def get(self, url, date_bucket):
+        return self.store.get((url, date_bucket))
+
+    def put(self, url, date_bucket, raw):
+        self.store[(url, date_bucket)] = raw
+
+
+def test_a_repeated_search_the_same_day_is_served_from_cache_for_free():
+    """Search responses were the one thing never cached, so every local
+    re-run re-bought the same results -- a large part of how the Exa credits
+    ran out twice. A cache hit costs no request and no credits."""
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, json={"results": [{"url": "https://acme.no"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    cache = _DictCache()
+    budget = BudgetGovernor()
+
+    first = discover_candidate_site("ACME AS", client, budget, exa_api_key="k", parallel_api_key=None,
+                                    cache=cache, date_bucket="2026-09-15")
+    second = discover_candidate_site("ACME AS", client, budget, exa_api_key="k", parallel_api_key=None,
+                                     cache=cache, date_bucket="2026-09-15")
+
+    assert first == second == "https://acme.no"
+    assert len(calls) == 1
+    assert budget.requests_used == 1
+
+
+def test_a_failed_search_is_never_cached():
+    exa_calls = {"n": 0}
+
+    def handler(request):
+        if "exa.ai" not in str(request.url):
+            return httpx.Response(404)  # the keyless last-resort tier
+        exa_calls["n"] += 1
+        if exa_calls["n"] <= MAX_FETCH_RETRIES:
+            return httpx.Response(503)
+        return httpx.Response(200, json={"results": [{"url": "https://acme.no"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    cache = _DictCache()
+
+    assert discover_candidate_site("ACME AS", client, BudgetGovernor(), sleep=lambda s: None, exa_api_key="k",
+                                   parallel_api_key=None, cache=cache, date_bucket="2026-09-15") is None
+    assert cache.store == {}
+    assert discover_candidate_site("ACME AS", client, BudgetGovernor(), sleep=lambda s: None, exa_api_key="k",
+                                   parallel_api_key=None, cache=cache, date_bucket="2026-09-15") == "https://acme.no"
+
+
+def test_the_cache_never_stores_the_api_key():
+    """The cache is a plain SQLite file on disk -- a secret must not end up in it."""
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"results": [{"url": "https://acme.no"}]})
+    ))
+    cache = _DictCache()
+
+    discover_candidate_site("ACME AS", client, BudgetGovernor(), exa_api_key="super-secret-key",
+                            parallel_api_key="another-secret", cache=cache, date_bucket="2026-09-15")
+
+    assert cache.store
+    assert not any("secret" in key[0] or "secret" in value for key, value in cache.store.items())
+
+
+# --- Former names as identity ---
+
+
+def test_verify_discovered_site_accepts_a_page_under_the_company_s_own_former_name():
+    """A company renamed recently often still runs its site under the old
+    name; the runner only passes a former name after confirming no other
+    entity holds it now."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Gamle Navn AS"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+
+    confirmed = verify_discovered_site(
+        "https://gamlenavn.no", "NYTT NAVN AS", client, BudgetGovernor(), now=lambda: NOW,
+        org_number="997770234", alternate_names=["GAMLE NAVN AS"],
+    )
+
+    assert confirmed is not None
+
+
+def test_verify_discovered_site_without_the_former_name_still_rejects_it():
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Gamle Navn AS"}</script></head></html>'
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+
+    assert verify_discovered_site(
+        "https://gamlenavn.no", "NYTT NAVN AS", client, BudgetGovernor(), now=lambda: NOW, org_number="997770234"
+    ) is None
+
+
+# --- Search spend tracking and the run-wide spend cap ---
+
+
+def _search_hit(request):
+    return httpx.Response(200, json={"results": [{"url": "https://acme.no"}]})
+
+
+def test_a_paid_exa_search_is_recorded_against_the_batch_spend_budget():
+    """Every search used to be recorded as costing $0, so the batch's $10
+    limit had nothing to enforce. Exa is $7 per 1,000 searches."""
+    budget = BudgetGovernor()
+
+    discover_candidate_site("ACME AS", httpx.Client(transport=httpx.MockTransport(_search_hit)), budget,
+                            exa_api_key="k", parallel_api_key=None)
+
+    assert budget.spend_used == pytest.approx(0.007)
+
+
+def test_free_tier_and_cached_searches_cost_nothing():
+    budget = BudgetGovernor()
+    cache = _DictCache()
+    client = httpx.Client(transport=httpx.MockTransport(_search_hit))
+
+    discover_candidate_site("ACME AS", client, budget, exa_api_key=None, parallel_api_key="k")
+    discover_candidate_site("ACME AS", client, budget, exa_api_key="k", parallel_api_key=None,
+                            cache=cache, date_bucket="2026-09-16")
+    spend_after_first_exa = budget.spend_used
+    discover_candidate_site("ACME AS", client, budget, exa_api_key="k", parallel_api_key=None,
+                            cache=cache, date_bucket="2026-09-16")
+
+    assert spend_after_first_exa == pytest.approx(0.007)
+    assert budget.spend_used == pytest.approx(0.007)
+
+
+def test_the_batch_dollar_limit_stops_paid_searches():
+    def handler(request):
+        if "exa.ai" in str(request.url):
+            raise AssertionError("must not make a paid search past the batch's $ limit")
+        return _search_hit(request)
+
+    budget = BudgetGovernor(BudgetLimits(max_requests=2000, max_spend_usd=0.005, max_wall_clock_seconds=1000))
+
+    candidate = discover_candidate_site("ACME AS", httpx.Client(transport=httpx.MockTransport(handler)), budget,
+                                        exa_api_key="k", parallel_api_key="k")
+
+    assert candidate == "https://acme.no"  # served by the free tier instead
+    assert budget.spend_used == 0
+
+
+def test_the_run_spend_cap_switches_exa_off_and_the_run_continues_on_free_tiers():
+    """A per-batch limit resets every 100 companies, so it can't protect a
+    1,000-company run from outspending an account. The run-wide cap does:
+    once the next Exa search would cross it, Exa is disabled for the rest of
+    the run and the free tiers take over -- nothing stops."""
+    exa_calls = []
+
+    def handler(request):
+        if "exa.ai" in str(request.url):
+            exa_calls.append(1)
+            return httpx.Response(200, json={"results": []})
+        return _search_hit(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    health = ProviderHealth(spend_cap_usd=0.02)  # room for exactly 2 Exa searches
+
+    results = [
+        discover_candidate_site(f"COMPANY {i} AS", client, BudgetGovernor(), exa_api_key="k",
+                                parallel_api_key="k", provider_health=health)
+        for i in range(5)
+    ]
+
+    assert len(exa_calls) == 2
+    assert health.spent_usd == pytest.approx(0.014)
+    assert not health.is_available("exa")
+    assert "spend cap" in health.disabled["exa"]
+    assert results == ["https://acme.no"] * 5
+
+
+def test_no_run_spend_cap_means_no_run_level_limit():
+    health = ProviderHealth()
+    assert all(health.reserve_spend("exa", 0.007) for _ in range(2000))
+    assert health.is_available("exa")

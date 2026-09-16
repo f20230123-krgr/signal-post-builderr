@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.pipeline.crawl import FetchedPage
-from src.pipeline.extract import extract
+from src.pipeline.extract import MAX_FEED_ACTIVITY_ENTRIES, MAX_SOCIAL_PROFILE_LINKS, feed_activity_facts, social_profile_facts, extract
 from src.models.profile import EvidenceState
 
 PAGES = Path(__file__).parent.parent.parent / "fixtures" / "pages"
@@ -369,3 +369,167 @@ def test_career_counselling_service_is_not_a_hiring_signal():
     facts = extract(_inline_page(html))
 
     assert not any(f.field_name == "hiring_signal" for f in facts)
+
+
+def test_social_profile_links_in_plain_markup_become_company_profile_facts():
+    """company_profile sat at ~4% of companies in a real 1,000-company batch
+    because it was sourced ONLY from JSON-LD `sameAs`. Most real sites put
+    their LinkedIn/Facebook/Instagram in a plain footer <a href> with no
+    structured data at all. Provenance is identical to the sameAs path --
+    these links are on the entity's own verified domain, which verify.py
+    already gates on -- so this is coverage, not a precision trade."""
+    html = """
+    <html><body>
+      <footer>
+        <a href="https://www.linkedin.com/company/acme-norge/">LinkedIn</a>
+        <a href="https://www.facebook.com/acmenorge">Facebook</a>
+        <a href="https://instagram.com/acme.norge">Instagram</a>
+      </footer>
+    </body></html>
+    """
+    facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    values = [f.value for f in facts]
+
+    assert "https://www.linkedin.com/company/acme-norge/" in values
+    assert "https://www.facebook.com/acmenorge" in values
+    assert "https://instagram.com/acme.norge" in values
+    assert all(f.field_name == "company_profile" for f in facts)
+    assert all(f.extraction_method == "structured" for f in facts)
+
+
+def test_social_profile_extraction_ignores_share_buttons_and_platform_chrome():
+    """A share/intent link is the page telling a visitor how to repost it --
+    not the company declaring its own profile. Publishing one as a
+    "company-owned profile" would be a wrong claim, not a thin one."""
+    html = """
+    <html><body>
+      <a href="https://www.facebook.com/sharer/sharer.php?u=https://acme.no">Share</a>
+      <a href="https://twitter.com/intent/tweet?url=https://acme.no">Tweet</a>
+      <a href="https://www.linkedin.com/shareArticle?url=https://acme.no">Share</a>
+      <a href="https://www.facebook.com/plugins/like.php">Like</a>
+      <a href="https://example.com/not-social">Partner</a>
+    </body></html>
+    """
+    assert social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
+
+
+def test_social_profile_extraction_dedups_and_caps():
+    """A site-wide template repeats the same links on every page; a page can
+    also list dozens. Dedup by URL and cap so one templated footer can't
+    flood the section (same discipline as assemble.py's claim dedup)."""
+    links = "".join(
+        f'<a href="https://www.instagram.com/handle{i}">i</a>' for i in range(20)
+    )
+    html = f"<html><body><footer>{links}{links}</footer></body></html>"
+
+    facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert len(facts) == len({f.value for f in facts})
+    assert len(facts) <= MAX_SOCIAL_PROFILE_LINKS
+
+
+def test_public_brand_falls_back_to_application_name_meta_tags():
+    """public_brand came only from og:site_name (plus JSON-LD Organization
+    name). Plenty of real sites ship no og:site_name but do declare
+    application-name / apple-mobile-web-app-title -- both single, structured,
+    self-declared brand tags on the company's own verified domain, so they
+    carry the same provenance as og:site_name and no extra request."""
+    html = '<html><head><meta name="application-name" content="Acme Norge"></head><body></body></html>'
+    page = _inline_page(html, url="https://acme.no")
+
+    facts = extract(page)
+    brands = [f.value for f in facts if f.field_name == "public_brand"]
+
+    assert "Acme Norge" in brands
+
+
+def test_og_site_name_still_wins_over_the_fallback_tags():
+    """og:site_name is the most explicit brand declaration of the three, so a
+    page carrying both must not have the weaker tag shadow it."""
+    html = (
+        '<html><head>'
+        '<meta property="og:site_name" content="Acme Norge">'
+        '<meta name="application-name" content="acme-pwa">'
+        '</head><body></body></html>'
+    )
+    page = _inline_page(html, url="https://acme.no")
+
+    brands = [f.value for f in extract(page) if f.field_name == "public_brand"]
+
+    assert brands[0] == "Acme Norge"
+
+
+def test_json_ld_event_becomes_dated_activity():
+    """schema.org Event carries its date in startDate, not datePublished, so
+    the existing dated-type handling skipped every event a company publishes
+    on its own site -- real dated public activity, structured, already on a
+    page we fetch anyway (zero extra requests)."""
+    html = """<html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Event","name":"Aapent hus i Bergen",
+     "startDate":"2026-10-04","location":{"@type":"Place","name":"Bergen"}}
+    </script></head><body></body></html>"""
+
+    facts = extract(_inline_page(html))
+    dated = [f for f in facts if f.field_name == "dated_activity"]
+
+    assert len(dated) == 1
+    assert "Aapent hus i Bergen" in dated[0].value
+    assert "2026-10-04" in dated[0].value
+
+
+def test_json_ld_event_without_a_date_is_not_published_as_dated_activity():
+    """An undated event is not dated activity -- the date IS the claim."""
+    html = """<html><head><script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Event","name":"Some event"}
+    </script></head><body></body></html>"""
+
+    assert [f for f in extract(_inline_page(html)) if f.field_name == "dated_activity"] == []
+
+
+def test_rss_feed_entries_become_dated_activity():
+    """A declared RSS/Atom feed is the highest-quality dated_activity a
+    company publishes about itself: real headlines with real publication
+    dates, structured, on its own domain. Registry update events give us
+    company-level coverage everywhere; this gives real editorial depth for
+    companies that actually publish."""
+    xml = """<?xml version="1.0"?>
+    <rss version="2.0"><channel>
+      <title>Acme Nyheter</title>
+      <item><title>Acme opens Bergen office</title><pubDate>Mon, 01 Sep 2026 09:00:00 GMT</pubDate></item>
+      <item><title>Acme wins contract</title><pubDate>Tue, 12 Aug 2026 09:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+
+    facts = feed_activity_facts(xml, "https://acme.no/feed", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    values = [f.value for f in facts]
+
+    assert any("Acme opens Bergen office" in v and "2026" in v for v in values)
+    assert all(f.field_name == "dated_activity" for f in facts)
+
+
+def test_atom_feed_entries_become_dated_activity():
+    xml = """<?xml version="1.0"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><title>Ny avdeling i Troms</title><updated>2026-07-04T10:00:00Z</updated></entry>
+    </feed>"""
+
+    facts = feed_activity_facts(xml, "https://acme.no/atom.xml", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert len(facts) == 1
+    assert "Ny avdeling i Troms" in facts[0].value
+    assert "2026-07-04" in facts[0].value
+
+
+def test_feed_entries_without_a_date_are_skipped_and_output_is_capped():
+    """Undated entries aren't dated activity, and a feed can carry hundreds --
+    same capping discipline as every other list section."""
+    items = "".join(f"<item><title>Post {i}</title><pubDate>2026-08-0{i%9+1}</pubDate></item>" for i in range(30))
+    xml = f"<rss><channel><item><title>No date here</title></item>{items}</channel></rss>"
+
+    facts = feed_activity_facts(xml, "https://acme.no/feed", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert all("No date here" not in f.value for f in facts)
+    assert len(facts) <= MAX_FEED_ACTIVITY_ENTRIES
+
+
+def test_non_feed_content_yields_nothing():
+    assert feed_activity_facts("<html><body>not a feed</body></html>", "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc)) == []

@@ -5,6 +5,16 @@ submission requirement: "a one-command run instruction."
 Usage:
     python -m src.run_batch --input batch.jsonl --out results/
 
+    Add --exa-first-round-only and/or --max-search-spend USD to limit the
+    RUNNER'S OWN spend (e.g. when generating a submission corpus on a personal
+    key). Neither is on by default, so an evaluator's one-command run uses
+    Exa on every search round, still bounded by the per-batch limits.
+
+    Add --stop-if-key-dead for local testing: if an Exa/Parallel key is out of
+    credits or rejected (at startup or mid-run), print a warning and exit
+    instead of finishing a run you'd throw away. Never use it for the graded
+    run -- a stopped run produces fewer profiles than the brief requires.
+
 Writes into --out:
     envelopes.jsonl  -- one submission envelope per input (docs: envelope.py)
     manifest.txt     -- the exact organisation-number manifest processed
@@ -16,11 +26,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from src.orchestrator.runner import run_in_chunks
+import httpx
+
+from src.orchestrator.runner import DeadProviderAbort, run_in_chunks
+from src.pipeline.discovery import PROVIDER_COST_PER_SEARCH_USD, ProviderHealth, check_provider_keys
 from src.pipeline.envelope import to_envelope
 from src.pipeline.universe import load_universe
 from src.reporting import render_html_report
@@ -28,6 +44,70 @@ from src.storage.cache import ResponseCache
 from src.storage.snapshots import SnapshotStore
 
 DEFAULT_UNIVERSE_PATH = Path("signalpost-company-universe-2025.jsonl.gz")
+
+
+def _print_dead_key_banner(dead: dict[str, str], headline: str, closing: list[str]) -> None:
+    print("!" * 72)
+    print(headline)
+    for provider, reason in dead.items():
+        print(f"  - {provider}: {reason}")
+    print("")
+    for line in closing:
+        print(f"  {line}")
+    print("!" * 72)
+
+
+def startup_key_check(
+    stop_if_key_dead: bool,
+    client: Optional[httpx.Client] = None,
+    spend_cap_usd: Optional[float] = None,
+) -> tuple[ProviderHealth, int]:
+    """Check every configured discovery key once, before any company runs.
+
+    Returns (provider_health, requests_used). A dead key is disabled up front,
+    so the run doesn't even make the first doomed call. With
+    `stop_if_key_dead`, a dead key prints a warning and exits with status 1
+    before anything is processed or written; without it, the warning is
+    printed and the run continues (the graded-run path)."""
+    owns_client = client is None
+    client = client or httpx.Client()
+    try:
+        dead, requests_used = check_provider_keys(
+            client,
+            exa_api_key=os.environ.get("EXA_API_KEY"),
+            parallel_api_key=os.environ.get("PARALLEL_API_KEY"),
+        )
+    finally:
+        if owns_client:
+            client.close()
+
+    if dead and stop_if_key_dead:
+        _print_dead_key_banner(
+            dead,
+            "STOPPED: a discovery API key is unusable -- nothing was processed.",
+            ["Top up or replace the key, then re-run.",
+             "(--stop-if-key-dead is set; without it the run would continue with",
+             "reduced website-discovery coverage.)"],
+        )
+        sys.exit(1)
+
+    # Disabled only on the continue path: disabling logs "remaining tiers will
+    # be used instead", which would contradict a STOPPED banner.
+    health = ProviderHealth(spend_cap_usd=spend_cap_usd)
+    # The startup check itself is one paid Exa search when that key is set.
+    if os.environ.get("EXA_API_KEY"):
+        health.reserve_spend("exa", PROVIDER_COST_PER_SEARCH_USD["exa"])
+    for provider, reason in dead.items():
+        health.disable(provider, reason)
+
+    if dead:
+        _print_dead_key_banner(
+            dead,
+            "WARNING: a discovery API key is unusable -- continuing without it.",
+            ["Every profile will still be valid, but website-discovery coverage",
+             "will be materially lower. Top up or replace the key to recover it."],
+        )
+    return health, requests_used
 
 
 def main() -> None:
@@ -49,7 +129,33 @@ def main() -> None:
         help="Companies per fresh budget envelope -- 100 matches the locked "
         "daily-evaluation batch size (docs/problem-statement.md).",
     )
+    parser.add_argument(
+        "--stop-if-key-dead",
+        action="store_true",
+        help="Local testing only: exit with a warning if an Exa/Parallel key is out of "
+        "credits or rejected, at startup or mid-run, instead of finishing the run. "
+        "Do not use for the graded run -- a stopped run produces too few profiles.",
+    )
+    parser.add_argument(
+        "--exa-first-round-only",
+        action="store_true",
+        help="Limit your own spend: use Exa only for the company-name search; fallback "
+        "search rounds use the free providers. Off by default.",
+    )
+    parser.add_argument(
+        "--max-search-spend",
+        type=float,
+        default=None,
+        help="Limit your own spend: hard cap in USD on paid search calls across the WHOLE run. "
+        "When reached, the paid provider is switched off and the run continues on the free "
+        "ones. Off by default (the per-batch $10 limit always applies).",
+    )
     args = parser.parse_args()
+
+    # Before anything is created or written, so a stop leaves no output behind.
+    provider_health, startup_requests = startup_key_check(
+        args.stop_if_key_dead, spend_cap_usd=args.max_search_spend
+    )
 
     org_numbers = [
         line.strip() for line in args.input.read_text().splitlines() if line.strip()
@@ -71,15 +177,31 @@ def main() -> None:
     cache = ResponseCache(args.out / "cache.sqlite3")
 
     wall_clock_start = time.perf_counter()
-    profiles, aggregate = asyncio.run(
-        run_in_chunks(
-            org_numbers,
-            chunk_size=args.chunk_size,
-            snapshot_store=snapshot_store,
-            universe=universe,
-            cache=cache,
+    try:
+        profiles, aggregate = asyncio.run(
+            run_in_chunks(
+                org_numbers,
+                chunk_size=args.chunk_size,
+                snapshot_store=snapshot_store,
+                universe=universe,
+                cache=cache,
+                provider_health=provider_health,
+                stop_if_key_dead=args.stop_if_key_dead,
+                use_nav_jobs=True,
+                exa_first_round_only=args.exa_first_round_only,
+            )
         )
-    )
+    except DeadProviderAbort as abort:
+        # No envelopes, report or manifest are written. Snapshots for companies
+        # that finished while every key still worked are kept: they're valid,
+        # and snapshot history is append-only by design.
+        _print_dead_key_banner(
+            abort.dead_providers,
+            "STOPPED: a discovery API key became unusable mid-run.",
+            ["No envelopes or run report were written for this run.",
+             "Top up or replace the key, then re-run."],
+        )
+        sys.exit(1)
     wall_clock_seconds = time.perf_counter() - wall_clock_start
 
     # Per-company operations (requests/cost/runtime) aren't separately
@@ -102,9 +224,27 @@ def main() -> None:
         "universe_used": universe_path is not None,
         "chunk_size": args.chunk_size,
         "chunk_count": aggregate["chunk_count"],
-        "requests_used": aggregate["requests_used"],
-        "spend_used_usd": aggregate["spend_used_usd"],
+        # Includes the one startup check per configured discovery key.
+        "requests_used": aggregate["requests_used"] + startup_requests,
+        # Real, recorded cost: paid search calls (including the startup key
+        # check) priced per PROVIDER_COST_PER_SEARCH_USD.
+        "spend_used_usd": round(aggregate.get("search_spend_usd", aggregate["spend_used_usd"]), 4),
+        "spend_limits": {
+            "exa_first_round_only": args.exa_first_round_only,
+            "max_search_spend_usd": args.max_search_spend,
+        },
         "wall_clock_seconds": round(wall_clock_seconds, 3),
+        # Empty on a healthy run. Non-empty means a discovery provider's key
+        # was exhausted or rejected mid-run and the chain fell back to weaker
+        # tiers -- the run still completes and every profile is still valid,
+        # but website-discovery coverage is materially lower than it should
+        # be. Measured: the same 100-company batch found 19 official websites
+        # with a healthy Exa key and 10-11 without.
+        "degraded_providers": aggregate.get("degraded_providers", {}),
+        # NAV hiring-signal index for this run: list pages read (hard-capped),
+        # requests spent, active ads indexed, and whether the page cap cut off
+        # the newest ads.
+        "nav_job_index": aggregate.get("nav_job_index"),
     }
     (args.out / "run-report.json").write_text(json.dumps(run_report, indent=2), encoding="utf-8")
 
@@ -118,6 +258,20 @@ def main() -> None:
     print(f"  manifest:  {args.out / 'manifest.txt'}")
     print(f"  report:    {args.out / 'run-report.json'}")
     print(f"  html view: {args.out / 'report.html'}")
+
+    # Loud, last, and impossible to scroll past: a quiet key exhaustion looks
+    # exactly like "this batch just had fewer discoverable websites", which
+    # is how it went unnoticed twice during development.
+    degraded = run_report["degraded_providers"]
+    if degraded:
+        print()
+        _print_dead_key_banner(
+            degraded,
+            "WARNING: a discovery provider failed permanently during this run.",
+            ["The run completed and every profile is valid, but website-discovery",
+             "coverage is materially lower than it should be. Top up or replace the",
+             "API key and re-run to recover it."],
+        )
 
 
 if __name__ == "__main__":

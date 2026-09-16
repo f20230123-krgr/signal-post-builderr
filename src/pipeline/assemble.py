@@ -210,7 +210,22 @@ def assemble(
     else:
         annual_latest_claim = _unavailable_claim(EvidenceState.NOT_AVAILABLE)
 
-    legal_identity = LegalIdentity(legal_name=legal_name_claim, public_brand=public_brand_claim)
+    # Free registry identity facts (registry_extras.universe_identity_facts):
+    # present only when this company is covered by Builderr's frozen universe
+    # manifest, omitted entirely otherwise -- never fabricated.
+    def _optional_identity_claim(field_name: str) -> Optional[Claim]:
+        fact = _first_matching(confirmed_facts, field_name)
+        return _confirmed_claim(fact) if fact else None
+
+    legal_identity = LegalIdentity(
+        legal_name=legal_name_claim,
+        public_brand=public_brand_claim,
+        industry=_optional_identity_claim("industry"),
+        employee_count=_optional_identity_claim("employee_count"),
+        legal_form=_optional_identity_claim("legal_form"),
+        operating_status=_optional_identity_claim("operating_status"),
+        founded_date=_optional_identity_claim("founded_date"),
+    )
     annual_accounts = AnnualAccounts(latest=annual_latest_claim, history=annual_history_claims)
     leadership = Leadership(leaders=leader_claims, workplaces=workplace_claims)
     online_presence = OnlinePresence(official_site=official_site_claim, company_profiles=company_profile_claims)

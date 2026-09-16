@@ -289,6 +289,29 @@ def _extract_outbound_links(html: str, page_url: str) -> list[str]:
     return [urljoin(page_url, href) for href in _HREF_RE.findall(html)]
 
 
+_FEED_LINK_RE = re.compile(
+    r'<link\b[^>]*\btype\s*=\s*["\']application/(?:rss|atom)\+xml["\'][^>]*>', re.IGNORECASE
+)
+_FEED_HREF_RE = re.compile(r'\bhref\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+# One feed is the company's news channel; a site declaring many (per-category
+# feeds, comment feeds) would otherwise turn into a crawl of its own.
+MAX_FEEDS_PER_SITE = 1
+
+
+def _discover_feed_urls(html: str, page_url: str) -> list[str]:
+    """Absolute URLs of RSS/Atom feeds this page explicitly declares."""
+    urls: list[str] = []
+    for tag in _FEED_LINK_RE.findall(html):
+        href = _FEED_HREF_RE.search(tag)
+        if not href:
+            continue
+        urls.append(urljoin(page_url, href.group(1).strip()))
+        if len(urls) >= MAX_FEEDS_PER_SITE:
+            break
+    return urls
+
+
 def crawl(
     entity: ResolvedEntity,
     budget: BudgetGovernor,
@@ -414,6 +437,17 @@ def crawl(
                 for link in _extract_outbound_links(html, url):
                     if _domain_matches_any(_domain(link), ats_domains) and normalize_url(link) not in seen_normalized:
                         queue.append((link, url))
+
+            # A declared RSS/Atom feed is the company's own published
+            # activity, on its own domain -- no new allow-list surface. Only
+            # followed when the page actually declares one (never guessed at
+            # /feed or /rss), and only from the entity's own pages, so a
+            # company without a feed costs nothing.
+            if linked_from is None:
+                for feed_url in _discover_feed_urls(html, url):
+                    if _domain(feed_url) in allowed and normalize_url(feed_url) not in seen_normalized:
+                        queue.append((feed_url, None))
+                        seen_normalized.add(normalize_url(feed_url))
 
         return pages
     finally:

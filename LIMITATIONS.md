@@ -24,6 +24,7 @@ evidence"), and the simplest way to honor that is not to use one at all yet.
 | Official ATS platforms (Greenhouse, Lever, Workable, Teamtailor, Workday) -- only ever fetched when linked directly from the entity's own official site, link chain preserved as evidence | Hiring signals | Free | None |
 | Exa Search API (`api.exa.ai/search`) | Candidate website discovery for companies with none on file -- candidate generation only, independently re-verified via the same name-match gate before acceptance (never trusted as evidence itself). Tried first in the discovery chain. | Free tier: 20,000 requests/month, no card required | `EXA_API_KEY` env var |
 | Parallel Search API (`api.parallel.ai/v1/search`) | Same candidate-generation role as Exa, tried second (only if Exa is unconfigured or returns nothing) | Free tier: ~5,000 requests/month, no card required | `PARALLEL_API_KEY` env var |
+| NAV job-vacancy feed (`pam-stilling-feed.nav.no`) | Hiring signals: NAV's official national job board, published as a feed for outside developers with a public token. An ad is published only when its own employer org number equals the company's; only the job title and dates are published, never contact details. | Free, public token | None |
 | DuckDuckGo Instant Answer API (`api.duckduckgo.com`) | Same candidate-generation role, last-resort fallback if neither key above is configured | Free, no key | None |
 
 Per `EVALUATION_HARNESS.md`: *"server-side secrets supplied through
@@ -71,6 +72,19 @@ All permissive; no copyleft (GPL-style) obligations.
 
 ## Known limitations (not silently hidden — see `docs/testing-strategy.md`'s "no fabricated data" ethos)
 
+- **NAV hiring signals cover ~70% of currently active job ads, not all of
+  them.** The feed replays changes oldest-first; covering every active ad
+  needs a ~60-day window (~104 list pages, measured), which would eat too
+  much of a 2,000-request batch. The run reads ads modified in the last 14
+  days (~31 pages, ~70% of active ads) with a hard cap of 40 pages; if the cap
+  is ever hit, the newest ads are the ones cut off, and `run-report.json`'s
+  `nav_job_index.truncated_at_page_cap` says so. Ads are matched to a company
+  by exact employer name first, then confirmed by org number, so an ad listed
+  under a brand name that differs from the legal name is missed.
+- **Former-name website search is limited to one former name per company**,
+  is skipped once the batch has used 90% of its request budget, and is only
+  used when no other registered entity currently holds that name.
+
 - **Per-company `operations`** (request count/cost/runtime) in each
   submission envelope report as zero. `BudgetGovernor` is intentionally one
   shared counter per 100-company chunk (that's what makes the 2,000-request
@@ -86,10 +100,11 @@ All permissive; no copyleft (GPL-style) obligations.
   default. A page requiring JS rendering that isn't caught as an obvious
   "shell" degrades to its static content rather than failing outright, but
   true JS-rendered content isn't captured without installing it.
-- **Self-check hand-labeled fixture sample is 4 companies**, smaller than the
-  recommended 10-30 (see `fixtures/expected/README.md`) — this development
-  environment's network access is restricted to a small domain allow-list,
-  which made it unsafe to hand-verify more real company websites from here.
+- **Self-check fixture sample is 10 companies**, at the low end of the
+  recommended 10-30. Four have hand-verified websites; six were added with no
+  website on file, to represent the ~89% majority case. Those six carry
+  registry-derived labels, so their registry fields test wiring and
+  regressions rather than independent discovery accuracy.
 - **DuckDuckGo-only discovery had a near-zero real-world hit rate** for the
   actual gap it targets — ~89% of a random sample of the company universe has
   no website on file in the registry, and DuckDuckGo's free Instant Answer

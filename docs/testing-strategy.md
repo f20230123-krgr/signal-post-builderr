@@ -60,7 +60,9 @@ the word.
 
 Define explicitly (avoid noisy false positives): a change is material if it
 affects `legal_name`, `leadership`, `official_site`, `annual_accounts.latest`,
-or adds/removes a `hiring_signal`. Whitespace/formatting differences in scraped
+`operating_status` (e.g. Active -> Bankrupt; only compared when both snapshots
+carry the field, so older snapshots don't flag every company), or adds/removes
+a `hiring_signal`. Whitespace/formatting differences in scraped
 text, or a re-fetch of an unchanged page with a new `retrieved_at` timestamp,
 are not material changes on their own.
 

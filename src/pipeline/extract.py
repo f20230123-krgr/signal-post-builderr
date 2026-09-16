@@ -48,6 +48,9 @@ _MAX_FREETEXT_LINE_LENGTH = 300
 # more JobPosting/Article blocks.
 _JOB_POSTING_TYPES = {"JobPosting"}
 _DATED_ACTIVITY_TYPES = {"NewsArticle", "Article", "BlogPosting", "PressRelease"}
+# Events date themselves with startDate rather than datePublished -- kept as
+# their own set so the two date properties stay explicitly separated.
+_EVENT_TYPES = {"Event", "BusinessEvent", "EducationEvent", "ExhibitionEvent"}
 
 _META_OG_SITE_NAME_RE = re.compile(
     r'<meta\b[^>]*\bproperty\s*=\s*["\']og:site_name["\'][^>]*\bcontent\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE
@@ -55,6 +58,11 @@ _META_OG_SITE_NAME_RE = re.compile(
 # content before property is also valid HTML attribute order -- handle both.
 _META_OG_SITE_NAME_RE_ALT = re.compile(
     r'<meta\b[^>]*\bcontent\s*=\s*["\']([^"\']*)["\'][^>]*\bproperty\s*=\s*["\']og:site_name["\']', re.IGNORECASE
+)
+_META_APP_NAME_RE = re.compile(
+    r'<meta\b[^>]*\bname\s*=\s*["\'](?:application-name|apple-mobile-web-app-title)["\']'
+    r'[^>]*\bcontent\s*=\s*["\']([^"\']*)["\']',
+    re.IGNORECASE,
 )
 _CANONICAL_LINK_RE = re.compile(
     r'<link\b[^>]*\brel\s*=\s*["\']canonical["\'][^>]*\bhref\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE
@@ -118,7 +126,7 @@ def _visible_lines(html: str) -> list[str]:
 # set of non-organization content types is safe to broaden: a missing or
 # wrong context_name can only make verify() over-reject (lost coverage), never
 # wrongly accept (lost precision) -- see RawFact.context_name's docstring.
-_NON_ORGANIZATION_TYPES = _JOB_POSTING_TYPES | _DATED_ACTIVITY_TYPES | {
+_NON_ORGANIZATION_TYPES = _JOB_POSTING_TYPES | _DATED_ACTIVITY_TYPES | _EVENT_TYPES | {
     "WebPage", "AboutPage", "ContactPage", "CollectionPage", "FAQPage",
     "BreadcrumbList", "ItemList", "Product", "Person",
 }
@@ -227,11 +235,23 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
 
         obj_name = _as_str(obj.get("name"))
         headline = _as_str(obj.get("headline")) or obj_name or "activity"
-        if any(t in _DATED_ACTIVITY_TYPES for t in obj_types) and obj.get("datePublished"):
+        # schema.org puts the date on a different property per type:
+        # Article-family objects use datePublished, Event uses startDate.
+        # Only checking datePublished silently skipped every event a company
+        # publishes on its own site -- real dated activity, already on a page
+        # we fetch anyway. An undated event is still not dated activity: the
+        # date IS the claim, so it's dropped rather than guessed.
+        activity_date = None
+        if any(t in _DATED_ACTIVITY_TYPES for t in obj_types):
+            activity_date = obj.get("datePublished")
+        elif any(t in _EVENT_TYPES for t in obj_types):
+            activity_date = obj.get("startDate")
+
+        if activity_date:
             facts.append(
                 RawFact(
                     "dated_activity",
-                    f"{headline} ({obj['datePublished']})",
+                    f"{headline} ({activity_date})",
                     source_url,
                     "structured",
                     extracted_at,
@@ -278,10 +298,128 @@ def _meta_tag_facts(html: str, source_url: str, extracted_at: datetime) -> list[
     site_name = _META_OG_SITE_NAME_RE.search(html) or _META_OG_SITE_NAME_RE_ALT.search(html)
     if site_name and site_name.group(1):
         facts.append(RawFact("public_brand", site_name.group(1), source_url, "structured", extracted_at))
+    else:
+        # Plenty of real sites ship no og:site_name but do declare
+        # application-name / apple-mobile-web-app-title. Both are single,
+        # structured, self-declared brand tags on the entity's own verified
+        # domain -- same provenance as og:site_name, no extra request. Only
+        # consulted when og:site_name is absent: it's the more explicit
+        # declaration and must not be shadowed by a weaker tag.
+        fallback = _META_APP_NAME_RE.search(html)
+        if fallback and fallback.group(1).strip():
+            facts.append(RawFact("public_brand", fallback.group(1).strip(), source_url, "structured", extracted_at))
 
     canonical = _CANONICAL_LINK_RE.search(html) or _CANONICAL_LINK_RE_ALT.search(html)
     if canonical and canonical.group(1):
         facts.append(RawFact("official_site", canonical.group(1), source_url, "structured", extracted_at))
+
+    return facts
+
+
+# Company-owned social profiles, extracted from plain markup rather than only
+# from JSON-LD `sameAs`. Real-world gap: company_profile was available for
+# just ~4% of companies in a full 1,000-company batch, because most real sites
+# link their profiles from a footer <a href> and publish no structured data at
+# all. Provenance is unchanged and is what carries the precision here -- these
+# links are only ever read from the entity's own verified domain (verify.py
+# gates on that, and the housing-manager filter still applies to
+# company_profile specifically), so this adds reach, not identity risk.
+_SOCIAL_PROFILE_HOST_RE = re.compile(
+    r"^https?://(?:[\w-]+\.)*(linkedin\.com|facebook\.com|instagram\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com)/",
+    re.IGNORECASE,
+)
+# A share/intent/plugin URL is the page telling a visitor how to repost it --
+# not the company declaring a profile it owns. Publishing one as a
+# "company-owned profile" would be a wrong claim, not merely a thin one.
+_SOCIAL_NON_PROFILE_RE = re.compile(
+    r"/(?:sharer|share|shareArticle|intent|dialog|plugins|widgets|embed)\b|[?&]u=|[?&]url=",
+    re.IGNORECASE,
+)
+_ANCHOR_HREF_RE = re.compile(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+MAX_SOCIAL_PROFILE_LINKS = 8
+
+
+def social_profile_facts(
+    html: str, source_url: str, extracted_at: datetime, context_name: Optional[str] = None
+) -> list[RawFact]:
+    """company_profile facts from plain <a href> social links on the page.
+
+    Deduped by URL and capped: a site-wide template repeats the same links on
+    every page, and one page can list many, so without both this section
+    would fill with duplicates of a single footer (same discipline as
+    assemble.py's claim dedup)."""
+    seen: set[str] = set()
+    facts: list[RawFact] = []
+
+    for href in _ANCHOR_HREF_RE.findall(html):
+        link = href.strip()
+        if link in seen:
+            continue
+        if not _SOCIAL_PROFILE_HOST_RE.match(link):
+            continue
+        if _SOCIAL_NON_PROFILE_RE.search(link):
+            continue
+        seen.add(link)
+        facts.append(
+            RawFact("company_profile", link, source_url, "structured", extracted_at, context_name=context_name)
+        )
+        if len(facts) >= MAX_SOCIAL_PROFILE_LINKS:
+            break
+
+    return facts
+
+
+# A declared RSS/Atom feed is the richest dated_activity a company publishes
+# about itself: real headlines with real publication dates, structured, on its
+# own domain. Registry update events (registry_extras) give company-level
+# coverage everywhere including the ~89% with no site at all; this adds real
+# editorial depth for the companies that actually publish. Capped like every
+# other list section -- a feed can carry hundreds of entries.
+MAX_FEED_ACTIVITY_ENTRIES = 5
+
+_FEED_ITEM_RE = re.compile(r"<(?:item|entry)\b[^>]*>(.*?)</(?:item|entry)>", re.IGNORECASE | re.DOTALL)
+_FEED_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_FEED_DATE_RE = re.compile(
+    r"<(?:pubDate|published|updated|dc:date)\b[^>]*>(.*?)</(?:pubDate|published|updated|dc:date)>",
+    re.IGNORECASE | re.DOTALL,
+)
+_CDATA_RE = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.DOTALL)
+
+
+def _feed_text(raw: str) -> str:
+    unwrapped = _CDATA_RE.sub(r"\1", raw)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", unwrapped)).strip()
+
+
+def looks_like_feed(content: str) -> bool:
+    head = content[:2000].lower()
+    return "<rss" in head or "<feed" in head or "<rdf:rdf" in head
+
+
+def feed_activity_facts(content: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
+    """dated_activity from an RSS/Atom feed's entries.
+
+    An entry with no date is skipped rather than published undated -- the
+    date IS the claim, same discipline as the JSON-LD Event handling."""
+    if not looks_like_feed(content):
+        return []
+
+    facts: list[RawFact] = []
+    for raw_item in _FEED_ITEM_RE.findall(content):
+        date_match = _FEED_DATE_RE.search(raw_item)
+        if not date_match:
+            continue
+        title_match = _FEED_TITLE_RE.search(raw_item)
+        title = _feed_text(title_match.group(1)) if title_match else "activity"
+        published = _feed_text(date_match.group(1))
+        if not title or not published:
+            continue
+        facts.append(
+            RawFact("dated_activity", f"{title} ({published})", source_url, "structured", extracted_at)
+        )
+        if len(facts) >= MAX_FEED_ACTIVITY_ENTRIES:
+            break
 
     return facts
 
@@ -332,6 +470,18 @@ def extract(
       - Invent a field that wasn't actually present on the page.
     """
     extracted_at = now()
+
+    # A feed is XML, not HTML -- running extruct/Trafilatura over it produces
+    # nothing useful at best and garbage text at worst, so route it to the
+    # feed parser instead of the HTML path.
+    if looks_like_feed(page.raw_html):
+        feed_facts = feed_activity_facts(page.raw_html, page.url, extracted_at)
+        content_hash = hashlib.sha256(page.raw_html.encode("utf-8")).hexdigest()
+        for fact in feed_facts:
+            fact.content_hash = content_hash
+            fact.linked_from = page.linked_from
+        return feed_facts
+
     facts = structured_facts(page.raw_html, page.url, extracted_at)
 
     if not facts:
@@ -341,6 +491,7 @@ def extract(
 
     facts += _meta_tag_facts(page.raw_html, page.url, extracted_at)
     facts += _activity_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
+    facts += social_profile_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
 
     content_hash = hashlib.sha256(page.raw_html.encode("utf-8")).hexdigest()
     for fact in facts:

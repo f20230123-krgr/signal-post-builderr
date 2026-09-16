@@ -1,0 +1,12 @@
+{
+  "org_number": "932560496",
+  "expected_legal_name": "TRESS EIENDOM AS",
+  "_provenance": "Registry-derived label: values are what Brreg/the frozen universe manifest authoritatively record for this company. Included to make the fixture set representative of the ~89% of companies with NO website on file -- the case the original four website-bearing fixtures never exercised. Note these registry fields are authoritative-by-construction (the pipeline reads the same source), so they test wiring and regressions, not discovery; expected_legal_name and the absence of official_site are the genuinely independent signals here.",
+  "expected_fields": {
+    "industry": "Utleie av egen eller",
+    "legal_form": "AS",
+    "operating_status": "Active",
+    "leader": "Prestnes",
+    "dated_activity": "Registry record updated"
+  }
+}

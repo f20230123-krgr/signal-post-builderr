@@ -71,6 +71,18 @@ class Claim(BaseModel):
 class LegalIdentity(BaseModel):
     legal_name: Claim
     public_brand: Claim
+    # Free official-registry identity facts carried by Builderr's own frozen
+    # universe record (see registry_extras.universe_identity_facts): zero
+    # extra requests, 100% precision. Optional (not a required Claim) so an
+    # entity resolved outside the universe -- or any existing caller that
+    # doesn't supply them -- still validates.
+    industry: Optional[Claim] = None
+    employee_count: Optional[Claim] = None
+    legal_form: Optional[Claim] = None
+    operating_status: Optional[Claim] = None
+    # Founding date from the live registry record (registry_extras.
+    # fetch_live_registry_details) -- not carried by the universe manifest.
+    founded_date: Optional[Claim] = None
 
 
 class AnnualAccounts(BaseModel):

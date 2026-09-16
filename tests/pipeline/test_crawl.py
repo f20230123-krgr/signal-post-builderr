@@ -540,3 +540,40 @@ def test_ats_link_following_is_opt_in():
     pages = crawl(entity, budget, client=client, allowed_domains=set())
 
     assert len(pages) == 1
+
+
+def test_crawl_follows_a_declared_rss_feed_on_the_official_domain():
+    """A site declaring <link rel="alternate" type="application/rss+xml">
+    is pointing at its own published activity. Same domain, so no new
+    allow-list risk, and only fetched when actually declared -- a company
+    with no feed costs nothing."""
+    home = (
+        '<html><head><link rel="alternate" type="application/rss+xml" '
+        'title="Nyheter" href="/feed.xml"></head><body>Home</body></html>'
+    )
+    fetched = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fetched.append(str(request.url))
+        if request.url.path == "/feed.xml":
+            return httpx.Response(200, text="<rss><channel></channel></rss>")
+        return httpx.Response(200, text=home)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    pages = crawl(_entity("https://acme.no"), BudgetGovernor(), client=client)
+
+    assert any(u.endswith("/feed.xml") for u in fetched)
+    assert any(p.url.endswith("/feed.xml") for p in pages)
+
+
+def test_crawl_does_not_invent_a_feed_when_none_is_declared():
+    fetched = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fetched.append(str(request.url))
+        return httpx.Response(200, text="<html><body>No feed here</body></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    crawl(_entity("https://acme.no"), BudgetGovernor(), client=client)
+
+    assert not any("feed" in u for u in fetched)

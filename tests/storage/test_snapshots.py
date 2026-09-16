@@ -109,3 +109,31 @@ def test_diffing_does_not_flag_a_reporting_period_change_when_both_are_none():
     new = make_profile(annual_latest=available_claim("Revenue: 100,000 NOK"))
 
     assert diff_material_changes(previous, new) == []
+
+
+def _with_status(profile, status):
+    profile.legal_identity.operating_status = available_claim(status) if status is not None else None
+    return profile
+
+
+def test_a_company_going_bankrupt_is_a_material_change():
+    old = _with_status(make_profile(legal_name=available_claim("ACME AS")), "Active")
+    new = _with_status(make_profile(legal_name=available_claim("ACME AS")), "Bankrupt")
+
+    assert "operating_status: 'Active' -> 'Bankrupt'" in diff_material_changes(old, new)
+
+
+def test_operating_status_missing_from_an_older_snapshot_is_not_a_change():
+    """Snapshots written before the field existed have none -- treating that
+    as a change would flag every company on the first run after upgrading."""
+    old = _with_status(make_profile(legal_name=available_claim("ACME AS")), None)
+    new = _with_status(make_profile(legal_name=available_claim("ACME AS")), "Active")
+
+    assert not any("operating_status" in c for c in diff_material_changes(old, new))
+
+
+def test_unchanged_operating_status_is_not_a_change():
+    old = _with_status(make_profile(legal_name=available_claim("ACME AS")), "Active")
+    new = _with_status(make_profile(legal_name=available_claim("ACME AS")), "Active")
+
+    assert not any("operating_status" in c for c in diff_material_changes(old, new))

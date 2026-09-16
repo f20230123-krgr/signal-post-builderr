@@ -39,7 +39,7 @@ from src.pipeline.resolve import ResolvedEntity
 
 # Documented threshold -- changing this number changes precision. Any change
 # must be accompanied by a /self-score run reported in the same PR/summary.
-NAME_MATCH_THRESHOLD = 90  # RapidFuzz token_sort_ratio, 0-100
+NAME_MATCH_THRESHOLD = 90  # RapidFuzz partial_ratio (see name_similarity), 0-100
 
 _NAME_BEARING_FIELDS = {"organization_name", "page_text"}
 
@@ -79,8 +79,27 @@ def _domain(url: str) -> str:
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 
+# Real-world regression, found running a genuinely unseen 100-company batch
+# (org numbers not in the submitted entry-companies.jsonl): Exa discovered
+# https://fanison.fi for "FANSON AS" -- confirmed live to be "Fanison Oy",
+# an unrelated Finnish company. partial_ratio("FANSON AS", "Fanison") scores
+# 92.3, clearing NAME_MATCH_THRESHOLD, purely because a 1-character edit
+# distance on a short bare-word candidate produces a high substring-
+# alignment score -- not because the names actually match. A genuine short
+# match (e.g. "ACME AS" vs a page's bare "ACME") is an exact substring and
+# still scores 100 either way, so this doesn't affect it -- only a short
+# candidate that is merely SIMILAR, not identical, gets penalized below the
+# threshold. Long candidates (e.g. a full sentence of page prose containing
+# the legal name) are unaffected -- that's partial_ratio's actual intended
+# use here (see module docstring).
+_SHORT_CANDIDATE_MAX_LEN = 12
+
+
 def name_similarity(a: str, b: str) -> float:
-    return fuzz.partial_ratio(a.lower(), b.lower())
+    score = fuzz.partial_ratio(a.lower(), b.lower())
+    if score < 100 and min(len(a.strip()), len(b.strip())) <= _SHORT_CANDIDATE_MAX_LEN:
+        return score / 2
+    return score
 
 
 # Real-world regression, confirmed at full 1,000-company batch scale (51

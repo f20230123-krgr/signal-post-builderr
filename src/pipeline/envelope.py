@@ -45,6 +45,21 @@ def _claim_entries(profile: CompanyProfile) -> list[tuple[str, Claim]]:
         ("annual_accounts_latest", profile.annual_accounts.latest),
         ("official_website", profile.online_presence.official_site),
     ]
+    # Free registry identity facts -- omitted entirely (not emitted as an
+    # empty/unavailable claim) when this company isn't covered by the
+    # universe manifest, so a missing one is never mistaken for a gap we
+    # looked for and failed to fill.
+    entries += [
+        (field_name, claim)
+        for field_name, claim in (
+            ("industry", profile.legal_identity.industry),
+            ("employee_count", profile.legal_identity.employee_count),
+            ("legal_form", profile.legal_identity.legal_form),
+            ("operating_status", profile.legal_identity.operating_status),
+            ("founded_date", profile.legal_identity.founded_date),
+        )
+        if claim is not None
+    ]
     entries += [("annual_accounts_history", c) for c in profile.annual_accounts.history]
     entries += [("leader", c) for c in profile.leadership.leaders]
     entries += [("workplace", c) for c in profile.leadership.workplaces]

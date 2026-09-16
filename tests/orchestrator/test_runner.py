@@ -11,10 +11,12 @@ import time
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
-from src.orchestrator.runner import _default_process_one, run_batch, run_in_chunks
+from src.orchestrator.runner import DeadProviderAbort, _default_process_one, run_batch, run_in_chunks
+from src.pipeline.discovery import ProviderHealth
 from src.storage.snapshots import SnapshotStore
 from tests.conftest import make_profile
 
@@ -117,16 +119,22 @@ def test_run_batch_passes_matching_universe_entry_to_default_process_one():
     assert seen_entries["000000001"] is None
 
 
-def test_default_process_one_resolves_from_universe_without_registry_call():
+def test_default_process_one_resolves_identity_from_the_universe_not_a_registry_lookup():
+    """Identity still comes from the frozen manifest, never from a live
+    lookup -- that is what makes it free and byte-identical for every
+    entrant.
+
+    The entity endpoint IS hit at most once per company now, deliberately:
+    fetch_live_registry_details reads the founding date and former names,
+    which the manifest doesn't carry (measured: founding date 40/40, former
+    names 11/40). That one extra call must not become the source of identity,
+    which is what this pins -- legal_name is still sourced from the manifest
+    even here, where that call returns nothing usable."""
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
-        # The plain entity-lookup endpoint must never be hit when a universe
-        # entry is supplied -- fail loudly if it ever is.
-        if str(request.url) == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
-            return httpx.Response(500)
-        return httpx.Response(404)  # roller/regnskap/underenheter: no extra data
+        return httpx.Response(404)  # entity details/roller/regnskap/underenheter: no extra data
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     universe_entry = {"organisation_number": "923609016", "name": "EQUINOR ASA", "website": "www.equinor.com"}
@@ -136,7 +144,9 @@ def test_default_process_one_resolves_from_universe_without_registry_call():
     )
 
     assert profile.legal_identity.legal_name.value == "EQUINOR ASA"
-    assert "https://data.brreg.no/enhetsregisteret/api/enheter/923609016" not in calls
+    assert profile.legal_identity.legal_name.source == "signalpost-company-universe-2025.jsonl.gz"
+    entity_lookups = [c for c in calls if c == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016"]
+    assert len(entity_lookups) <= 1, f"expected at most the details fetch, got {len(entity_lookups)}"
 
 
 def test_run_in_chunks_processes_every_company_across_multiple_chunks():
@@ -452,3 +462,218 @@ def test_default_process_one_falls_back_to_org_number_search_when_leader_name_al
 
     assert profile.online_presence.official_site.value in ("https://org-number.example", "https://org-number.example/")
     assert profile.online_presence.official_site.source_class == "external"
+
+
+# --- Stop if a discovery key is dead (opt-in, local testing only) ---
+
+
+def test_stop_if_key_dead_aborts_before_processing_anything_when_a_key_is_already_dead():
+    health = ProviderHealth()
+    health.disable("exa", "HTTP 402 (exhausted credits or invalid key)")
+    processed = []
+
+    def process_one(org_number, budget, previous_snapshot=None):
+        processed.append(org_number)
+        return make_profile(org_number=org_number)
+
+    with pytest.raises(DeadProviderAbort) as excinfo:
+        asyncio.run(
+            run_batch(
+                ["000000001", "000000002"], BudgetGovernor(), process_one=process_one,
+                provider_health=health, stop_if_key_dead=True,
+            )
+        )
+
+    assert processed == []
+    assert "exa" in excinfo.value.dead_providers
+
+
+def test_stop_if_key_dead_aborts_when_a_key_dies_mid_run(tmp_path):
+    """The company whose run killed the key was processed with degraded
+    discovery -- it must not be written to snapshot history, and nothing
+    after it may start."""
+    health = ProviderHealth()
+    store = SnapshotStore(tmp_path / "snapshots")
+    processed = []
+
+    def process_one(org_number, budget, previous_snapshot=None):
+        processed.append(org_number)
+        health.disable("exa", "HTTP 402 (exhausted credits or invalid key)")
+        return make_profile(org_number=org_number)
+
+    with pytest.raises(DeadProviderAbort):
+        asyncio.run(
+            run_batch(
+                ["000000001", "000000002", "000000003"], BudgetGovernor(), process_one=process_one,
+                snapshot_store=store, provider_health=health, stop_if_key_dead=True, concurrency=1,
+            )
+        )
+
+    assert processed == ["000000001"]
+    assert store.latest("000000001") is None
+
+
+def test_without_the_flag_a_dead_key_never_costs_terminal_results():
+    """The default is what the graded run uses: a dead key must never reduce
+    the number of profiles produced (exactly-N terminal results hard gate)."""
+    health = ProviderHealth()
+    health.disable("exa", "HTTP 402 (exhausted credits or invalid key)")
+
+    def process_one(org_number, budget, previous_snapshot=None):
+        return make_profile(org_number=org_number)
+
+    org_numbers = [f"{i:09d}" for i in range(5)]
+    profiles = asyncio.run(run_batch(org_numbers, BudgetGovernor(), process_one=process_one, provider_health=health))
+
+    assert len(profiles) == 5
+
+
+def test_run_in_chunks_honours_stop_if_key_dead():
+    health = ProviderHealth()
+    health.disable("parallel", "HTTP 401 (exhausted credits or invalid key)")
+
+    def process_one(org_number, budget, previous_snapshot=None):
+        raise AssertionError("must not process any company")
+
+    with pytest.raises(DeadProviderAbort):
+        asyncio.run(
+            run_in_chunks(
+                ["000000001"], process_one=process_one, provider_health=health, stop_if_key_dead=True,
+            )
+        )
+
+
+# --- Former-name search tier and NAV index wiring ---
+
+
+def _former_name_handler(name_holders, site_html_by_url):
+    """Registry + DuckDuckGo mock: company GENERIC HOLDING AS (923609016) was
+    renamed from OLD BRAND AS; only the former-name search finds a site."""
+    def handler(request):
+        url = str(request.url)
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(200, json={
+                "organisasjonsnummer": "923609016", "navn": "GENERIC HOLDING AS",
+                "historiskeNavn": [{"navn": "OLD BRAND AS", "fraDato": "2015-01-01 00:00:00",
+                                    "tilDato": "2024-03-01 00:00:00"}],
+            })
+        if request.url.path == "/enhetsregisteret/api/enheter" and "navn" in request.url.params:
+            return httpx.Response(200, json={"_embedded": {"enheter": name_holders}})
+        if "duckduckgo.com" in url:
+            if "OLD BRAND" in dict(request.url.params).get("q", ""):
+                return httpx.Response(200, json={"Heading": "x", "Infobox": {"content": [
+                    {"label": "Website", "value": "[oldbrand.example]"}]}})
+            return httpx.Response(200, json={"Heading": "x", "Infobox": None})
+        for site, html in site_html_by_url.items():
+            if url.rstrip("/") == site or url == site + "/robots.txt":
+                return httpx.Response(200, text=html)
+        return httpx.Response(404)
+    return handler
+
+
+_OLD_BRAND_HTML = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Old Brand AS"}</script></head></html>'
+
+
+def test_former_name_tier_finds_a_site_still_running_under_the_old_name(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
+    client = httpx.Client(transport=httpx.MockTransport(
+        _former_name_handler(name_holders=[], site_html_by_url={"https://oldbrand.example": _OLD_BRAND_HTML})
+    ))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client)
+
+    assert profile.online_presence.official_site.value in ("https://oldbrand.example", "https://oldbrand.example/")
+    assert any("Renamed from 'OLD BRAND AS'" in c.value for c in profile.activity.dated_activity)
+
+
+def test_former_name_tier_is_skipped_when_another_company_now_holds_that_name(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
+    client = httpx.Client(transport=httpx.MockTransport(_former_name_handler(
+        name_holders=[{"organisasjonsnummer": "555555555", "navn": "OLD BRAND AS"}],
+        site_html_by_url={"https://oldbrand.example": _OLD_BRAND_HTML},
+    )))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), client=client)
+
+    assert profile.online_presence.official_site.value is None
+
+
+def test_nav_job_index_is_built_once_per_run_not_once_per_chunk(monkeypatch):
+    """The feed is the same for every company: a 1,000-company run pays for
+    it once, on the first chunk's budget."""
+    import src.orchestrator.runner as runner_module
+    from src.pipeline.nav_jobs import NavJobIndex
+
+    builds = []
+
+    def fake_build(client, budget, now=None):
+        builds.append(budget)
+        return NavJobIndex(token="t")
+
+    monkeypatch.setattr(runner_module, "build_nav_job_index", fake_build)
+
+    def process_one(org_number, budget, previous_snapshot=None):
+        return make_profile(org_number=org_number)
+
+    org_numbers = [f"{i:09d}" for i in range(6)]
+    _, report = asyncio.run(run_in_chunks(org_numbers, chunk_size=2, process_one=process_one, use_nav_jobs=True))
+
+    assert len(builds) == 1
+    assert report["nav_job_index"]["truncated_at_page_cap"] is False
+
+
+def test_nav_jobs_are_off_unless_asked_for(monkeypatch):
+    import src.orchestrator.runner as runner_module
+
+    def fake_build(*args, **kwargs):
+        raise AssertionError("NAV index must not be built unless use_nav_jobs=True")
+
+    monkeypatch.setattr(runner_module, "build_nav_job_index", fake_build)
+
+    def process_one(org_number, budget, previous_snapshot=None):
+        return make_profile(org_number=org_number)
+
+    _, report = asyncio.run(run_in_chunks(["000000001"], process_one=process_one))
+
+    assert report["nav_job_index"] is None
+
+
+# --- Exa limited to the first search round (opt-in spend limit) ---
+
+
+def _exa_keys_per_round(monkeypatch, exa_first_round_only):
+    import src.orchestrator.runner as runner_module
+
+    monkeypatch.setenv("EXA_API_KEY", "fake-exa")
+    monkeypatch.setenv("PARALLEL_API_KEY", "fake-parallel")
+    seen = []
+
+    def fake_discover(query_name, client, budget, **kwargs):
+        seen.append(kwargs.get("exa_api_key"))
+        return None
+
+    monkeypatch.setattr(runner_module, "discover_candidate_site", fake_discover)
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    universe_entry = {"organisation_number": "923609016", "name": "GENERIC HOLDING AS", "website": ""}
+
+    _default_process_one(
+        "923609016", BudgetGovernor(), universe_entry=universe_entry, client=client,
+        exa_first_round_only=exa_first_round_only,
+    )
+    return seen
+
+
+def test_exa_first_round_only_uses_exa_for_the_company_name_search_alone(monkeypatch):
+    seen = _exa_keys_per_round(monkeypatch, exa_first_round_only=True)
+
+    assert seen[0] == "fake-exa"
+    assert len(seen) > 1 and all(key is None for key in seen[1:])
+
+
+def test_by_default_exa_is_used_on_every_search_round(monkeypatch):
+    """The default -- what an evaluator's one-command run gets."""
+    seen = _exa_keys_per_round(monkeypatch, exa_first_round_only=False)
+
+    assert len(seen) > 1 and all(key == "fake-exa" for key in seen)

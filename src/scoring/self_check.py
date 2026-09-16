@@ -41,6 +41,15 @@ _FIELD_TO_CLAIMS: dict[str, Callable[[CompanyProfile], list[Optional[str]]]] = {
     "company_profile": lambda p: [c.value for c in p.online_presence.company_profiles],
     "hiring_signal": lambda p: [c.value for c in p.activity.hiring_signals],
     "dated_activity": lambda p: [c.value for c in p.activity.dated_activity],
+    # Free registry identity fields (registry_extras.universe_identity_facts).
+    # Optional on the profile, so guard against None rather than assuming.
+    "industry": lambda p: [p.legal_identity.industry.value if p.legal_identity.industry else None],
+    "employee_count": lambda p: [p.legal_identity.employee_count.value if p.legal_identity.employee_count else None],
+    "legal_form": lambda p: [p.legal_identity.legal_form.value if p.legal_identity.legal_form else None],
+    "operating_status": lambda p: [
+        p.legal_identity.operating_status.value if p.legal_identity.operating_status else None
+    ],
+    "founded_date": lambda p: [p.legal_identity.founded_date.value if p.legal_identity.founded_date else None],
 }
 
 
@@ -80,6 +89,27 @@ def _field_matches(profile: CompanyProfile, field_name: str, expected_substring:
     return any(expected_substring.lower() in v.lower() for v in values)
 
 
+_UNIVERSE_CACHE: Optional[dict] = None
+
+
+def _universe_entry(org_number: str) -> Optional[dict]:
+    """This company's record from the frozen universe manifest, if present.
+
+    The real runner resolves from the universe and mines it for free identity
+    facts, so a harness that skipped it would score a pipeline that isn't the
+    one shipping. Loaded once and cached -- the file is large and this runs
+    across every fixture."""
+    global _UNIVERSE_CACHE
+    if _UNIVERSE_CACHE is None:
+        from pathlib import Path as _Path
+
+        from src.pipeline.universe import load_universe
+
+        manifest = _Path("signalpost-company-universe-2025.jsonl.gz")
+        _UNIVERSE_CACHE = load_universe(manifest) if manifest.exists() else {}
+    return _UNIVERSE_CACHE.get(org_number)
+
+
 def _default_process_company(org_number: str) -> CompanyProfile:
     """Real end-to-end pipeline run for one company -- used for actual
     /self-score invocations. Not exercised by this module's own pytest suite
@@ -88,13 +118,19 @@ def _default_process_company(org_number: str) -> CompanyProfile:
     from src.pipeline.assemble import assemble
     from src.pipeline.crawl import DEFAULT_COMPANY_OWNED_PATHS, crawl
     from src.pipeline.extract import extract
-    from src.pipeline.registry_extras import fetch_registry_extras
+    from src.pipeline.registry_extras import (
+        fetch_live_registry_details,
+        fetch_registry_extras,
+        fetch_registry_update_activity,
+        universe_identity_facts,
+    )
     from src.pipeline.resolve import resolve
     from src.pipeline.verify import verify
     from src.orchestrator.budget import BudgetGovernor
 
     budget = BudgetGovernor()
-    entity = resolve(org_number)
+    universe_entry = _universe_entry(org_number)
+    entity = resolve(org_number, universe_entry=universe_entry)
     raw_facts = []
     if entity.resolution_state == EvidenceState.AVAILABLE:
         pages = crawl(entity, budget, company_owned_paths=DEFAULT_COMPANY_OWNED_PATHS)
@@ -104,6 +140,13 @@ def _default_process_company(org_number: str) -> CompanyProfile:
     confirmed = [c for c in (verify(f, entity) for f in raw_facts) if c is not None]
     registry_facts, accounts_state = fetch_registry_extras(entity, budget)
     confirmed += registry_facts
+    # Keep this harness on the same path the real runner takes -- it drifted
+    # once already (the runner gained registry update events while this kept
+    # scoring without them, quietly measuring a different pipeline than the
+    # one that actually ships).
+    confirmed += fetch_registry_update_activity(entity, budget)
+    confirmed += universe_identity_facts(org_number, universe_entry, entity.retrieved_at)
+    confirmed += fetch_live_registry_details(entity, budget).facts
     return assemble(entity, confirmed, previous_snapshot=None, accounts_state=accounts_state)
 
 

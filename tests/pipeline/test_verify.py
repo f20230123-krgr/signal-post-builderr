@@ -62,6 +62,24 @@ def test_similar_but_different_company_name_is_rejected():
     assert confirmed is None
 
 
+def test_name_similarity_rejects_a_short_near_miss_candidate():
+    """Real-world regression, found running a genuinely unseen 100-company
+    batch: fuzz.partial_ratio("FANSON AS", "Fanison") scores 92.3 -- above
+    NAME_MATCH_THRESHOLD (90) -- even though these are two unrelated real
+    companies (a Norwegian "FANSON AS" and a Finnish "Fanison Oy" in Lahti,
+    confirmed live). A 1-character edit distance on a short bare-word
+    candidate produces a deceptively high substring-alignment score. A
+    short candidate must match (near-)exactly -- not merely fuzzily -- to
+    be accepted; a genuine short match (e.g. "ACME AS" vs "ACME") is an
+    exact substring and still scores 100, so this doesn't affect it."""
+    assert verify_module.name_similarity("FANSON AS", "Fanison") < NAME_MATCH_THRESHOLD
+
+
+def test_name_similarity_still_accepts_a_true_short_substring_match():
+    assert verify_module.name_similarity("ACME AS", "ACME") >= NAME_MATCH_THRESHOLD
+    assert verify_module.name_similarity("SYKKELKOMPONENTER AS", "Sykkelkomponenter") >= NAME_MATCH_THRESHOLD
+
+
 def test_fact_from_a_different_domain_than_the_official_site_is_rejected():
     # A look-alike/imposter site could use the exact same company name --
     # provenance (source domain) must gate independently of name similarity.

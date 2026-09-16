@@ -1,11 +1,22 @@
 {
-  "run_id": "submission-run-final-v3",
+  "run_id": "submission-corpus",
   "input_count": 1000,
   "profile_count": 1000,
   "universe_used": true,
   "chunk_size": 100,
   "chunk_count": 10,
-  "requests_used": 16253,
-  "spend_used_usd": 0.0,
-  "wall_clock_seconds": 3453.428
+  "requests_used": 14450,
+  "spend_used_usd": 5.635,
+  "spend_limits": {
+    "exa_first_round_only": true,
+    "max_search_spend_usd": 10.0
+  },
+  "wall_clock_seconds": 4287.619,
+  "degraded_providers": {},
+  "nav_job_index": {
+    "pages_fetched": 30,
+    "requests_used": 31,
+    "active_ads_indexed": 6317,
+    "truncated_at_page_cap": false
+  }
 }

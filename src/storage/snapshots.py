@@ -87,6 +87,19 @@ def diff_material_changes(
             f"leadership.workplaces: {sorted(old_workplaces)} -> {sorted(new_workplaces)}"
         )
 
+    # Going bankrupt or into liquidation is the most decision-relevant change a
+    # company can make between runs. Only compared when BOTH snapshots carry
+    # the field: snapshots written before it existed have none, and treating
+    # "absent -> Active" as a change would flag every company on the first
+    # run after upgrading.
+    old_status_claim = previous.legal_identity.operating_status
+    new_status_claim = new.legal_identity.operating_status
+    if old_status_claim is not None and new_status_claim is not None:
+        old_status = _normalized(old_status_claim.value)
+        new_status = _normalized(new_status_claim.value)
+        if old_status and new_status and old_status != new_status:
+            changes.append(f"operating_status: {old_status!r} -> {new_status!r}")
+
     old_hiring = _claim_values(previous.activity.hiring_signals)
     new_hiring = _claim_values(new.activity.hiring_signals)
     added = new_hiring - old_hiring

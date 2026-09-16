@@ -59,6 +59,13 @@ CompanyProfile:
   legal_identity:
     legal_name: Claim
     public_brand: Claim
+    # Optional registry identity facts -- omitted (not emitted as a gap) when
+    # the source doesn't carry them:
+    industry: Claim | null          # universe manifest industry code + label
+    employee_count: Claim | null    # universe manifest
+    legal_form: Claim | null        # universe manifest (AS, ASA, ENK, ...)
+    operating_status: Claim | null  # Active / Bankrupt / In liquidation
+    founded_date: Claim | null      # live registry record (stiftelsesdato)
 
   # 2. Latest annual accounts and available history
   annual_accounts:

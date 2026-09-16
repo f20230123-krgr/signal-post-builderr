@@ -86,3 +86,56 @@ def test_answers_never_include_a_value_when_state_is_not_available():
 
     assert site_answer["state"] == "not_available"
     assert "http" not in site_answer["answer"]
+
+
+def test_profile_question_answers_from_the_free_registry_identity_fields():
+    """Industry, employee count and operating status come free from the
+    registry record we already read (registry_extras.universe_identity_facts)
+    -- they answer real questions a job seeker or investor actually asks, and
+    cost nothing extra to synthesize since the claims are already in hand."""
+    from src.models.profile import Claim
+
+    profile = make_profile(legal_name=available_claim("SANDNES ELEKTRISKE AS"))
+    profile.legal_identity.industry = available_claim("43.210 Elektrisk installasjonsarbeid")
+    profile.legal_identity.employee_count = available_claim("11")
+    profile.legal_identity.operating_status = available_claim("Active")
+
+    answers = answer_business_questions(profile)
+    by_q = {a["question"]: a for a in answers}
+    profile_answer = next(a for q, a in by_q.items() if "do" in q.lower() and "what" in q.lower())
+
+    assert "Elektrisk installasjonsarbeid" in profile_answer["answer"]
+    assert profile_answer["state"] == EvidenceState.AVAILABLE.value
+
+    status_answer = next(a for q, a in by_q.items() if "operating" in q.lower() or "still active" in q.lower())
+    assert "Active" in status_answer["answer"]
+
+
+def test_new_questions_degrade_honestly_when_the_registry_fields_are_absent():
+    """A company outside Builderr's universe manifest has no such claims --
+    the questions must still be answered, honestly, never guessed."""
+    profile = make_profile(legal_name=available_claim("SOME COMPANY AS"))
+
+    answers = answer_business_questions(profile)
+
+    assert all("answer" in a and "state" in a for a in answers)
+    assert not any(a["state"] == EvidenceState.AVAILABLE.value and a["answer"].strip() == "" for a in answers)
+
+
+def test_founded_question_answers_from_the_live_registry_founding_date():
+    profile = make_profile(legal_name=available_claim("ACME AS"))
+    profile.legal_identity.founded_date = available_claim("2012-07-01")
+
+    answer = next(a for a in answer_business_questions(profile) if "founded" in a["question"].lower())
+
+    assert answer["answer"] == "Founded 2012-07-01"
+    assert answer["state"] == EvidenceState.AVAILABLE.value
+
+
+def test_founded_question_is_honest_when_no_date_is_known():
+    answer = next(
+        a for a in answer_business_questions(make_profile(legal_name=available_claim("ACME AS")))
+        if "founded" in a["question"].lower()
+    )
+
+    assert answer["state"] == EvidenceState.NOT_AVAILABLE.value

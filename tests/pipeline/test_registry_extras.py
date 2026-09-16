@@ -15,7 +15,14 @@ import httpx
 
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
-from src.pipeline.registry_extras import fetch_leadership_only, fetch_registry_extras
+from src.pipeline.registry_extras import (
+    fetch_leadership_only,
+    fetch_registry_extras,
+    fetch_live_registry_details,
+    fetch_registry_update_activity,
+    name_is_held_by_another_entity,
+    universe_identity_facts,
+)
 from src.pipeline.resolve import ResolvedEntity
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "registry"
@@ -271,3 +278,276 @@ def test_accounts_state_is_failed_when_the_accounts_endpoint_returns_a_server_er
 
     assert not any(f.field_name.startswith("annual_accounts") for f in facts)
     assert accounts_state == EvidenceState.FAILED
+
+
+def test_universe_identity_facts_mines_free_fields_from_the_universe_record():
+    """Builderr's frozen universe record already carries industry, employee
+    count, legal form and insolvency status for every covered company -- all
+    official-registry data we already hold in memory, so emitting them costs
+    zero requests and carries no identity-matching risk (same trust tier as
+    resolve() itself, which reads the same record)."""
+    entry = {
+        "organisation_number": "810034882",
+        "name": "SANDNES ELEKTRISKE AS",
+        "legal_form": "AS",
+        "employees": 11,
+        "bankrupt": False,
+        "liquidating": False,
+        "municipality": "SANDNES",
+        "industry_code": "43.210",
+        "industry_label": "Elektrisk installasjonsarbeid",
+        "website": "",
+    }
+
+    facts = universe_identity_facts("810034882", entry, now=NOW)
+    by_field = {f.field_name: f.value for f in facts}
+
+    assert by_field["industry"] == "43.210 Elektrisk installasjonsarbeid"
+    assert by_field["employee_count"] == "11"
+    assert by_field["legal_form"] == "AS"
+    assert by_field["operating_status"] == "Active"
+    # Registry-tier trust, zero identity risk -- same as every other fact here.
+    assert all(f.source_class == "official_registry" for f in facts)
+    assert all(f.extraction_method == "registry" for f in facts)
+    assert all(f.match_confidence == 100.0 for f in facts)
+
+
+def test_universe_identity_facts_reports_insolvency_and_skips_missing_fields():
+    entry = {
+        "organisation_number": "999999999",
+        "name": "KONKURS AS",
+        "legal_form": "AS",
+        "employees": None,
+        "bankrupt": True,
+        "liquidating": False,
+        "industry_code": "",
+        "industry_label": "",
+    }
+
+    facts = universe_identity_facts("999999999", entry, now=NOW)
+    by_field = {f.field_name: f.value for f in facts}
+
+    assert by_field["operating_status"] == "Bankrupt"
+    # Never invent a value for a field the record doesn't actually carry.
+    assert "industry" not in by_field
+    assert "employee_count" not in by_field
+
+
+def test_universe_identity_facts_returns_nothing_without_a_universe_record():
+    assert universe_identity_facts("810034882", None, now=NOW) == []
+
+
+def _updates_response(dates: list[str]) -> dict:
+    return {
+        "_embedded": {
+            "oppdaterteEnheter": [
+                {"oppdateringsid": i, "dato": d, "organisasjonsnummer": "923609016", "endringstype": "Endring"}
+                for i, d in enumerate(dates)
+            ]
+        }
+    }
+
+
+def test_registry_update_activity_emits_the_most_recent_events_as_dated_activity():
+    """Brreg's oppdateringer/enheter endpoint (confirmed live to accept an
+    organisasjonsnummer filter) is per-company, dated, authoritative and
+    free -- exactly the "dated public activity from permitted sources" the
+    brief asks for, for companies that have no website at all. Capped to the
+    most recent few: a company can have 40+ update events and republishing
+    all of them would bury the signal in registry churn."""
+    dates = [
+        "2026-05-11T22:30:42.050Z",
+        "2026-07-15T22:03:09.106Z",
+        "2026-08-11T22:03:42.412Z",
+        "2026-09-14T22:01:56.024Z",
+    ]
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_updates_response(dates)))
+    )
+
+    facts = fetch_registry_update_activity(_entity(), BudgetGovernor(), client=client, now=lambda: NOW, max_events=3)
+
+    assert len(facts) == 3
+    assert all(f.field_name == "dated_activity" for f in facts)
+    assert all(f.source_class == "official_registry" for f in facts)
+    # Most recent first, and each carries its own real date.
+    assert "2026-09-14" in facts[0].value
+    assert "2026-08-11" in facts[1].value
+    assert "2026-07-15" in facts[2].value
+
+
+def test_registry_update_activity_returns_nothing_when_budget_is_exhausted():
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_updates_response([]))))
+    exhausted = BudgetGovernor(BudgetLimits(max_requests=0, max_spend_usd=10, max_wall_clock_seconds=1000))
+
+    assert fetch_registry_update_activity(_entity(), exhausted, client=client, now=lambda: NOW) == []
+
+
+def test_registry_update_activity_degrades_cleanly_on_error():
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503)))
+
+    facts = fetch_registry_update_activity(
+        _entity(), BudgetGovernor(), client=client, sleep=lambda s: None, now=lambda: NOW
+    )
+
+    assert facts == []
+
+
+def test_workplace_falls_back_to_the_entity_s_own_registered_location():
+    """A company with no registered sub-units still has a workplace -- its
+    own registered business address. Without this, ~25% of companies in a
+    real batch reported no workplace at all despite the registry holding a
+    perfectly good one. Registry-sourced, so same trust tier and zero extra
+    requests (the sub-units call already happened and came back empty)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "underenheter" in url:
+            return httpx.Response(200, json={"_embedded": {"underenheter": []}})
+        return httpx.Response(404)
+
+    entity = _entity(org_number="810034882", legal_name="SANDNES ELEKTRISKE AS")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=client, now=lambda: NOW)
+    workplaces = [f for f in facts if f.field_name == "workplace"]
+
+    assert len(workplaces) == 1
+    assert "SANDNES ELEKTRISKE AS" in workplaces[0].value
+    assert workplaces[0].source_class == "official_registry"
+
+
+def test_workplace_fallback_does_not_fire_when_real_subunits_exist():
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "underenheter" in url:
+            return httpx.Response(
+                200,
+                json={"_embedded": {"underenheter": [{"navn": "SANDNES ELEKTRISKE AVD OSLO", "beliggenhetsadresse": {"kommune": "OSLO"}}]}},
+            )
+        return httpx.Response(404)
+
+    entity = _entity(org_number="810034882", legal_name="SANDNES ELEKTRISKE AS")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=client, now=lambda: NOW)
+    workplaces = [f for f in facts if f.field_name == "workplace"]
+
+    assert len(workplaces) == 1
+    assert "AVD OSLO" in workplaces[0].value
+
+
+def test_universe_identity_facts_carry_the_same_content_hash_as_the_legal_name():
+    """Every fact read from the universe record must carry the same evidence
+    fingerprint resolve() records for legal_name from that exact record."""
+    import hashlib
+
+    entry = {"organisation_number": "810034882", "name": "SANDNES ELEKTRISKE AS", "legal_form": "AS",
+             "industry_code": "43.210", "industry_label": "Elektrisk installasjonsarbeid", "employees": 11}
+    expected = hashlib.sha256(json.dumps(entry, sort_keys=True).encode("utf-8")).hexdigest()
+
+    facts = universe_identity_facts("810034882", entry, now=NOW)
+
+    assert facts and all(f.content_hash == expected for f in facts)
+
+
+def _live_record(**extra) -> dict:
+    body = {"organisasjonsnummer": "997770234", "navn": "KAHOOT! AS"}
+    body.update(extra)
+    return body
+
+
+def test_live_registry_details_publish_founding_date_and_former_names():
+    """The universe manifest carries neither. Measured on 40 random companies
+    without a website: founding date 40/40, former names 11/40."""
+    record = _live_record(
+        stiftelsesdato="2012-07-01",
+        historiskeNavn=[
+            {"navn": "OLDEST AS", "fraDato": "2012-07-01 00:00:00", "tilDato": "2014-01-01 00:00:00"},
+            {"navn": "NEWEST AS", "fraDato": "2019-01-01 00:00:00", "tilDato": "2023-05-02 08:00:00"},
+            {"navn": "MIDDLE AS", "fraDato": "2014-01-01 00:00:00", "tilDato": "2019-01-01 00:00:00"},
+            {"navn": "MIDDLE2 AS", "fraDato": "2013-01-01 00:00:00", "tilDato": "2016-01-01 00:00:00"},
+        ],
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=record)))
+
+    details = fetch_live_registry_details(_entity(), BudgetGovernor(), client=client, now=lambda: NOW)
+    by_field = {}
+    for f in details.facts:
+        by_field.setdefault(f.field_name, []).append(f.value)
+
+    assert by_field["founded_date"] == ["2012-07-01"]
+    assert "Founded on 2012-07-01 - Brønnøysundregistrene" in by_field["dated_activity"]
+    assert "Renamed from 'NEWEST AS' on 2023-05-02 - Brønnøysundregistrene" in by_field["dated_activity"]
+    # newest first, capped
+    assert details.former_names == ["NEWEST AS", "MIDDLE AS", "MIDDLE2 AS"]
+    assert all(f.source_class == "official_registry" for f in details.facts)
+
+
+def test_live_registry_details_back_off_when_the_budget_is_nearly_spent():
+    """An extra, not core data: once the batch is past 90% of its request
+    budget the remaining requests belong to core registry data."""
+    def handler(request):
+        raise AssertionError("must not spend a request when the budget is nearly spent")
+
+    budget = BudgetGovernor(BudgetLimits(max_requests=10, max_spend_usd=10, max_wall_clock_seconds=1000))
+    for _ in range(9):
+        budget.record_request()
+
+    details = fetch_live_registry_details(
+        _entity(), budget, client=httpx.Client(transport=httpx.MockTransport(handler)), now=lambda: NOW
+    )
+
+    assert details.facts == [] and details.former_names == []
+
+
+def test_live_registry_details_degrade_cleanly_on_error():
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503)))
+
+    details = fetch_live_registry_details(
+        _entity(), BudgetGovernor(), client=client, sleep=lambda s: None, now=lambda: NOW
+    )
+
+    assert details.facts == [] and details.former_names == []
+
+
+def _name_search(units):
+    return httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"_embedded": {"enheter": units}})
+    ))
+
+
+def test_former_name_now_held_by_another_entity_is_detected():
+    client = _name_search([{"organisasjonsnummer": "111111111", "navn": "Old Name AS"}])
+
+    assert name_is_held_by_another_entity("OLD NAME AS", "997770234", BudgetGovernor(), client=client) is True
+
+
+def test_former_name_not_held_by_anyone_else_is_usable():
+    client = _name_search([
+        {"organisasjonsnummer": "997770234", "navn": "OLD NAME AS"},
+        {"organisasjonsnummer": "222222222", "navn": "OLD NAME HOLDING AS"},
+    ])
+
+    assert name_is_held_by_another_entity("OLD NAME AS", "997770234", BudgetGovernor(), client=client) is False
+
+
+def test_name_check_is_precision_first_when_it_cannot_confirm():
+    """A failed lookup must answer "held" -- the only cost is skipping one
+    extra search, while guessing wrong could publish another company's site."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503)))
+
+    assert name_is_held_by_another_entity("OLD NAME AS", "997770234", BudgetGovernor(), client=client) is True
+
+
+def test_subunit_org_numbers_are_read_from_workplace_registry_urls():
+    from src.pipeline.registry_extras import subunit_org_numbers
+    from src.pipeline.verify import ConfirmedFact
+
+    facts = [
+        ConfirmedFact("workplace", "A", "https://data.brreg.no/enhetsregisteret/api/underenheter/917784078", 100.0, NOW),
+        ConfirmedFact("workplace", "B", "https://data.brreg.no/enhetsregisteret/api/underenheter/994172603", 100.0, NOW),
+        ConfirmedFact("workplace", "own", "signalpost-company-universe-2025.jsonl.gz", 100.0, NOW),
+        ConfirmedFact("leader", "X", "https://data.brreg.no/enhetsregisteret/api/underenheter/123456789", 100.0, NOW),
+    ]
+
+    assert subunit_org_numbers(facts) == {"917784078", "994172603"}
