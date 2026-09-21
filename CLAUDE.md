@@ -19,18 +19,41 @@ belong in this repo:
 
 Full verbatim problem statement: @docs/problem-statement.md
 
-## Non-negotiable hard gates (read before every PR / before saying "done")
+## Qualification rules and our non-negotiable standards (read before every PR / before saying "done")
 
-These are pass/fail, not partial credit. A change that improves one metric while
-silently breaking another is a regression, not progress.
+Builderr's rules were revised (see `starter-briefs/signalpost.md`, re-captured
+2026-09-21): an entry qualifies with **an official run and at least 65/100**.
+Coverage, recall and precision are scored dimensions, **not** separate
+qualification thresholds -- the old 21/35 coverage, 60% recall and 95%
+precision bars no longer exist. Final ranking is the **mean across every
+scheduled daily batch** while a version is active; a failed or missed batch
+scores zero. Builderr's own crawlers now feed the reference pool too.
 
-- Coverage score ≥ 21/35
-- Weighted external company recall ≥ 60%
-- External precision ≥ 95% (never publish a claim on the wrong company)
-- Exactly 100 terminal results per daily 100-company batch — not 99, not 101
+An official run needs: exactly 100 terminal envelopes per daily batch, no
+fabricated financial value, no material wrong-company publication, sources and
+dates on published claims, idempotent refresh that preserves evidence,
+reproducible one-command setup with pinned dependencies, and safe source,
+secret and outbound-URL handling. A material wrong-company match keeps the
+score visible but blocks the run from becoming official, and fewer
+wrong-company publications is the first tie-breaker.
+
+Our own standards, kept pass/fail because each protects the score or the
+official run:
+
+- Never publish a claim on the wrong company (we still target >= 95% external
+  precision in every self-check run)
+- Exactly 100 terminal results per daily 100-company batch -- not 99, not 101
 - Zero fabricated financial values, ever
 - Refresh is idempotent: prior snapshots are never overwritten or deleted
-- Batch completes within 45 min wall-clock, ≤2,000 outbound requests, ≤$10 spend
+- Batch completes within 45 min wall-clock, <= 2,000 outbound requests
+  **counted the way Builderr counts them: including redirects and retries**
+  (enforced from the real wire count in `src/pipeline/net.py`, with a
+  safety margin), and <= $10 declared spend
+- Every outbound request passes the outbound URL policy; secrets come only
+  from environment variables and are never logged or written
+
+Coverage >= 21/35 and recall >= 60% remain useful self-check targets, but
+missing them is no longer a qualification failure.
 
 Full scoring rubric and definition of done: @docs/success-criteria.md
 
@@ -69,7 +92,7 @@ Full layout with one-line purpose per file: @docs/folder-structure.md
   last one," never "overwrite."
 - Before marking any task done, run (or ask the user to run) `/self-score` and
   quote the resulting recall/precision/coverage numbers. "I implemented it" is
-  not done; "it clears the gates on the fixture sample" is done.
+  not done; "it meets our targets on the fixture sample" is done.
 - If you notice the implementation solving a more interesting/general problem
   than the one in `docs/problem-statement.md`, stop. Flag the scope creep instead
   of continuing — this repo has one job.
@@ -77,11 +100,12 @@ Full layout with one-line purpose per file: @docs/folder-structure.md
 ## Useful custom commands
 
 - `/self-score` — run the local scoring harness against `fixtures/` and report
-  recall, precision, and coverage against the thresholds above.
+  recall, precision, and coverage against our internal targets above.
 - `/add-stage <name>` — scaffold a new pipeline stage + matching test file that
   follows the contract shape in `docs/component-specs.md`.
-- `/guard-check` — re-read the hard gates and problem statement, then review the
-  current diff for anything that violates a gate or drifts from the four phases.
+- `/guard-check` — re-read the official-run checks, our standards and the problem
+  statement, then review the current diff for anything that violates one or drifts
+  from the four phases.
 
 ## Source of truth for everything else
 

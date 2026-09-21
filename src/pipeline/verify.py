@@ -7,9 +7,10 @@ Responsibility: confirm a raw fact actually belongs to the resolved entity,
 using RapidFuzz name matching against legal_name (and known aliases) with an
 explicit, documented threshold.
 
-*** This is the code that enforces the 95%-precision hard gate. ***
+*** This is the code that enforces wrong-company precision (>= 95% is our own
+target; a material wrong-company match blocks an official run). ***
 Treat any threshold change as a gate-risk change requiring a self-score run,
-not a minor tuning tweak (see CLAUDE.md non-negotiable hard gates).
+not a minor tuning tweak (see CLAUDE.md non-negotiable standards).
 
 Two independent layers, both must pass:
   1. Provenance -- the fact's source_url must be on the same domain as the

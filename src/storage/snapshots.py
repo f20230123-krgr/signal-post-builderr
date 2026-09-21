@@ -23,7 +23,9 @@ from src.models.profile import CompanyProfile
 # docs/testing-strategy.md section 6: legal_name, leadership (leaders +
 # workplaces), official_site, annual_accounts.latest, or hiring_signals
 # added/removed. Whitespace/formatting-only differences and re-fetches with a
-# new retrieved_at on an otherwise-unchanged value are NOT material.
+# new retrieved_at on an otherwise-unchanged value are NOT material. Registry
+# identity facts (employee_count, legal_form, industry) count once both
+# snapshots carry them.
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -99,6 +101,20 @@ def diff_material_changes(
         new_status = _normalized(new_status_claim.value)
         if old_status and new_status and old_status != new_status:
             changes.append(f"operating_status: {old_status!r} -> {new_status!r}")
+
+    # Live registry facts that genuinely change between runs. Same rule as
+    # operating_status: only compared when BOTH snapshots carry the claim, so
+    # snapshots written before a claim existed never look like a change.
+    for label, previous_claim, new_claim in (
+        ("employee_count", previous.legal_identity.employee_count, new.legal_identity.employee_count),
+        ("legal_form", previous.legal_identity.legal_form, new.legal_identity.legal_form),
+        ("industry", previous.legal_identity.industry, new.legal_identity.industry),
+    ):
+        if previous_claim is None or new_claim is None:
+            continue
+        old_value, new_value = _normalized(previous_claim.value), _normalized(new_claim.value)
+        if old_value and new_value and old_value != new_value:
+            changes.append(f"{label}: {old_value!r} -> {new_value!r}")
 
     old_hiring = _claim_values(previous.activity.hiring_signals)
     new_hiring = _claim_values(new.activity.hiring_signals)

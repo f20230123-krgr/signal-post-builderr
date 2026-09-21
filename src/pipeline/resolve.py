@@ -19,13 +19,14 @@ import hashlib
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import httpx
 
 from src.models.profile import EvidenceState
+from src.pipeline.net import new_client
 
 REGISTRY_BASE_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/"
 
@@ -48,6 +49,10 @@ class ResolvedEntity:
     # signalpost-sources.md: "every claim records ... content hash". None
     # when there's nothing to hash (not_available/ambiguous/failed).
     content_hash: Optional[str] = None
+    # The live registry record this entity was built from (None when it came
+    # from the universe manifest or nothing resolved). Kept so later steps that
+    # need the same record don't download it a second time.
+    raw_record: Optional[dict] = field(default=None, repr=False, compare=False)
 
 
 def _format_address(addr: Optional[dict]) -> Optional[str]:
@@ -124,7 +129,7 @@ def resolve(
         return _resolve_from_universe(org_number, universe_entry, now)
 
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     url = REGISTRY_BASE_URL + org_number
 
     try:
@@ -196,6 +201,7 @@ def resolve(
             source=url,
             retrieved_at=retrieved_at,
             content_hash=content_hash,
+            raw_record=body if isinstance(body, dict) else None,
         )
     finally:
         if owns_client:

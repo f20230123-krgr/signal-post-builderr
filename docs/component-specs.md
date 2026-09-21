@@ -245,7 +245,7 @@ for it once a fact reaches this stage.
 **Must:**
 - Use RapidFuzz name matching against `legal_name` (and known aliases) with an
   explicit, documented threshold. This is the code that enforces the 95%
-  precision hard gate — treat threshold changes as gate-risk changes, not minor tuning.
+  wrong-company precision standard — treat threshold changes as precision-risk changes, not minor tuning.
 - Hard-reject `company_profile`/`hiring_signal`/`dated_activity` facts sourced
   from a known housing-manager domain (`_KNOWN_HOUSING_MANAGER_DOMAINS`) when
   the entity looks like a housing co-op (`_is_housing_coop`) — regardless of
@@ -351,7 +351,7 @@ never part of the submission (real gap found chasing a synthesis score of 0/10).
 
 **Must not:** drop a claim because it's `not_available`/etc — it still
 appears in `claims` (value `null`, empty `evidence_ids`), per the "missing
-values are never silently converted to zero" hard gate.
+values are never silently converted to zero" official-run check.
 
 **Tests to write:** available claim produces one claim + one evidence entry,
 unavailable claim has no evidence and null value, claims sharing a source

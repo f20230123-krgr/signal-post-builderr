@@ -21,8 +21,11 @@ Two steps, sized to the request budget:
 
 Sizing, measured against the live feed: covering every active ad needs a
 ~60-day window (~104 list pages); ads modified in the last 14 days are ~70%
-of active ads (~31 pages), 30 days ~93% (~64 pages). 14 days with a hard cap
-of MAX_NAV_FEED_PAGES keeps this to a few percent of a 2,000-request batch.
+of active ads (~31 pages), 30 days ~93% (~64 pages). 30 days is used: a 14-day
+window missed ads that were still live but last modified longer ago (two real
+ads, live for another five weeks, dropped out of a run three weeks after they
+were posted). A hard cap of MAX_NAV_FEED_PAGES keeps it to ~3% of a
+2,000-request batch.
 The feed is ordered oldest-first, so hitting the cap cuts off the NEWEST ads;
 that is logged and reported rather than hidden.
 
@@ -54,8 +57,8 @@ PUBLIC_TOKEN_URL = NAV_FEED_BASE + "/api/publicToken"
 FEED_PATH = "/api/v1/feed"
 PUBLIC_AD_URL = "https://arbeidsplassen.nav.no/stillinger/stilling/{uuid}"
 
-NAV_WINDOW_DAYS = 14
-MAX_NAV_FEED_PAGES = 40
+NAV_WINDOW_DAYS = 30
+MAX_NAV_FEED_PAGES = 80
 # A large employer can have dozens of open ads; a handful is enough to show
 # the company is hiring, and each one costs a request to confirm.
 MAX_ADS_PER_COMPANY = 5

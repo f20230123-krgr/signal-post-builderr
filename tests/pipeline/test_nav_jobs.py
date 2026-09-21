@@ -217,3 +217,26 @@ def test_a_sub_unit_number_that_is_not_this_company_s_is_still_rejected():
     )
 
     assert facts == []
+
+
+def test_the_index_reads_ads_modified_in_the_last_30_days():
+    """A 14-day window (~70% of active ads) missed ads that are still live but
+    were last modified longer ago: two real ads published on 2 and 4 September,
+    live until 25 September and 31 October, dropped out of a run made three weeks
+    later. 30 days reaches ~93% of active ads for about 33 more requests."""
+    from email.utils import format_datetime
+    from datetime import timedelta
+
+    seen = []
+    client = httpx.Client(transport=httpx.MockTransport(_feed_handler([[_item("a1", "X AS")]], seen=seen)))
+
+    build_nav_job_index(client, BudgetGovernor(), now=lambda: NOW)
+
+    first_feed_call = next(h for p, h in seen if p == "/api/v1/feed")
+    assert first_feed_call["if-modified-since"] == format_datetime(NOW - timedelta(days=30), usegmt=True)
+
+
+def test_the_page_cap_leaves_room_for_the_30_day_window():
+    from src.pipeline.nav_jobs import MAX_NAV_FEED_PAGES
+
+    assert MAX_NAV_FEED_PAGES >= 80  # ~64 pages cover 30 days; the cap cuts off the NEWEST ads

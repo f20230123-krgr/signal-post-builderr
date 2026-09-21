@@ -2,13 +2,25 @@
 
 Status: scoring version 2, effective 26 August 2026 for every Round 1 entrant. Random daily evaluation began 24 August; all active submissions are rescored under version 2.
 
+## In plain language
+
+Build a program that researches companies and keeps their profiles current. Submit at least 1,000 completed profiles; the daily test uses the same 100 random companies for every entered agent, drawn from the full 411,160-company list.
+
+We combine independently checked findings from all submissions and Builderr's own crawlers into one reference collection. New verified findings update the collection, and every entrant is rescored against the same version. This is the checked information we have found, not a claim that we found everything online.
+
+For each information type, 70% of its coverage score measures how many companies you covered and 30% measures how many individual facts you found. Example: the collection has 50 job postings across 20 companies. Finding 30 postings across 15 companies gives 60% of postings and 75% of companies: 70% × 75% + 30% × 60% = 70.5% for that information type. This contributes to the 35 coverage points according to its field weight; it is not the total score.
+
+The remaining points check correctness (30), reliable updates (20), useful explanations (10) and ease of use (5). An entry qualifies with an official run and at least 65/100 overall. Coverage, recall and precision are scored dimensions, not separate qualification thresholds. Company-matching precision is separate from factual accuracy; fabricated financial values or a material wrong-company publication prevent the run from becoming official.
+
+The exact requirements follow.
+
 ## Corpus
 
 - Universe: Norway-registered entities with observed annual-account records.
 - Public universe: all 411,160 eligible organisation numbers.
 - Minimum submitted artifact: 1,000 completed profiles plus its exact organisation-number manifest. Larger submissions are allowed.
 - Public product sample: 100 profiles at `/signalpost`.
-- Daily evaluation: the same 100 organisations are randomly selected after the cutoff for every frozen agent, for 60 days and up to 6,000 scored checks.
+- Daily evaluation: the same 100 organisations are randomly selected after the cutoff for every frozen agent, on each scheduled test day through 21 October.
 - The public universe is not hidden. Freshness, exact attribution and reproducible execution—not secrecy of the organisation number—are what the daily run tests.
 - Every entrant receives the same batch, cutoff, network policy and resource budget.
 - Eligible-universe uncompressed content SHA-256: `b82d6a3e7231d1759a958c282bc4366b80ec2fab8095053d8ed7fa9cd01bc838`.
@@ -26,13 +38,9 @@ Exactly one terminal envelope per input organisation number. Envelopes must cont
 4. Decision-useful synthesis — 10
 5. UX and interaction — 5
 
-Coverage and exact attribution control 65 points. For every external field family, coverage is 70% company recall and 30% individual-claim recall against the independently verified union of discoveries from every submitted crawler. The union is cumulative and versioned: each verified addition creates a new pool hash and every entrant is rescored against that same latest version. The final union freezes only after all eligible final submissions have been verified.
+Coverage and exact attribution control 65 points. For every external field family, coverage is 70% company recall and 30% individual-claim recall against the independently verified union of discoveries from every submitted crawler and Builderr’s own crawlers. The union is cumulative and versioned: each verified addition creates a new pool hash and every entrant is rescored against that same latest version. The final union freezes only after all eligible final submissions have been verified.
 
-## Hard gates
-
-- At least 21/35 coverage.
-- At least 60% weighted external company recall across measurable field families.
-- At least 95% external exact-entity precision.
+## Official-run checks
 - The submitted public artifact has at least 1,000 completed profiles and a matching manifest.
 - Every daily 100-company input produces exactly 100 terminal envelopes.
 - No fabricated financial value or material wrong-company publication.
@@ -43,7 +51,7 @@ Coverage and exact attribution control 65 points. For every external field famil
 - Setup is reproducible with pinned dependencies and one evaluator command.
 - Source rights, secrets and outbound URL policy are documented and safe.
 
-Qualification is 65/100 plus all hard gates. Final ranking uses the mean score across completed daily batches. Ties break on fewer wrong-company publications, then higher weighted company recall, then lower declared third-party cost.
+Qualification is an official run with 65/100 or more. Official-run checks establish whether the run is valid; they do not create additional score bars. Final ranking uses the mean across every scheduled daily batch while an entrant has an active frozen version. An entrant-caused failed or missed batch scores zero after Builderr reproduces the failure in a clean evaluator run. A batch affected by Builderr's harness, infrastructure or a shared-source failure is void and rerun for every affected entrant with the same frozen code. Ties break on fewer wrong-company publications, then higher weighted company recall, then lower declared third-party cost.
 
 ## Locked evaluator budget
 
@@ -56,7 +64,9 @@ Qualification is 65/100 plus all hard gates. Final ranking uses the mean score a
 
 Builderr provides the frozen official registry snapshot used for identity anchoring. External caches must be declared. Cached public-universe material is allowed, but the daily score still enforces source timestamps, refresh behavior and the same evidence cutoff for everyone.
 
-Entrants may submit up to four exact commit hashes. Revisions close 18 October 2026 and take effect only after being frozen for the next daily run.
+The first submission is version 1. Entrants may then submit up to four revised exact commit hashes, for five versions total. Revisions close 18 October 2026, take effect only after being frozen for the next daily run, and never replace earlier batch results.
+
+If the verified pool has fewer than 15 positive company-field opportunities across at least three external field families, recall is reported as not measured for that batch rather than as 0%. It remains a scored observation, not a qualification gate.
 
 ## Measurement
 

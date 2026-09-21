@@ -551,3 +551,69 @@ def test_subunit_org_numbers_are_read_from_workplace_registry_urls():
     ]
 
     assert subunit_org_numbers(facts) == {"917784078", "994172603"}
+
+
+# ---- identity claims from the live record (no universe file) -------------
+
+
+def _identity(details):
+    return {f.field_name: f.value for f in details.identity_facts}
+
+
+def test_live_registry_details_carry_the_identity_claims_the_universe_manifest_would():
+    """A clean checkout has no universe file, and the live record holds the
+    same four fields, in the same shape the manifest publishes them."""
+    record = _live_record(
+        naeringskode1={"kode": "62.010", "beskrivelse": "Programmeringstjenester"},
+        organisasjonsform={"kode": "AS", "beskrivelse": "Aksjeselskap"},
+        antallAnsatte=12,
+        konkurs=False,
+        underAvvikling=False,
+        underTvangsavviklingEllerTvangsopplosning=False,
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=record)))
+
+    details = fetch_live_registry_details(_entity(), BudgetGovernor(), client=client, now=lambda: NOW)
+
+    assert _identity(details) == {
+        "industry": "62.010 Programmeringstjenester",
+        "employee_count": "12",
+        "legal_form": "AS",
+        "operating_status": "Active",
+    }
+    fact = details.identity_facts[0]
+    assert fact.source_url == "https://data.brreg.no/enhetsregisteret/api/enheter/997770234"
+    assert fact.source_class == "official_registry" and fact.extraction_method == "registry"
+    assert fact.content_hash
+
+
+def test_live_identity_claims_are_kept_apart_from_the_facts_published_for_every_company():
+    """`facts` is added for every company; identity facts only when the
+    universe manifest isn't already supplying them, so nothing is duplicated."""
+    record = _live_record(naeringskode1={"kode": "62.010", "beskrivelse": "X"}, antallAnsatte=3)
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=record)))
+
+    details = fetch_live_registry_details(_entity(), BudgetGovernor(), client=client, now=lambda: NOW)
+
+    assert {f.field_name for f in details.facts}.isdisjoint({"industry", "employee_count", "legal_form", "operating_status"})
+
+
+def test_live_status_reads_bankruptcy_and_liquidation_flags():
+    for flags, expected in [
+        ({"konkurs": True}, "Bankrupt"),
+        ({"underAvvikling": True}, "In liquidation"),
+        ({"underTvangsavviklingEllerTvangsopplosning": True}, "In liquidation"),
+        ({"konkurs": False, "underAvvikling": False}, "Active"),
+    ]:
+        client = httpx.Client(transport=httpx.MockTransport(lambda r, f=flags: httpx.Response(200, json=_live_record(**f))))
+        details = fetch_live_registry_details(_entity(), BudgetGovernor(), client=client, now=lambda: NOW)
+        assert _identity(details)["operating_status"] == expected, flags
+
+
+def test_live_identity_never_guesses_a_field_the_record_does_not_carry():
+    """No status flags at all is not evidence of an active company."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_live_record())))
+
+    details = fetch_live_registry_details(_entity(), BudgetGovernor(), client=client, now=lambda: NOW)
+
+    assert _identity(details) == {}

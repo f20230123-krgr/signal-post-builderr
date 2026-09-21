@@ -34,6 +34,7 @@ import httpx
 
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor
+from src.pipeline.net import UnsafeOutboundUrl, new_client
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.urls import normalize_url
 from src.storage.cache import ResponseCache
@@ -56,10 +57,20 @@ RETRY_BACKOFF_SECONDS = 0.5
 # "/news" nor anything matching an existing keyword under these names --
 # unlike "/presse" ("press" is already a substring match), there was no
 # coverage at all for this common Norwegian page-naming pattern.
-DEFAULT_COMPANY_OWNED_PATHS = [
-    "/about", "/om-oss", "/contact", "/kontakt", "/leadership", "/ledelse",
-    "/locations", "/careers", "/jobs", "/news", "/investor", "/aktuelt", "/nyheter",
-]
+#
+# Trimmed from 13 paths to the 4 that earn their requests. Builderr counts every
+# request against a 2,000-per-run limit (redirects and retries included), and on
+# the 1,000-company corpus (293 sites) the nine dropped guesses produced claims on
+# only 5 pages between them (~0.1% of claims) while costing ~9 requests per site.
+# The kept four (/kontakt, /om-oss, /about, /contact) produced 25 of the 30
+# claim-bearing guessed pages. Real pages under the dropped names are still found
+# through the sitemap and the pages' own links.
+DEFAULT_COMPANY_OWNED_PATHS = ["/kontakt", "/om-oss", "/about", "/contact"]
+
+# After this many failed fetches in a row on one domain (5xx, timeouts, 429),
+# the rest of that site is skipped: a real batch spent 32 requests on a single
+# server that answered 503 to every page.
+MAX_CONSECUTIVE_DOMAIN_FAILURES = 3
 
 # Keywords a sitemap.xml URL's path must contain to be worth spending budget
 # on -- sitemaps commonly list hundreds of blog/product pages we don't want.
@@ -155,21 +166,39 @@ _FETCH_ERRORS = (httpx.HTTPError, UnicodeError)
 
 
 def _fetch_static(
-    client: httpx.Client, url: str, sleep: Callable[[float], None]
+    client: httpx.Client, url: str, sleep: Callable[[float], None], retry: bool = True
 ) -> Optional[httpx.Response]:
     response = None
-    for attempt in range(MAX_FETCH_RETRIES):
+    attempts = MAX_FETCH_RETRIES if retry else 1
+    for attempt in range(attempts):
         try:
             response = client.get(url, timeout=10.0, follow_redirects=True)
-            if response.status_code >= 500 and attempt < MAX_FETCH_RETRIES - 1:
+            if response.status_code >= 500 and attempt < attempts - 1:
                 sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
                 continue
             return response
+        except UnsafeOutboundUrl:
+            # A URL the outbound policy refuses is refused every time; retrying
+            # it would only burn backoff time.
+            return None
+        except httpx.TooManyRedirects:
+            # A redirect loop is deterministic: a retry just walks the same loop
+            # again (the cost of one such site was ~190 requests).
+            return None
         except _FETCH_ERRORS:
             response = None
-            if attempt < MAX_FETCH_RETRIES - 1:
+            if attempt < attempts - 1:
                 sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
     return response
+
+
+def _rebased(url: str, rebase: dict[str, str]) -> str:
+    """Point `url` at the host its site was seen to live on (see crawl())."""
+    parts = urlsplit(url)
+    target = rebase.get(f"{parts.scheme}://{parts.netloc}")
+    if target is None:
+        return url
+    return target + url[len(f"{parts.scheme}://{parts.netloc}"):]
 
 
 def _state_for_status(status_code: int) -> Optional[EvidenceState]:
@@ -354,7 +383,7 @@ def crawl(
         return []
 
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     date_bucket = date_bucket or now().strftime("%Y-%m-%d")
     allowed = {_domain(entity.official_site_candidate)} | {d.lower() for d in (allowed_domains or set())}
     ats_domains = {d.lower() for d in (ats_domains or set())}
@@ -383,9 +412,16 @@ def crawl(
         pages: list[FetchedPage] = []
         budget_exhausted = False
         queue: list[tuple[str, Optional[str]]] = [(url, None) for url in to_fetch]
+        # Consecutive failed fetches per domain, and where a site redirected to
+        # (example.no -> www.example.no): once the first page shows where the
+        # site really lives, later pages are requested there directly instead
+        # of paying for the same redirect hop on every page.
+        failures: dict[str, int] = {}
+        rebase: dict[str, str] = {}
 
         while queue:
             url, linked_from = queue.pop(0)
+            url = _rebased(url, rebase)
             normalized = normalize_url(url)
             if linked_from is not None:
                 if normalized in seen_normalized:
@@ -403,16 +439,33 @@ def crawl(
                 pages.append(FetchedPage(url=url, raw_html="", fetched_at=now(), fetch_state=EvidenceState.BLOCKED, linked_from=linked_from))
                 continue
 
+            domain = _domain(url)
+            if cached_html is None and failures.get(domain, 0) >= MAX_CONSECUTIVE_DOMAIN_FAILURES:
+                pages.append(FetchedPage(url=url, raw_html="", fetched_at=now(), fetch_state=EvidenceState.FAILED, linked_from=linked_from))
+                continue
+
             if cached_html is not None:
                 html = cached_html
                 status_state = None
             else:
-                response = _fetch_static(client, url, sleep)
+                # A domain that has already failed once isn't retried again:
+                # the first page gets its second chance, the rest don't.
+                response = _fetch_static(client, url, sleep, retry=failures.get(domain, 0) == 0)
                 budget.record_request()
+
+                if response is None or response.status_code >= 500 or response.status_code == 429:
+                    failures[domain] = failures.get(domain, 0) + 1
+                else:
+                    failures[domain] = 0
 
                 if response is None:
                     pages.append(FetchedPage(url=url, raw_html="", fetched_at=now(), fetch_state=EvidenceState.FAILED, linked_from=linked_from))
                     continue
+
+                if 200 <= response.status_code < 300:
+                    sent, landed = urlsplit(url), urlsplit(str(response.url))
+                    if (sent.scheme, sent.netloc) != (landed.scheme, landed.netloc) and _domain(str(response.url)) in allowed:
+                        rebase[f"{sent.scheme}://{sent.netloc}"] = f"{landed.scheme}://{landed.netloc}"
 
                 status_state = _state_for_status(response.status_code)
                 if status_state is not None:

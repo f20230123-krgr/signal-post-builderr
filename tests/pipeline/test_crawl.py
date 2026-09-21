@@ -402,11 +402,10 @@ def test_sitemap_discovery_recognizes_norwegian_only_news_page_paths():
     assert "https://example.com/blog/unrelated-post" not in urls
 
 
-def test_default_company_owned_paths_include_norwegian_news_variants():
-    from src.pipeline.crawl import DEFAULT_COMPANY_OWNED_PATHS
-
-    assert "/aktuelt" in DEFAULT_COMPANY_OWNED_PATHS
-    assert "/nyheter" in DEFAULT_COMPANY_OWNED_PATHS
+# Norwegian news pages (/aktuelt, /nyheter) are no longer GUESSED at as fixed
+# paths: on the 1,000-company corpus the two together produced claims on a single
+# page, at ~2 requests per site. They are still found wherever a site really has
+# them, through the sitemap keywords tested just above and the pages' own links.
 
 
 def test_robots_txt_disallow_is_respected(caplog):
@@ -577,3 +576,127 @@ def test_crawl_does_not_invent_a_feed_when_none_is_declared():
     crawl(_entity("https://acme.no"), BudgetGovernor(), client=client)
 
     assert not any("feed" in u for u in fetched)
+
+
+# ---- spending fewer of the 2,000 real requests ---------------------------
+# Builderr counts every redirect hop and retry. These pin the three places the
+# crawl was spending requests for (almost) nothing.
+
+
+def test_default_guessed_paths_are_the_four_that_actually_yield_claims():
+    """Measured on the 1,000-company corpus (293 sites): pages at these paths
+    yielded claims 25 times of the 30 that any of the 13 guessed paths did.
+    The other nine cost ~9 requests per site for ~0.1% of claims."""
+    from src.pipeline.crawl import DEFAULT_COMPANY_OWNED_PATHS
+
+    assert DEFAULT_COMPANY_OWNED_PATHS == ["/kontakt", "/om-oss", "/about", "/contact"]
+
+
+def test_after_a_redirect_to_another_host_later_pages_go_straight_to_it():
+    """example.no -> www.example.no on every page would cost two requests per
+    page. Once the first fetch shows where the site really lives, the rest of
+    the crawl asks there directly."""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.host == "example.no":
+            return httpx.Response(301, headers={"Location": str(request.url.copy_with(host="www.example.no"))})
+        return httpx.Response(200, text="<html><body>hello there, a page with enough text to count</body></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    pages = crawl(
+        _entity("https://example.no/"), budget, client=client,
+        company_owned_paths=["/om-oss", "/kontakt", "/about"],
+    )
+
+    assert [p.fetch_state for p in pages] == [EvidenceState.AVAILABLE] * 4
+    # one redirect hop for the first page only; the three guessed paths went to www directly
+    assert requested.count("https://example.no/") == 1
+    assert [u for u in requested if u.startswith("https://example.no")] == ["https://example.no/"]
+    assert len(requested) == 5  # root (2 hops) + 3 direct
+
+
+def test_a_redirect_to_an_unrelated_domain_is_not_followed_for_later_pages():
+    """Rebasing is only for the same site under another host name, never a
+    way to leave the entity's own domain."""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.host == "example.no":
+            return httpx.Response(302, headers={"Location": "https://other-company.com/"})
+        return httpx.Response(200, text="<html><body>an unrelated site with enough text on it</body></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    crawl(_entity("https://example.no/"), BudgetGovernor(), client=client, company_owned_paths=["/om-oss"])
+
+    assert "https://example.no/om-oss" in requested  # still asked on the entity's own host
+
+
+def test_a_site_that_keeps_failing_is_given_up_on_after_three_failures():
+    """A server that answers 503 to everything cost 2 attempts x 16 pages = 32
+    requests for one company in a real batch."""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(503)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = BudgetGovernor()
+
+    pages = crawl(
+        _entity("https://broken.no/"), budget, client=client,
+        company_owned_paths=["/kontakt", "/om-oss", "/about", "/contact"],
+        sleep=lambda s: None,
+    )
+
+    assert len(pages) == 5  # every page still gets a terminal state...
+    assert all(p.fetch_state == EvidenceState.FAILED for p in pages)
+    assert len(requested) <= 8  # ...but the site was abandoned early (not 5 x 2 = 10)
+
+
+def test_one_failure_does_not_stop_the_rest_of_a_healthy_site():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/kontakt":
+            return httpx.Response(503)
+        return httpx.Response(200, text="<html><body>a page with enough visible text to count as content</body></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    pages = crawl(
+        _entity("https://fine.no/"), BudgetGovernor(), client=client,
+        company_owned_paths=["/kontakt", "/om-oss", "/about"], sleep=lambda s: None,
+    )
+
+    states = {p.url: p.fetch_state for p in pages}
+    assert states["https://fine.no/om-oss"] == EvidenceState.AVAILABLE
+    assert states["https://fine.no/about"] == EvidenceState.AVAILABLE
+
+
+def test_a_redirect_loop_is_one_failed_fetch_not_a_retry_storm():
+    """robots.txt -> robots.txt-Home -> robots.txt-Home ... cost 191 requests
+    for one company in a real batch (20 hops x 2 attempts x several fetches)."""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path.startswith("/robots.txt"):
+            return httpx.Response(302, headers={"Location": "https://loopy.no/robots.txt-Home"})
+        return httpx.Response(200, text="<html><body>a page with enough visible text to count as content</body></html>")
+
+    from src.pipeline.net import new_client
+
+    client = new_client(
+        transport=httpx.MockTransport(handler),
+        policy=__import__("src.pipeline.net", fromlist=["OutboundPolicy"]).OutboundPolicy(resolver=lambda *a, **k: []),
+    )
+
+    pages = crawl(_entity("https://loopy.no/"), BudgetGovernor(), client=client, use_sitemap=True, sleep=lambda s: None)
+
+    assert any(p.fetch_state == EvidenceState.AVAILABLE for p in pages)  # the site itself is still crawled
+    assert len(requested) <= 15

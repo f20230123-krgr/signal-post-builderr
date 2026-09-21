@@ -14,7 +14,8 @@ history."**
 ## Why this order, specifically
 
 1. **Resolve first, always.** A wrong resolve poisons every downstream claim —
-   this is the single biggest lever on the 95%-precision hard gate. No crawling
+   this is the single biggest lever on wrong-company precision (a material
+   wrong-company match blocks an official run). No crawling
    starts until the entity is confirmed against the official registry.
 2. **Crawl within budget, not exhaustively.** With ~20 requests and ~$0.10 per
    company (from the 2,000-request / $10 batch budget), the crawler must be
@@ -46,7 +47,7 @@ history."**
 
 ## What "clean" means for this project specifically
 
-Clean is not "elegant abstractions." Clean here means: every hard gate has a
+Clean is not "elegant abstractions." Clean here means: every official-run check and standard has a
 traceable, testable piece of code responsible for it, and the fastest possible
-answer to "did we just break the 95% precision gate?" is always "run
+answer to "did we just risk a wrong-company publication?" is always "run
 `/self-score` and look." Optimize for that feedback loop above almost anything else.

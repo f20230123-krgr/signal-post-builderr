@@ -41,11 +41,12 @@ from src.pipeline.discovery import (
 )
 from src.pipeline.extract import extract
 from src.pipeline.nav_jobs import NavJobIndex, build_nav_job_index, nav_hiring_signal_facts
+from src.pipeline.net import new_client
 from src.pipeline.registry_extras import (
-    fetch_leadership_only,
     fetch_registry_extras,
     fetch_live_registry_details,
     fetch_registry_update_activity,
+    UNIVERSE_SOURCE,
     name_is_held_by_another_entity,
     subunit_org_numbers,
     universe_identity_facts,
@@ -113,6 +114,11 @@ def _default_process_one(
     entity = resolve(org_number, client=client, universe_entry=universe_entry)
     # Fetched before discovery: its former names are a search tier below.
     live_details = fetch_live_registry_details(entity, budget, client=client, now=now)
+    # Roles, accounts and sub-units come BEFORE the exploratory web search and
+    # crawl: they are core registry data (so they get the request budget first),
+    # and the leader names double as the search fallback's seed below -- fetched
+    # once here instead of once for the search and again for the profile.
+    registry_facts, accounts_state = fetch_registry_extras(entity, budget, client=client)
 
     discovered_site_fact = None
     if (
@@ -131,7 +137,7 @@ def _default_process_one(
         # variables only." discovery.py stays a pure function of its
         # explicit inputs (same pattern as client/cache above); this is the
         # one place that resolves them from the environment.
-        real_client = client or httpx.Client()
+        real_client = client or new_client()
         try:
             exa_api_key = os.environ.get("EXA_API_KEY")
             parallel_api_key = os.environ.get("PARALLEL_API_KEY")
@@ -172,11 +178,9 @@ def _default_process_one(
                 # on a real batch until fixed to retry here instead. See
                 # discover_candidate_site's docstring.
                 #
-                # fetch_registry_extras() below still re-fetches leadership
-                # normally as part of its own flow -- one small, bounded
-                # duplicate roles request, see fetch_leadership_only's
-                # docstring for why that trade-off is acceptable.
-                leadership_facts = fetch_leadership_only(entity, budget, client=real_client, now=now)
+                # Leaders come from the registry roles already fetched above
+                # (no second roles request).
+                leadership_facts = [f for f in registry_facts if f.field_name == "leader"]
                 for leader_fact in leadership_facts[:1]:
                     leader_name = strip_leader_role_title(leader_fact.value)
                     if leader_name:
@@ -245,17 +249,27 @@ def _default_process_one(
         confirmed_facts.append(discovered_site_fact)
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
-    registry_facts, accounts_state = fetch_registry_extras(entity, budget, client=client)
     confirmed_facts += registry_facts
     # Industry/employees/legal form/status straight out of the universe record
     # already in memory -- zero requests, same registry trust tier.
     confirmed_facts += universe_identity_facts(org_number, universe_entry, now())
+    # The manifest is a 2025 snapshot; the live registry record is current, and
+    # employee count is the field that really moves between runs. So the live
+    # count replaces the manifest's whenever the live record could be read.
+    live_employee_count = [f for f in live_details.identity_facts if f.field_name == "employee_count"]
+    if live_employee_count and universe_entry is not None:
+        confirmed_facts = [f for f in confirmed_facts if not (f.field_name == "employee_count" and f.source_url == UNIVERSE_SOURCE)]
+        confirmed_facts += live_employee_count
     # Dated registry-change events: the only dated_activity source that works
     # for the ~89% of companies with no website to crawl at all.
     confirmed_facts += fetch_registry_update_activity(entity, budget, client=client, now=now)
     confirmed_facts += live_details.facts
+    if universe_entry is None:
+        # No manifest (e.g. a clean checkout): the live record supplies the
+        # same identity claims. With a manifest they are already above.
+        confirmed_facts += live_details.identity_facts
     if nav_job_index is not None:
-        nav_client = client or httpx.Client()
+        nav_client = client or new_client()
         try:
             confirmed_facts += nav_hiring_signal_facts(
                 entity, nav_job_index, nav_client, budget, now=now,
@@ -355,6 +369,8 @@ async def run_in_chunks(
     stop_if_key_dead: bool = False,
     use_nav_jobs: bool = False,
     exa_first_round_only: bool = False,
+    wire_counter: Optional[Callable[[], int]] = None,
+    startup_wire_requests: int = 0,
 ) -> tuple[list[CompanyProfile], dict]:
     """
     Run a submission corpus larger than one daily batch as sequential
@@ -370,6 +386,13 @@ async def run_in_chunks(
 
     Returns (all_profiles, aggregate_report) where aggregate_report has
     requests_used/spend_used_usd/chunk_count summed across every chunk.
+
+    `wire_counter` (src/pipeline/net.py's wire_request_count in a real run)
+    makes each chunk's budget enforce the REAL number of outbound requests,
+    redirects and retries included, as Builderr counts them.
+    `startup_wire_requests` are the requests already made before the first
+    chunk (key check, universe download); they belong to the same evaluated
+    run, so the first chunk is charged for them.
     """
     # Shared across every chunk on purpose: an exhausted API key stays
     # exhausted for the whole run, so chunk 2 must not rediscover the same
@@ -385,13 +408,16 @@ async def run_in_chunks(
 
     for start in range(0, len(org_numbers), chunk_size):
         chunk = org_numbers[start : start + chunk_size]
-        budget = BudgetGovernor(budget_limits)
+        baseline = None
+        if wire_counter is not None and start == 0 and startup_wire_requests:
+            baseline = wire_counter() - startup_wire_requests
+        budget = BudgetGovernor(budget_limits, wire_counter=wire_counter, wire_baseline=baseline)
         if use_nav_jobs and nav_job_index is None:
             # Once per run, not per chunk: the feed is the same for every
             # company, so a 1,000-company run pays for it once. Built on the
             # first chunk's budget so those requests count against a real
             # 2,000-request envelope rather than bypassing it.
-            nav_client = client or httpx.Client()
+            nav_client = client or new_client()
             try:
                 nav_job_index = build_nav_job_index(nav_client, budget, now=now)
             finally:

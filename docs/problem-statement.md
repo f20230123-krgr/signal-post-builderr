@@ -4,6 +4,11 @@ This document is the frozen source of truth for *what we were asked to build*.
 If anything in code or in another doc conflicts with this file, this file wins
 unless the user explicitly updates it.
 
+**Updated 2026-09-21** (at the user's request) to match Builderr's revised brief and
+evaluation contract (`starter-briefs/signalpost.md`, `signalpost-evaluation-harness.md`):
+the old numeric "hard gates" are gone as qualification thresholds, requests are counted
+including redirects and retries, and there are five versions in total.
+
 ## Overview
 
 Build an autonomous research agent that constructs verified company intelligence
@@ -47,20 +52,27 @@ a curated subset.
 
 - 45-minute wall-clock limit
 - 8 vCPU (virtual CPU — a processing "lane"), 16 GB RAM, 10 GB temp disk
-- Maximum 2,000 outbound requests (cache hits are free)
+- Maximum 2,000 total outbound requests, **including redirects and retries** (cache hits are free)
 - Maximum $10 external API spend
-- Up to 4 revision submissions allowed before October 18, 2026
+- Five versions in total: the first submission plus up to four revised commit hashes, all before October 18, 2026
+- Server-side secrets are supplied through documented environment variables only; external caches must be declared
 
-## Hard gates (non-negotiable — fail one, fail the submission)
+## Official-run checks (revised 2026-09 -- these are NOT score thresholds)
 
-- Coverage score ≥ 21/35
-- Weighted external company recall ≥ 60%
-- External precision ≥ 95% (no wrong-company publication)
 - Exactly 100 terminal results per daily batch
-- No fabricated financial data
-- Idempotent refresh — prior snapshots always preserved
+- No fabricated financial values and no material wrong-company publication
+- Published material claims have a source, retrieval time and reporting period
+- Idempotent refresh that preserves prior evidence and exposes material changes
+- Reproducible setup with pinned dependencies and one evaluator command
+- Source rights, secrets and outbound URL policy documented and safe
 
-## Scoring (100 points total; 65 to qualify)
+The former numeric gates (coverage >= 21/35, weighted recall >= 60%, precision
+>= 95%) no longer exist as qualification bars; coverage, recall and precision
+only contribute to the score. If the verified pool has fewer than 15 positive
+company-field opportunities across at least three external field families,
+recall is reported as "not measured" for that batch rather than 0%.
+
+## Scoring (100 points total; an official run and 65 to qualify)
 
 | Category | Weight |
 |---|---|
@@ -74,6 +86,12 @@ Coverage detail: for every external field, 70% of its coverage score comes from
 company-level recall (did you find the right company at all) and 30% from
 claim-level recall (did you get the specific fact right). Depth on a company you
 never correctly identified scores nothing — breadth and correct identity come first.
+
+The reference pool is the verified union of findings from every submitted crawler
+**and Builderr's own crawlers**. Final ranking is the mean across every scheduled daily
+batch while a version is active; an entrant-caused failed or missed batch scores zero.
+Tie-breakers: fewer wrong-company publications, then higher weighted company recall,
+then lower declared third-party cost.
 
 ## Timeline
 
@@ -105,7 +123,7 @@ one-command run instruction, models/APIs/licenses used, expected cost per
 
 ## Provided resources
 
-- Starter kit (runnable reference agent): `signalpost-starter-kit.tar.gz`
+- Starter kit (runnable reference agent): `signalpost-starter-kit.zip`
 - Full brief: `starter-briefs/signalpost.md`
 - Company universe: `signalpost-company-universe-2025.jsonl.gz`
 - 100-company product sample (viewable, not embedded in the brief)

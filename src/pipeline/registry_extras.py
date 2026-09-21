@@ -40,6 +40,7 @@ from typing import Callable, Optional
 import httpx
 
 from src.orchestrator.budget import BudgetGovernor
+from src.pipeline.net import new_client
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact
 from src.models.profile import EvidenceState
@@ -327,7 +328,7 @@ def fetch_registry_update_activity(
     if not budget.can_spend_request():
         return []
 
-    real_client = client or httpx.Client()
+    real_client = client or new_client()
     try:
         url = UPDATES_URL.format(org=entity.org_number)
         response = _get(real_client, url, sleep)
@@ -436,6 +437,11 @@ MAX_FORMER_NAMES = 3
 class LiveRegistryDetails:
     facts: list[ConfirmedFact] = field(default_factory=list)
     former_names: list[str] = field(default_factory=list)
+    # Industry / employee count / legal form / status read from the live
+    # record. Kept apart from `facts` (published for every company) because
+    # they are only used when the universe manifest isn't supplying the same
+    # four claims, so nothing is published twice.
+    identity_facts: list[ConfirmedFact] = field(default_factory=list)
 
 
 def fetch_live_registry_details(
@@ -461,23 +467,28 @@ def fetch_live_registry_details(
     details = LiveRegistryDetails()
     if entity.resolution_state != EvidenceState.AVAILABLE:
         return details
-    if budget.should_degrade() or not budget.can_spend_request():
+
+    url = ENHET_URL.format(org=entity.org_number)
+    reuse_record = isinstance(entity.raw_record, dict) and entity.source == url
+    if not reuse_record and (budget.should_degrade() or not budget.can_spend_request()):
         return details
 
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     try:
-        url = ENHET_URL.format(org=entity.org_number)
-        response = _get(client, url, sleep)
-        budget.record_request()
-        if response is None or response.status_code != 200:
-            return details
-        try:
-            body = response.json()
-        except ValueError:
-            return details
-
-        content_hash = _content_hash(response)
+        if reuse_record:
+            # resolve() just downloaded this exact record: reuse it.
+            body, content_hash = entity.raw_record, entity.content_hash
+        else:
+            response = _get(client, url, sleep)
+            budget.record_request()
+            if response is None or response.status_code != 200:
+                return details
+            try:
+                body = response.json()
+            except ValueError:
+                return details
+            content_hash = _content_hash(response)
         retrieved_at = now()
 
         def fact(field_name: str, value: str) -> ConfirmedFact:
@@ -491,6 +502,8 @@ def fetch_live_registry_details(
             founded = founded.strip()[:10]
             details.facts.append(fact("founded_date", founded))
             details.facts.append(fact("dated_activity", f"Founded on {founded} - Brønnøysundregistrene"))
+
+        details.identity_facts = _live_identity_facts(body, fact)
 
         former = [
             h for h in (body.get("historiskeNavn") or [])
@@ -509,6 +522,43 @@ def fetch_live_registry_details(
     finally:
         if owns_client:
             client.close()
+
+
+def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact]) -> list[ConfirmedFact]:
+    """The four claims universe_identity_facts() reads from the manifest, read
+    from the live registry record instead, in the same published shape. A field
+    the record doesn't carry is omitted, never guessed -- in particular a record
+    with no bankruptcy/liquidation flags at all says nothing about status."""
+    facts: list[ConfirmedFact] = []
+
+    code_block = body.get("naeringskode1")
+    if isinstance(code_block, dict):
+        industry = " ".join(
+            p for p in (str(code_block.get("kode") or "").strip(), str(code_block.get("beskrivelse") or "").strip()) if p
+        )
+        if industry:
+            facts.append(fact("industry", industry))
+
+    employees = body.get("antallAnsatte")
+    if isinstance(employees, int) and not isinstance(employees, bool):
+        facts.append(fact("employee_count", str(employees)))
+
+    form = body.get("organisasjonsform")
+    legal_form = str(form.get("kode") or "").strip() if isinstance(form, dict) else ""
+    if legal_form:
+        facts.append(fact("legal_form", legal_form))
+
+    flags = ("konkurs", "underAvvikling", "underTvangsavviklingEllerTvangsopplosning")
+    if any(flag in body for flag in flags):
+        if body.get("konkurs"):
+            status = "Bankrupt"
+        elif body.get("underAvvikling") or body.get("underTvangsavviklingEllerTvangsopplosning"):
+            status = "In liquidation"
+        else:
+            status = "Active"
+        facts.append(fact("operating_status", status))
+
+    return facts
 
 
 def _normalized_company_name(name: str) -> str:
@@ -532,7 +582,7 @@ def name_is_held_by_another_entity(
     if not budget.can_spend_request():
         return True
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     try:
         try:
             response = client.get(NAME_SEARCH_URL, params={"navn": name, "size": 20}, timeout=10.0)
@@ -576,7 +626,7 @@ def fetch_leadership_only(
     if entity.resolution_state != EvidenceState.AVAILABLE:
         return []
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     try:
         if not budget.can_spend_request():
             return []
@@ -611,7 +661,7 @@ def fetch_registry_extras(
         return [], EvidenceState.NOT_AVAILABLE
 
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     retrieved_at = now()
 
     facts: list[ConfirmedFact] = []

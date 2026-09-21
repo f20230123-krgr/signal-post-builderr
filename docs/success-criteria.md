@@ -3,20 +3,29 @@
 Use this as a literal checklist. "Implemented" is not "done." Done means every
 box below is checked against real (or fixture) numbers, not assumed.
 
-## Hard gates (must ALL pass — any single failure fails the whole submission)
+## Official-run checks and our standards (revised 2026-09)
 
-- [ ] Coverage score ≥ 21/35 (measured via `/self-check` against fixtures, and
-      trusted as a proxy for the real daily batch)
-- [ ] Weighted external company recall ≥ 60%
-- [ ] External precision ≥ 95% — zero material wrong-company publications
+Builderr no longer has numeric qualification gates: an entry qualifies with an
+official run and 65/100, and coverage / recall / precision only contribute to
+the score. What can stop a run from being official, or cost a whole batch, is
+below; treat every box as must-pass.
+
+- [ ] No material wrong-company publication (blocks an official run; first
+      tie-breaker). We keep >= 95% external precision as our own self-check target.
 - [ ] Exactly 100 terminal results produced for a 100-company batch, every time,
       including under simulated budget exhaustion and simulated network failures
+      (a failed or missed batch scores zero)
 - [ ] Zero fabricated financial values anywhere in the output
-- [ ] Refresh is idempotent — running the same batch twice never deletes,
+- [ ] Refresh is idempotent -- running the same batch twice never deletes,
       overwrites, or duplicates a prior snapshot
-- [ ] A 100-company batch completes within 45 minutes wall-clock, ≤2,000
-      outbound requests, ≤$10 external spend, on the declared 8 vCPU / 16GB /
-      10GB resource envelope
+- [ ] A 100-company batch completes within 45 minutes wall-clock, <= 2,000
+      outbound requests **including redirects and retries** (measured with the
+      real wire counter, see `run-report.json` `outbound_requests_measured`),
+      <= $10 declared external spend, on the declared 8 vCPU / 16GB / 10GB envelope
+- [ ] Source rights, secrets and outbound URL policy are documented and safe
+      (README "Requests, secrets, caches and outbound URLs")
+- [ ] Self-check targets (not gates): coverage >= 21/35, weighted company
+      recall >= 60%
 
 ## Scoring rubric self-estimate (100 pts total, 65 to qualify)
 

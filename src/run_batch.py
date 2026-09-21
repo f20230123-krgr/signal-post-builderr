@@ -35,15 +35,36 @@ from typing import Optional
 
 import httpx
 
+from src.orchestrator.budget import BudgetLimits
 from src.orchestrator.runner import DeadProviderAbort, run_in_chunks
 from src.pipeline.discovery import PROVIDER_COST_PER_SEARCH_USD, ProviderHealth, check_provider_keys
 from src.pipeline.envelope import to_envelope
-from src.pipeline.universe import load_universe
+from src.pipeline.net import new_client, wire_request_breakdown, wire_request_count
+from src.pipeline.universe import ensure_universe, load_universe
 from src.reporting import render_html_report
 from src.storage.cache import ResponseCache
 from src.storage.snapshots import SnapshotStore
 
 DEFAULT_UNIVERSE_PATH = Path("signalpost-company-universe-2025.jsonl.gz")
+
+# Requests held back from the 2,000-per-run limit. Builderr counts every
+# redirect hop and retry; concurrent workers can each start one last fetch
+# after the budget check passes, so stopping exactly at the limit could land
+# over it. 10 workers x (a fetch and a couple of redirects) fits well inside 60.
+REQUEST_SAFETY_MARGIN = 60
+
+
+def prepare_universe(
+    explicit_path: Optional[Path], default_path: Path, client: httpx.Client
+) -> tuple[Optional[Path], int]:
+    """Which universe manifest to use, fetching it when a clean checkout has none.
+
+    An explicit --universe is always used as given. Otherwise the default file
+    is used if present and downloaded (hash-verified) if not. Returns
+    (path_or_None, requests_used); None means "carry on with live lookups"."""
+    if explicit_path is not None:
+        return explicit_path, 0
+    return ensure_universe(default_path, client)
 
 
 def _print_dead_key_banner(dead: dict[str, str], headline: str, closing: list[str]) -> None:
@@ -70,7 +91,7 @@ def startup_key_check(
     before anything is processed or written; without it, the warning is
     printed and the run continues (the graded-run path)."""
     owns_client = client is None
-    client = client or httpx.Client()
+    client = client or new_client()
     try:
         dead, requests_used = check_provider_keys(
             client,
@@ -153,7 +174,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Before anything is created or written, so a stop leaves no output behind.
-    provider_health, startup_requests = startup_key_check(
+    provider_health, _ = startup_key_check(
         args.stop_if_key_dead, spend_cap_usd=args.max_search_spend
     )
 
@@ -162,8 +183,17 @@ def main() -> None:
     ]
     args.out.mkdir(parents=True, exist_ok=True)
 
-    universe_path = args.universe or (DEFAULT_UNIVERSE_PATH if DEFAULT_UNIVERSE_PATH.exists() else None)
+    # A clean checkout has no universe file: fetch it (hash-verified) or, if that
+    # fails, carry on with live registry lookups -- see src/pipeline/universe.py.
+    startup_client = new_client()
+    try:
+        universe_path, _ = prepare_universe(args.universe, DEFAULT_UNIVERSE_PATH, startup_client)
+    finally:
+        startup_client.close()
     universe = load_universe(universe_path) if universe_path else None
+    # Everything sent so far (key check, universe download) belongs to this
+    # evaluated run, so the first chunk's request budget is charged for it.
+    startup_wire_requests = wire_request_count()
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     # SnapshotStore lives under --out so every run is append-only and the
@@ -189,6 +219,11 @@ def main() -> None:
                 stop_if_key_dead=args.stop_if_key_dead,
                 use_nav_jobs=True,
                 exa_first_round_only=args.exa_first_round_only,
+                budget_limits=BudgetLimits(request_safety_margin=REQUEST_SAFETY_MARGIN),
+                # Builderr counts "outbound requests, including redirects and
+                # retries": enforce the real number, not one per logical fetch.
+                wire_counter=wire_request_count,
+                startup_wire_requests=startup_wire_requests,
             )
         )
     except DeadProviderAbort as abort:
@@ -224,8 +259,13 @@ def main() -> None:
         "universe_used": universe_path is not None,
         "chunk_size": args.chunk_size,
         "chunk_count": aggregate["chunk_count"],
-        # Includes the one startup check per configured discovery key.
-        "requests_used": aggregate["requests_used"] + startup_requests,
+        # Real outbound requests as Builderr counts them (redirect hops and
+        # retries included), startup key check and universe download included.
+        "requests_used": aggregate["requests_used"],
+        # Independent whole-process count of every request actually sent.
+        "outbound_requests_measured": wire_request_count(),
+        "outbound_requests_breakdown": wire_request_breakdown(),
+        "request_safety_margin": REQUEST_SAFETY_MARGIN,
         # Real, recorded cost: paid search calls (including the startup key
         # check) priced per PROVIDER_COST_PER_SEARCH_USD.
         "spend_used_usd": round(aggregate.get("search_spend_usd", aggregate["spend_used_usd"]), 4),

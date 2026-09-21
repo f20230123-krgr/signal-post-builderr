@@ -49,10 +49,10 @@ values. `self_check.py` runs the pipeline against them and reports:
 - **Weighted company recall** — did we find and correctly attach the right
   company at all, weighted per the 70/30 split described in `problem-statement.md`
 - **External precision** — of what we published, what fraction was actually
-  the correct company (must stay ≥95% in every self-check run before submitting)
+  the correct company (our own target: keep ≥95% in every self-check run before submitting -- no longer a Builderr qualification bar)
 - **Coverage score** — approximate 0-35 scale per the rubric
 
-Treat any self-check run below the hard-gate thresholds as a blocking failure —
+Treat any self-check run below these internal targets as a blocking failure —
 do not submit, and do not mark a related task "done" in `CLAUDE.md`'s sense of
 the word.
 
@@ -60,8 +60,10 @@ the word.
 
 Define explicitly (avoid noisy false positives): a change is material if it
 affects `legal_name`, `leadership`, `official_site`, `annual_accounts.latest`,
-`operating_status` (e.g. Active -> Bankrupt; only compared when both snapshots
-carry the field, so older snapshots don't flag every company), or adds/removes
+`operating_status` (e.g. Active -> Bankrupt), `employee_count`, `legal_form` or
+`industry` (each only compared when both snapshots carry the field, so older
+snapshots don't flag every company -- Builderr's own refresh sample expects an
+employee-count change to be detected), or adds/removes
 a `hiring_signal`. Whitespace/formatting differences in scraped
 text, or a re-fetch of an unchanged page with a new `retrieved_at` timestamp,
 are not material changes on their own.

@@ -830,6 +830,9 @@ def verify_discovered_site(
         # broader HTTPError here covers both in one clause) -- the same
         # exception-type gap already fixed once for crawl.py's
         # malformed-redirect case, just not carried over here.
+        except httpx.TooManyRedirects:
+            response = None  # a loop is deterministic: never retried
+            break
         except (httpx.HTTPError, UnicodeError):
             response = None
             if attempt < MAX_FETCH_RETRIES - 1:

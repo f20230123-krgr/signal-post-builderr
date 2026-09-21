@@ -1,22 +1,54 @@
 {
-  "run_id": "submission-corpus",
+  "run_id": "2026-09-21T17-49-06Z",
   "input_count": 1000,
   "profile_count": 1000,
   "universe_used": true,
   "chunk_size": 100,
   "chunk_count": 10,
-  "requests_used": 14450,
-  "spend_used_usd": 5.635,
+  "requests_used": 12919,
+  "outbound_requests_measured": 12919,
+  "outbound_requests_breakdown": {
+    "total": 12919,
+    "redirect_hops": 659,
+    "server_error_responses": 22,
+    "by_host": {
+      "data.brreg.no": 5436,
+      "api.parallel.ai": 1798,
+      "api.exa.ai": 945,
+      "api.duckduckgo.com": 202,
+      "bizpages.org": 92,
+      "norwegian-subsea.no": 91,
+      "vibbo.no": 83,
+      "tracxn.com": 61,
+      "www.usbl.no": 41,
+      "www.datalog.co.uk": 38,
+      "forvalt.no": 38,
+      "pam-stilling-feed.nav.no": 32,
+      "backe.no": 32,
+      "www.mpstorkjokken.no": 32,
+      "www.norwegianshipdesign.no": 30
+    }
+  },
+  "request_safety_margin": 60,
+  "spend_used_usd": 6.258,
   "spend_limits": {
     "exa_first_round_only": true,
     "max_search_spend_usd": 10.0
   },
-  "wall_clock_seconds": 4287.619,
+  "wall_clock_seconds": 3736.072,
   "degraded_providers": {},
   "nav_job_index": {
-    "pages_fetched": 30,
-    "requests_used": 31,
-    "active_ads_indexed": 6317,
+    "pages_fetched": 31,
+    "requests_used": 32,
+    "active_ads_indexed": 6177,
     "truncated_at_page_cap": false
+  },
+  "chunk_1_rerun": {
+    "reason": "data.brreg.no was briefly unavailable while the first batch of 100 ran (58 profiles came back with failed registry claims); the same 100 organisation numbers were re-run and replace that batch.",
+    "profiles_replaced": 100,
+    "requests_used": 1288,
+    "spend_used_usd": 0.63,
+    "wall_clock_seconds": 316.635,
+    "degraded_providers": {}
   }
 }

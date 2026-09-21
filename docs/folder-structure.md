@@ -11,12 +11,12 @@ signalpost-agent/
     component-specs.md         # per-module contract: inputs, outputs, must-not-do
     data-schema.md             # the profile schema + evidence state enum
     testing-strategy.md        # what gets tested, how, and with what fixtures
-    success-criteria.md        # hard gates + rubric as a literal checklist
+    success-criteria.md        # official-run checks + rubric as a literal checklist
   .claude/
     commands/
       self-score.md           # /self-score — run local scoring harness
       add-stage.md             # /add-stage <name> — scaffold a new stage + test
-      guard-check.md           # /guard-check — review a diff against the gates
+      guard-check.md           # /guard-check — review a diff against the standards
     settings.json              # starter permission scaffold (adjust as needed)
   src/
     pipeline/

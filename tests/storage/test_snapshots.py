@@ -137,3 +137,54 @@ def test_unchanged_operating_status_is_not_a_change():
     new = _with_status(make_profile(legal_name=available_claim("ACME AS")), "Active")
 
     assert not any("operating_status" in c for c in diff_material_changes(old, new))
+
+
+# ---- registry facts that change between runs -----------------------------
+
+
+def _with_registry_fields(profile, **fields):
+    for name, value in fields.items():
+        setattr(profile.legal_identity, name, available_claim(value) if value is not None else None)
+    return profile
+
+
+def test_a_changed_employee_count_is_a_material_change():
+    """Builderr's own refresh sample expects exactly this: the registry's
+    employee count going from 2 to 3 between two versions of a profile."""
+    old = _with_registry_fields(make_profile(legal_name=available_claim("ACME AS")), employee_count="2")
+    new = _with_registry_fields(make_profile(legal_name=available_claim("ACME AS")), employee_count="3")
+
+    assert "employee_count: '2' -> '3'" in diff_material_changes(old, new)
+
+
+def test_a_changed_legal_form_or_industry_is_a_material_change():
+    old = _with_registry_fields(
+        make_profile(legal_name=available_claim("ACME AS")), legal_form="AS", industry="62.010 Programmeringstjenester"
+    )
+    new = _with_registry_fields(
+        make_profile(legal_name=available_claim("ACME AS")), legal_form="ASA", industry="62.020 Konsulentvirksomhet"
+    )
+
+    changes = diff_material_changes(old, new)
+
+    assert "legal_form: 'AS' -> 'ASA'" in changes
+    assert "industry: '62.010 Programmeringstjenester' -> '62.020 Konsulentvirksomhet'" in changes
+
+
+def test_registry_fields_missing_from_either_snapshot_are_not_a_change():
+    """Snapshots written before these claims existed have none; flagging that as
+    a change would report every company on the first run after upgrading."""
+    with_fields = _with_registry_fields(
+        make_profile(legal_name=available_claim("ACME AS")), employee_count="3", legal_form="AS", industry="62.010 X"
+    )
+    without = make_profile(legal_name=available_claim("ACME AS"))
+
+    assert diff_material_changes(without, with_fields) == []
+    assert diff_material_changes(with_fields, without) == []
+
+
+def test_unchanged_registry_fields_are_not_a_change():
+    old = _with_registry_fields(make_profile(legal_name=available_claim("ACME AS")), employee_count="3", legal_form="AS")
+    new = _with_registry_fields(make_profile(legal_name=available_claim("ACME AS")), employee_count="3", legal_form="AS")
+
+    assert diff_material_changes(old, new) == []

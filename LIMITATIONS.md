@@ -75,8 +75,9 @@ All permissive; no copyleft (GPL-style) obligations.
 - **NAV hiring signals cover ~70% of currently active job ads, not all of
   them.** The feed replays changes oldest-first; covering every active ad
   needs a ~60-day window (~104 list pages, measured), which would eat too
-  much of a 2,000-request batch. The run reads ads modified in the last 14
-  days (~31 pages, ~70% of active ads) with a hard cap of 40 pages; if the cap
+  much of a 2,000-request batch. The run reads ads modified in the last 30
+  days (~64 pages, ~93% of active ads; a 14-day window missed live ads that were
+  last modified longer ago) with a hard cap of 80 pages; if the cap
   is ever hit, the newest ads are the ones cut off, and `run-report.json`'s
   `nav_job_index.truncated_at_page_cap` says so. Ads are matched to a company
   by exact employer name first, then confirmed by org number, so an ad listed
@@ -124,3 +125,42 @@ All permissive; no copyleft (GPL-style) obligations.
   because the static HTML had no extractable company-name signal. Correct,
   safe behavior (precision preserved), but it further lowers this mechanism's
   already-low effective hit rate.
+
+## Known limits added 2026-09-21
+
+- **Request counting is the real wire count.** Builderr counts redirects and retries, so
+  every client goes through `src/pipeline/net.py`. Measured on 100 unseen companies:
+  1,467 real requests for the default command, 1,187 with Exa limited to the first round. A run that would exceed the limit degrades (1,800) and stops fetching (1,940)
+  rather than overshooting; companies processed after that point get thinner profiles.
+- **The guessed page paths were cut from 13 to 4** (`/kontakt`, `/om-oss`, `/about`,
+  `/contact`) to save ~9 requests per site. On the 1,000-company corpus the nine dropped
+  paths had produced claims on 5 pages (~0.1% of claims). Pages under those names are still
+  found through the sitemap and the pages' own links.
+- **Redirect chains are capped at 5 hops and never retried.** One real site's `robots.txt`
+  redirected to itself and cost 192 requests before this.
+- **NAV hiring signals depend on NAV's public feed being reachable.** During testing on
+  2026-09-21 the feed timed out; the agent then simply publishes no NAV signals (and spends
+  2-4 requests finding out). Nothing else is affected.
+- **Guessing company domains was measured and not built.** On 87 companies with no
+  registered website it verified one site that search missed (about +1 per 100), at the
+  cost of new code and precision risk.
+- **The outbound URL guard resolves a name before the request and the HTTP client resolves
+  it again**, so a hostile DNS server could in principle answer differently the second
+  time (DNS rebinding). Names that do not resolve are let through (the request just fails).
+- **Employee count is now the live registry value** (falling back to the universe file's
+  2025 figure), so it can differ from the manifest for companies that changed size.
+- **A site that bounces every page through a login redirect still costs requests.** One
+  measured example spent ~58 requests on 13 pages (five hops each, the cap). The chain is
+  bounded, never retried, and yields nothing published; at most ~3% of a batch.
+- **If data.brreg.no is unavailable while a batch runs, the affected companies get FAILED
+  registry claims** (accounts, workplaces, founding date, leaders). This happened once during
+  the corpus run (58 profiles in one batch, replaced by re-running those 100 companies).
+  Registry calls are retried three times over about a second and a half, which cannot outlast
+  an outage of minutes. Builderr's contract treats a shared-source failure as void and rerun.
+- **NAV's job feed is intermittently slow or unreachable** (it timed out for whole stretches on
+  2026-09-21/22). The corpus therefore has 0 hiring signals (the previous one had 2).
+- **NAV hiring signals depend on when an ad was last modified.** The old 14-day window found
+  2 signals in the first corpus and 0 in the regenerated one, because two still-live ads
+  had aged out of the window; the window is now 30 days. The NAV list endpoint was too slow
+  to re-verify this live on 2026-09-22, so the corpus in this repo was generated with the
+  14-day window and has 0 NAV hiring signals.

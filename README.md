@@ -18,10 +18,10 @@ read it before making any change.
 ```bash
 pip install -r requirements.txt
 python -m pytest tests/                                # all green, no live network
-curl -LO https://builderr.ai/signalpost-company-universe-2025.jsonl.gz  # optional but recommended
+curl -LO https://builderr.ai/signalpost-company-universe-2025.jsonl.gz  # optional: fetched automatically if missing
 export EXA_API_KEY=... PARALLEL_API_KEY=...            # your own keys -- see "API keys and cost"
 python -m src.run_batch --input batch.jsonl --out results/
-python -m src.scoring.self_check --fixtures fixtures/   # coverage/recall/precision vs hard gates
+python -m src.scoring.self_check --fixtures fixtures/   # coverage/recall/precision vs our targets
 ```
 
 `batch.jsonl` is one Norwegian organization number per line, e.g.:
@@ -43,6 +43,13 @@ If `signalpost-company-universe-2025.jsonl.gz` is present in the working
 directory (or passed via `--universe`), identity resolution for any covered
 org number is free and network-free (Builderr's own frozen, hash-verified
 manifest) -- see `src/pipeline/universe.py`.
+
+The file is not stored in this repository. If it is missing, the run downloads
+it once from `builderr.ai` (one request), keeps it only if its SHA-256 matches
+the hash Builderr publishes, and saves it next to where you ran the command. If
+the download fails, the run carries on with live registry lookups: identity,
+industry, legal form, employee count and operating status then come from the
+live Brønnøysund record instead (same fields, same source class).
 
 ## Status
 
@@ -82,7 +89,7 @@ there:
   the agent playbook and the learning harness.
 - **Honest HTTP status handling**: a 404/403/5xx response is no longer
   silently treated as a successful fetch.
-- **Pinned dependencies**, per the "reproducible setup" hard gate.
+- **Pinned dependencies**, per the "reproducible setup" official-run check.
 - Deliberately **not** pursued: `signalpost-sources.md`'s own restrictions
   rule out scraping LinkedIn/proff.no/purehelp.no directly (checked their
   actual `robots.txt`/access behavior -- purehelp.no explicitly disallows the
@@ -115,11 +122,11 @@ A third pass (September 2026) focused on coverage and precision:
 
 On the self-check harness's fixture sample (10 companies: 4 hand-verified
 with websites, plus 6 with no website on file to represent the ~89% majority
-case), all three hard gates pass: coverage 34.56/35, weighted company recall
-100%, external precision 100%.
+case), all three of our self-check targets are met: coverage 34.56/35, weighted
+company recall 100%, external precision 100%.
 
 Use `/self-score` to re-run the harness and quote fresh numbers, and
-`/guard-check` before any PR to confirm no hard gate has regressed.
+`/guard-check` before any PR to confirm no standard has regressed.
 
 ## API keys and cost
 
@@ -139,7 +146,21 @@ run time), and each company's own website.
 website is only found for companies that registered one (~11% of the
 universe), and every field that depends on the website is thinner.
 
-**Expected cost per 100-company batch (default command): up to about $2.40**
+**Real outbound requests per 100-company batch, measured** (redirect hops and
+retries included, as Builderr counts them; 100 unseen companies drawn at random
+on 2026-09-21, universe file present, 10 concurrent workers):
+
+| Command | Real requests | Time | Exa spend |
+|---|---|---|---|
+| Default (Exa on every search round) | **1,467** | 345 s | $1.76 |
+| `--exa-first-round-only` | 1,187 | 310 s | $0.62 |
+| No Exa key, no universe file (clean checkout) | 1,122 | 273 s | $0 |
+
+All are well under the 2,000 limit and the 45-minute limit. The agent starts
+skipping optional extras at 1,800 and stops fetching at 1,940, so a heavy batch
+degrades instead of overshooting. Numbers vary a little with the companies drawn.
+
+**Expected cost per 100-company batch (default command): about $1.80 measured, up to about $2.40**
 of Exa searches, well under the $10-per-batch limit. Each company without a
 registered website gets up to four search rounds (company name, CEO name, org
 number, former name), stopping as soon as a verified website is found, so the
@@ -153,6 +174,39 @@ every run.
 rest of the run, the run continues on the remaining providers, and the
 problem is printed at the start and end of the run and recorded in
 `run-report.json` under `degraded_providers`.
+
+### Requests, secrets, caches and outbound URLs
+
+**Request limit.** Builderr's limit is 2,000 outbound requests per run,
+*including redirects and retries*. Every client the agent builds goes through
+`src/pipeline/net.py`, which counts each request that is actually sent, redirect
+hops and retries included, and the budget governor enforces that real number
+(not one per page). The agent starts degrading (skipping optional extras) at 90%
+and stops fetching 60 requests short of 2,000, so requests already in flight
+when it stops cannot push the run over. `run-report.json` records
+`requests_used` (real count, startup requests included) and
+`outbound_requests_measured` (an independent count of everything sent).
+
+**Secrets.** API keys are read from the environment variables in the table above
+and nowhere else. They are never written to `run-report.json`, envelopes,
+snapshots, caches or logs, and no key is stored in this repository.
+
+**Caches.** The only caches are: (1) `cache.sqlite3` in the `--out` directory,
+created empty for each output directory and never shipped, holding fetched
+public web pages and search-API responses keyed by URL, request and date (never
+a key); and (2) the company-universe file described above, a public Builderr
+file verified against its published SHA-256. Nothing else is cached or
+pre-populated.
+
+**Outbound URL policy.** The agent follows URLs it finds on third-party pages,
+so every request is checked before it is sent, redirect hops included: only
+`http` and `https` are allowed, and a URL is refused if its host is
+`localhost`, an internal-looking name (`.local`, `.internal`, ...), a
+private, loopback, link-local (including the cloud metadata address) or
+carrier-grade-NAT IP address, or a name that resolves to one. A refused request
+is not sent and not counted, and only costs that one fetch. Known limit: the
+name is resolved once for the check and again by the HTTP client, so a hostile
+DNS server could in principle answer differently the second time.
 
 ### Limiting your own spend (optional, off by default)
 
@@ -178,11 +232,16 @@ lower website coverage than the default command produces. Measured result:
 | | |
 |---|---|
 | Profiles | 1,000 / 1,000 |
-| Search spend | $5.64 in total (the $10 cap was never reached) |
-| Requests | 14,450 across 10 batches of 100 (~1,445 per batch, limit 2,000) |
-| Runtime | ~4.3 minutes per 100 companies of active processing; the recorded `wall_clock_seconds` also includes a ~29-minute pause while the machine slept |
-| Provider failures | none |
-| Available claims | 15,346 (legal name, industry, legal form and operating status for all 1,000; dated activity and workplaces for all 1,000; founding date 989; leaders 990; annual accounts 997; official website 293; company profiles 123; public brand 125; hiring signals 2) |
+| Search spend | $6.89 in total ($6.26 for the run plus $0.63 to re-run one batch; the $10 cap was never reached) |
+| Requests | 12,919 across 10 batches of 100 (~1,290 per batch, limit 2,000), plus 1,288 to re-run one batch. Real requests, redirects and retries included |
+| Runtime | ~5 minutes per 100 companies of active processing (62 minutes for the whole run, which includes a short machine pause) |
+| Provider failures | none. data.brreg.no was briefly unavailable during the first batch of 100 (58 profiles came back with failed registry claims), so those same 100 organisation numbers were re-run and replace that batch; see `chunk_1_rerun` in `run-report.json` |
+| Available claims | 15,340. For all 1,000 companies: legal name, industry, legal form, operating status, dated activity and workplaces. Annual accounts 997, founding date 989, leaders 989, official website 298, company profiles 125, public brand 124, employee count 146 (only where the registry holds one), hiring signals 0 (this corpus was generated with a 14-day NAV window and a slow feed; the window is now 30 days, see `LIMITATIONS.md`) |
+
+The corpus was generated on 2026-09-21/22 by the code in the commit submitted with it (real
+request counting, the outbound URL guard and the request trims described above), with one
+exception: the NAV job-feed window was widened from 14 to 30 days afterwards (see
+`LIMITATIONS.md`), so this corpus was built with the 14-day window.
 
 The default one-command run uses Exa on every search round and has no
 run-wide spend cap.
@@ -190,7 +249,7 @@ run-wide spend cap.
 ## Submitting
 
 Per `starter-briefs/signalpost.md`: email `submit@builderr.ai` with the
-**repository URL and exact commit hash** (not a zip -- up to 4 revisions are
+**repository URL and exact commit hash** (not a zip -- five versions in total, the first plus up to four revisions, are
 allowed before the deadline, each a new commit hash), completed-profile
 count (>=1,000), the organisation-number manifest (`manifest.txt`), the
 one-command run instruction above, models/APIs/licences used, and expected

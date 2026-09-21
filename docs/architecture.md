@@ -13,7 +13,7 @@ the ecosystem saves engineering time against the fixed October deadline.
 | Resolve | `httpx.Client` + Pydantic model against Brønnøysundregisteret's public Enhetsregisteret API | Cheap, authoritative, structured, free, no auth. Spend request budget here first — a bad resolve poisons everything downstream. |
 | Crawl | `httpx.Client` (primary), Playwright (optional, lazy fallback) | **Reconciled during implementation:** Scrapy was dropped in favor of using `httpx` directly for the static fetch — it's what the Concurrency model section below already specified, and running two separate HTTP stacks (Scrapy's own reactor + httpx) added complexity with no real benefit at this scale. Playwright is invoked only via an injected `render_js` callable when a page looks like a JS-shell (see `crawl.py`); it is not a hard dependency and its absence degrades gracefully (the static/shell content is kept as-is) rather than failing the company. |
 | Extract | extruct (schema.org/JSON-LD/microdata) then Trafilatura (article text) | extruct captures data companies already publish in structured form — fastest and cheapest. Trafilatura is the fallback for unstructured prose. |
-| Verify | RapidFuzz (fuzzy string matching) | Directly enforces the 95%-precision gate: a claim is only accepted if (a) it came from the entity's own verified official-site domain (provenance) and (b) for prose fields, the source page's company name matches the resolved legal name above a threshold. |
+| Verify | RapidFuzz (fuzzy string matching) | Directly enforces our >= 95% wrong-company precision standard: a claim is only accepted if (a) it came from the entity's own verified official-site domain (provenance) and (b) for prose fields, the source page's company name matches the resolved legal name above a threshold. |
 | Assemble | Pydantic models | Schema + state-enum enforcement at write time — a malformed profile cannot leave the pipeline. |
 | Persist | Append-only snapshot store (SQLite for the HTTP cache, JSONL for profile snapshots, keyed by org_number + run timestamp) | Never overwrite — always add. Makes "idempotent refresh" structural rather than a rule to remember. |
 
@@ -47,7 +47,7 @@ checks before doing expensive work: remaining requests, remaining dollars,
 remaining wall-clock time. When a budget is nearly exhausted, the pipeline stops
 pulling new data and moves straight to writing out whatever it has — correctly
 flagged `not_available`/`blocked` — rather than crashing mid-batch. This is what
-protects the "exactly 100 terminal results" hard gate: a graceful degrade that
+protects the "exactly 100 terminal results" official-run check: a graceful degrade that
 emits 100 thinner profiles passes; a crash that emits 87 profiles fails outright.
 
 ## Error handling philosophy

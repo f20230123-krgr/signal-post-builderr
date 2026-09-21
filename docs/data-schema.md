@@ -43,7 +43,7 @@ time,..., content hash and extraction method") and the reference agent's
 deliberately **not** added to the `Claim.value`/`retrieved_at`-style hard
 validator -- doing so would require every existing test construction of
 `ResolvedEntity`/`RawFact`/`ConfirmedFact` across the suite to supply them,
-for a schema-strictness gain that isn't itself one of the hard gates in
+for a schema-strictness gain that isn't itself one of the official-run checks in
 `success-criteria.md`. `source_class` values map directly to
 `signalpost-sources.md`'s three source tiers (Official Norwegian records /
 Company-owned sources / External sources).
@@ -62,7 +62,7 @@ CompanyProfile:
     # Optional registry identity facts -- omitted (not emitted as a gap) when
     # the source doesn't carry them:
     industry: Claim | null          # universe manifest industry code + label
-    employee_count: Claim | null    # universe manifest
+    employee_count: Claim | null    # live registry record; universe manifest if it can't be read
     legal_form: Claim | null        # universe manifest (AS, ASA, ENK, ...)
     operating_status: Claim | null  # Active / Bankrupt / In liquidation
     founded_date: Claim | null      # live registry record (stiftelsesdato)
@@ -114,5 +114,5 @@ CompanyProfile:
 
 Pydantic validation at assemble-time means a malformed profile physically cannot
 reach the output file — the equivalent of a compiler error instead of a code
-review comment. Given that precision/coverage are hard pass-fail gates, this is
+review comment. Given that a wrong-company match blocks an official run, this is
 worth the up-front cost of a stricter schema.

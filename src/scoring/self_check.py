@@ -6,7 +6,8 @@ Invoked by: .claude/commands/self-score.md (the /self-score slash command)
 
 Must report the same metric definitions Builderr uses (weighted company
 recall, external precision, 70/30 coverage split) so numbers are directly
-comparable to the real hard gates in docs/success-criteria.md.
+comparable to the targets in docs/success-criteria.md. (Builderr no longer treats
+coverage/recall/precision as qualification thresholds; these are our own bars.)
 
 Metric definitions (docs/problem-statement.md):
   - weighted_company_recall: % of labeled companies whose legal_name was
@@ -59,12 +60,15 @@ class SelfCheckReport:
     weighted_company_recall: float  # 0-100 (%)
     external_precision: float  # 0-100 (%)
 
-    def passes_hard_gates(self) -> bool:
+    def meets_targets(self) -> bool:
         return (
             self.coverage_score >= 21
             and self.weighted_company_recall >= 60.0
             and self.external_precision >= 95.0
         )
+
+    # Kept for callers written before the rules were revised.
+    passes_hard_gates = meets_targets
 
 
 def _load_labels(fixtures_dir: Path) -> list[dict]:
@@ -208,10 +212,10 @@ def main() -> None:
     args = parser.parse_args()
 
     report = run_self_check(args.fixtures)
-    print(f"coverage_score: {report.coverage_score:.2f} / 35 (gate: >=21)")
-    print(f"weighted_company_recall: {report.weighted_company_recall:.2f}% (gate: >=60%)")
-    print(f"external_precision: {report.external_precision:.2f}% (gate: >=95%)")
-    print(f"passes_hard_gates: {report.passes_hard_gates()}")
+    print(f"coverage_score: {report.coverage_score:.2f} / 35 (target: >=21)")
+    print(f"weighted_company_recall: {report.weighted_company_recall:.2f}% (target: >=60%)")
+    print(f"external_precision: {report.external_precision:.2f}% (target: >=95%)")
+    print(f"meets_targets: {report.meets_targets()}")
 
 
 if __name__ == "__main__":
