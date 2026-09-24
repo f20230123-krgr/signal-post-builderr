@@ -120,6 +120,15 @@ A third pass (September 2026) focused on coverage and precision:
   startup and mid-run, switched off for the rest of the run, and reported;
   search results are cached per day and search spend is recorded.
 
+**Synthesis, per Soham's per-category breakdown for `e44e85c` (scored 0/10):**
+that commit's `envelopes.jsonl` -- the artifact actually submitted -- had no
+synthesis content anywhere in it; `report.html` existed but is a local file,
+never part of a submission. Fixed by embedding `src/synthesis.py`'s templated
+answers under `answers` in every envelope (commit `6c3d454`), and, after the
+same breakdown made it worth double-checking, by adding a `sources` list to
+every answer -- the rubric asks for a summary "with sources for its
+conclusions," and the answers had none before this.
+
 On the self-check harness's fixture sample (10 companies: 4 hand-verified
 with websites, plus 6 with no website on file to represent the ~89% majority
 case), all three of our self-check targets are met: coverage 34.56/35, weighted

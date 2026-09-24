@@ -139,3 +139,51 @@ def test_founded_question_is_honest_when_no_date_is_known():
     )
 
     assert answer["state"] == EvidenceState.NOT_AVAILABLE.value
+
+
+def test_every_answer_cites_the_sources_its_conclusion_rests_on():
+    """The evaluation contract asks for a summary "with sources for its
+    conclusions" -- each answer must carry the source URL(s)/identifiers of
+    the Claim(s) it was templated from, not just the question and answer text."""
+    profile = make_profile(
+        legal_name=available_claim("EQUINOR ASA", source="https://data.brreg.no/enhetsregisteret/api/enheter/923609016"),
+        official_site=available_claim("https://www.equinor.com", source="https://www.equinor.com/about"),
+        leaders=[
+            available_claim("Anders Opedal (President and CEO)", source="https://data.brreg.no/roller/923609016"),
+            available_claim("Board Chair", source="https://data.brreg.no/roller/923609016"),
+        ],
+        hiring_signals=[available_claim("Kahoot! AS is hiring: Senior Backend Engineer", source="https://www.equinor.com/careers")],
+        annual_latest=available_claim(
+            "67,956,000,000", source="https://data.brreg.no/regnskapsregisteret/regnskap/923609016", reporting_period="FY2025"
+        ),
+        workplaces=[available_claim("SOTRA", source="https://data.brreg.no/underenheter/923609016")],
+        is_first_run=False,
+        material_changes=["legal_name: 'Old' -> 'EQUINOR ASA'"],
+    )
+
+    answers = answer_business_questions(profile)
+    by_question = {a["question"]: a for a in answers}
+
+    assert by_question["What is the company's legal name and brand?"]["sources"] == [
+        "https://data.brreg.no/enhetsregisteret/api/enheter/923609016"
+    ]
+    assert by_question["What is the official website?"]["sources"] == ["https://www.equinor.com/about"]
+    # Two leaders sharing the same source collapse to one entry, not a duplicate per leader.
+    assert by_question["Who leads the company?"]["sources"] == ["https://data.brreg.no/roller/923609016"]
+    assert by_question["Is the company currently hiring?"]["sources"] == ["https://www.equinor.com/careers"]
+    assert by_question["What are the latest filed annual accounts?"]["sources"] == [
+        "https://data.brreg.no/regnskapsregisteret/regnskap/923609016"
+    ]
+    assert by_question["Where are the registered workplaces?"]["sources"] == ["https://data.brreg.no/underenheter/923609016"]
+
+    for a in answers:
+        assert isinstance(a["sources"], list)
+
+
+def test_an_unavailable_answer_cites_no_sources():
+    profile = make_profile()  # everything NOT_AVAILABLE
+
+    answers = answer_business_questions(profile)
+
+    for a in answers:
+        assert a["sources"] == []

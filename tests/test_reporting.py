@@ -63,3 +63,24 @@ def test_report_escapes_html_special_characters_in_claim_values():
 
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+def test_a_synthesis_answer_with_a_source_links_to_it_for_verification():
+    """Usability bar: "a user should be able to find, compare and verify
+    company information on desktop and mobile." A sourced answer must carry
+    a clickable link to that source, not just prose."""
+    profile = make_profile(
+        legal_name=available_claim("EQUINOR ASA", source="https://data.brreg.no/enhetsregisteret/api/enheter/923609016"),
+    )
+
+    html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert 'href="https://data.brreg.no/enhetsregisteret/api/enheter/923609016"' in html
+
+
+def test_a_synthesis_answer_with_no_source_shows_no_broken_link():
+    profile = make_profile()  # everything NOT_AVAILABLE, no sources
+
+    html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert 'href=""' not in html

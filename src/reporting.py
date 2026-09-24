@@ -36,6 +36,7 @@ th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #ee
 .state-ambiguous, .state-not_applicable { color: #b8860b; }
 .synthesis dt { font-weight: 600; margin-top: 0.5rem; }
 .synthesis dd { margin: 0.15rem 0 0 0; }
+.synthesis .source { font-size: 0.85em; }
 @media (max-width: 480px) {
   body { padding: 0.5rem; }
   table, thead, tbody, th, td, tr { display: block; }
@@ -84,9 +85,14 @@ def _company_section(profile: CompanyProfile) -> str:
         ]
     )
 
-    synthesis_items = "".join(
-        f"<dt>{_esc(a['question'])}</dt><dd>{_esc(a['answer'])}</dd>" for a in answer_business_questions(profile)
-    )
+    def _synthesis_item(a: dict) -> str:
+        sources = a.get("sources") or []
+        # First source only -- multiple leaders/workplaces/etc. commonly share
+        # one source page, and the answer text itself already lists the values.
+        link = f' <a class="source" href="{_esc(sources[0])}">source</a>' if sources else ""
+        return f"<dt>{_esc(a['question'])}</dt><dd>{_esc(a['answer'])}{link}</dd>"
+
+    synthesis_items = "".join(_synthesis_item(a) for a in answer_business_questions(profile))
 
     return f"""
 <details class="company">

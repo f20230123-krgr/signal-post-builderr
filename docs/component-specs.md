@@ -337,7 +337,17 @@ an `answers` key holding `src/synthesis.py`'s `answer_business_questions()`
 output. `OUTPUT_CONTRACT.md` itself doesn't document this field, but it's the
 only way the rubric's "decision-useful synthesis" answers reach the actual
 submitted artifact — `src/reporting.py`'s `report.html` is a local-only view,
-never part of the submission (real gap found chasing a synthesis score of 0/10).
+never part of the submission (real gap: commit e44e85c, scored by Builderr on
+2026-09-16, had no synthesis content anywhere in `envelopes.jsonl` at all and
+scored 0/10 on synthesis; fixed in commit 6c3d454 by embedding `answers` here).
+
+Each answer is `{"question", "answer", "state", "sources"}` — `sources` (added
+2026-09-24, after that same synthesis breakdown showed 0/10 with no way to
+tell whether the missing content or the missing citations caused it) is the
+deduplicated list of the underlying Claim(s)' `.source` URLs/identifiers, so
+"the profile ... explain[s] ... with sources for its conclusions" is true of
+the answer itself, not just of the separate `claims`/`evidence` arrays.
+`src/reporting.py`'s `report.html` links each sourced answer to its source too.
 
 **Must:**
 - Deduplicate evidence by `(source_url, content_hash)` — claims sharing a

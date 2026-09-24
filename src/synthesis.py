@@ -11,6 +11,8 @@ produces an explicit "not available"-shaped answer, never a guess.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from src.models.profile import Claim, CompanyProfile, EvidenceState
 
 
@@ -22,8 +24,25 @@ def _list_values(claims: list[Claim]) -> list[str]:
     return [c.value for c in claims if c.state == EvidenceState.AVAILABLE and c.value]
 
 
-def _answer(question: str, answer: str, state: EvidenceState) -> dict:
-    return {"question": question, "answer": answer, "state": state.value}
+def _sources(*claims: Claim | None) -> list[str]:
+    """Deduplicated source URLs/identifiers for the Claim(s) an answer is
+    templated from, order preserved. Evaluator feedback: the summary must
+    give "sources for its conclusions" -- a plain answer string isn't
+    enough. A claim with no source (never AVAILABLE, or a None claim) is
+    skipped, never a guessed placeholder."""
+    seen: list[str] = []
+    for claim in claims:
+        if claim is not None and claim.state == EvidenceState.AVAILABLE and claim.source and claim.source not in seen:
+            seen.append(claim.source)
+    return seen
+
+
+def _sources_from_list(claims: list[Claim]) -> list[str]:
+    return _sources(*claims)
+
+
+def _answer(question: str, answer: str, state: EvidenceState, sources: Optional[list[str]] = None) -> dict:
+    return {"question": question, "answer": answer, "state": state.value, "sources": sources or []}
 
 
 def _identity_answer(profile: CompanyProfile) -> dict:
@@ -36,7 +55,10 @@ def _identity_answer(profile: CompanyProfile) -> dict:
             profile.legal_identity.legal_name.state,
         )
     text = legal_name if not brand or brand == legal_name else f"{legal_name} (publicly known as {brand})"
-    return _answer("What is the company's legal name and brand?", text, EvidenceState.AVAILABLE)
+    return _answer(
+        "What is the company's legal name and brand?", text, EvidenceState.AVAILABLE,
+        sources=_sources(profile.legal_identity.legal_name, profile.legal_identity.public_brand),
+    )
 
 
 def _website_answer(profile: CompanyProfile) -> dict:
@@ -44,21 +66,27 @@ def _website_answer(profile: CompanyProfile) -> dict:
     value = _value_or_none(claim)
     if value is None:
         return _answer("What is the official website?", "No official website on file.", claim.state)
-    return _answer("What is the official website?", value, EvidenceState.AVAILABLE)
+    return _answer("What is the official website?", value, EvidenceState.AVAILABLE, sources=_sources(claim))
 
 
 def _leadership_answer(profile: CompanyProfile) -> dict:
     leaders = _list_values(profile.leadership.leaders)
     if not leaders:
         return _answer("Who leads the company?", "No leadership information available.", EvidenceState.NOT_AVAILABLE)
-    return _answer("Who leads the company?", "; ".join(leaders), EvidenceState.AVAILABLE)
+    return _answer(
+        "Who leads the company?", "; ".join(leaders), EvidenceState.AVAILABLE,
+        sources=_sources_from_list(profile.leadership.leaders),
+    )
 
 
 def _hiring_answer(profile: CompanyProfile) -> dict:
     signals = _list_values(profile.activity.hiring_signals)
     if not signals:
         return _answer("Is the company currently hiring?", "No hiring signals found.", EvidenceState.NOT_AVAILABLE)
-    return _answer("Is the company currently hiring?", f"Yes, hiring signals found: {signals[0]}", EvidenceState.AVAILABLE)
+    return _answer(
+        "Is the company currently hiring?", f"Yes, hiring signals found: {signals[0]}", EvidenceState.AVAILABLE,
+        sources=_sources_from_list(profile.activity.hiring_signals),
+    )
 
 
 def _accounts_answer(profile: CompanyProfile) -> dict:
@@ -67,14 +95,19 @@ def _accounts_answer(profile: CompanyProfile) -> dict:
     if value is None:
         return _answer("What are the latest filed annual accounts?", "Not available.", claim.state)
     period = f" ({claim.reporting_period})" if claim.reporting_period else ""
-    return _answer("What are the latest filed annual accounts?", f"{value}{period}", EvidenceState.AVAILABLE)
+    return _answer(
+        "What are the latest filed annual accounts?", f"{value}{period}", EvidenceState.AVAILABLE, sources=_sources(claim)
+    )
 
 
 def _workplaces_answer(profile: CompanyProfile) -> dict:
     workplaces = _list_values(profile.leadership.workplaces)
     if not workplaces:
         return _answer("Where are the registered workplaces?", "No registered workplaces available.", EvidenceState.NOT_AVAILABLE)
-    return _answer("Where are the registered workplaces?", ", ".join(workplaces), EvidenceState.AVAILABLE)
+    return _answer(
+        "Where are the registered workplaces?", ", ".join(workplaces), EvidenceState.AVAILABLE,
+        sources=_sources_from_list(profile.leadership.workplaces),
+    )
 
 
 def _changes_answer(profile: CompanyProfile) -> dict:
@@ -115,7 +148,10 @@ def _business_answer(profile: CompanyProfile) -> dict:
         parts.append(f"Registered industry: {industry}")
     if employees:
         parts.append(f"{employees} registered employees")
-    return _answer("What does the company do, and how big is it?", "; ".join(parts), EvidenceState.AVAILABLE)
+    return _answer(
+        "What does the company do, and how big is it?", "; ".join(parts), EvidenceState.AVAILABLE,
+        sources=_sources(profile.legal_identity.industry, profile.legal_identity.employee_count),
+    )
 
 
 def _status_answer(profile: CompanyProfile) -> dict:
@@ -130,7 +166,10 @@ def _status_answer(profile: CompanyProfile) -> dict:
             "Is the company still operating?", "No registered operating status available.", EvidenceState.NOT_AVAILABLE
         )
     text = f"{status}" + (f" ({legal_form})" if legal_form else "")
-    return _answer("Is the company still operating?", text, EvidenceState.AVAILABLE)
+    return _answer(
+        "Is the company still operating?", text, EvidenceState.AVAILABLE,
+        sources=_sources(profile.legal_identity.operating_status, profile.legal_identity.legal_form),
+    )
 
 
 def _founded_answer(profile: CompanyProfile) -> dict:
@@ -139,7 +178,10 @@ def _founded_answer(profile: CompanyProfile) -> dict:
     founded = _optional_value(profile.legal_identity.founded_date)
     if founded is None:
         return _answer("When was the company founded?", "No founding date available.", EvidenceState.NOT_AVAILABLE)
-    return _answer("When was the company founded?", f"Founded {founded}", EvidenceState.AVAILABLE)
+    return _answer(
+        "When was the company founded?", f"Founded {founded}", EvidenceState.AVAILABLE,
+        sources=_sources(profile.legal_identity.founded_date),
+    )
 
 
 def _recent_activity_answer(profile: CompanyProfile) -> dict:
@@ -151,7 +193,10 @@ def _recent_activity_answer(profile: CompanyProfile) -> dict:
         return _answer(
             "What is the most recent public activity?", "No dated public activity found.", EvidenceState.NOT_AVAILABLE
         )
-    return _answer("What is the most recent public activity?", activity[0], EvidenceState.AVAILABLE)
+    return _answer(
+        "What is the most recent public activity?", activity[0], EvidenceState.AVAILABLE,
+        sources=_sources(profile.activity.dated_activity[0]),
+    )
 
 
 def answer_business_questions(profile: CompanyProfile) -> list[dict]:
