@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Literal, Optional
+from urllib.parse import urljoin, urlsplit
 
 import extruct
 import trafilatura
@@ -263,7 +264,11 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
             facts.append(RawFact("organization_name", obj_name, source_url, "structured", extracted_at))
         site_url = _as_str(obj.get("url"))
         if site_url:
-            facts.append(RawFact("official_site", site_url, source_url, "structured", extracted_at))
+            # Structured data may give a relative URL ("/"); resolve it against
+            # the page it came from, and drop anything that isn't http(s).
+            site_url = urljoin(source_url, site_url)
+            if urlsplit(site_url).scheme in ("http", "https") and urlsplit(site_url).netloc:
+                facts.append(RawFact("official_site", site_url, source_url, "structured", extracted_at))
         addr = obj.get("address")
         if isinstance(addr, dict):
             addr_str = ", ".join(

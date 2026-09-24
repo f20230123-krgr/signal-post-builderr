@@ -109,6 +109,28 @@ _NON_WEBPAGE_EXTENSIONS = (
 # check, not a blacklist, since blacklisting them would incorrectly reject
 # genuine claims.
 AGGREGATOR_DOMAIN_BLACKLIST = [
+    # Found regenerating the 1,000-company corpus (2026-09-22): each accepted as
+    # a company's "official website" and confirmed not to be one.
+    #   - streaming / social platforms: an open.spotify.com artist page was
+    #     accepted for a company; a company's profile on these platforms is a
+    #     company_profile, never its website.
+    "spotify.com", "soundcloud.com", "instagram.com", "youtube.com", "youtu.be",
+    "tiktok.com", "twitter.com", "x.com",
+    #   - company-data / listing directories: forvalt.no (credit information),
+    #     areg.no and listings.no (company registers keyed by org number),
+    #     lei.report (LEI lookup), datalog.co.uk (company data), smartmeny.no
+    #     (restaurant menu directory).
+    "forvalt.no", "areg.no", "listings.no", "lei.report", "datalog.co.uk", "smartmeny.no",
+    #   - nordlei.org: an LEI directory (a "LAPSED" LEI record page was accepted
+    #     as ABC BOLIG & EIENDOM AS's website).
+    "nordlei.org",
+    #   - norgelei.no ("Selskapssøk - Norge LEI"), restaurantmeny.no (menu
+    #     directory), mintmedias.no (a media agency's hosting, 403) and
+    #     founditapp.org (a global lost-and-found app): each accepted as one
+    #     company's website. (snekkersentralen.no is deliberately NOT here: a
+    #     carpenter marketplace, but also the real site of the company whose
+    #     org number it shows -- the org-number check decides that one.)
+    "norgelei.no", "restaurantmeny.no", "mintmedias.no", "founditapp.org",
     "proff.no", "purehelp.no", "gulesider.no", "180.no",
     "facebook.com", "linkedin.com", "wikipedia.org",
     "rosa.no", "regnskapstall.no", "regnskapsbasen.no", "firmadatabasen.no",
@@ -193,6 +215,22 @@ AGGREGATOR_DOMAIN_BLACKLIST = [
 
 
 _ORG_NUMBER_RE = re.compile(r"(?<!\d)(\d{9})(?!\d)")
+
+
+def _url_embeds_any_org_number(url: str) -> bool:
+    """True if `url` contains ANY 9-digit (Norwegian org-number-shaped)
+    sequence, this company's own included.
+
+    A company's own homepage does not carry an org number in its URL; a
+    directory listing keyed by org number does. Found regenerating the
+    1,000-company corpus: areg.no/816028612, listings.no/b/922899924,
+    forvalt.no/Nettbutikk/produkter/912410943 and
+    datalog.co.uk/.../CompanyNumber/NO890546242/... were each accepted as a
+    company's "official website" because the directory page shows the
+    company's OWN org number, which the page-level confirmation below treats
+    as proof. Rejecting the URL shape closes that whole class, for
+    directories not yet seen, without a domain list."""
+    return bool(_ORG_NUMBER_RE.search(url))
 
 
 def _url_embeds_a_different_org_number(url: str, org_number: Optional[str]) -> bool:
@@ -359,11 +397,55 @@ def _is_blacklisted_domain(url: str) -> bool:
 
 
 def _first_webpage_url(results: list[dict]) -> Optional[str]:
+    """The first result that could be a company's own site. Directory-shaped
+    results (a listing keyed by an org number, or under /company/, /bedrift/
+    etc.) are skipped here, not only rejected later in verify_discovered_site:
+    a rejection there ends the whole search round, while skipping here lets
+    the next real result be tried."""
     for result in results:
         url = result.get("url")
-        if url and _looks_like_webpage(url) and not _is_blacklisted_domain(url):
+        if (
+            url
+            and _looks_like_webpage(url)
+            and not _is_blacklisted_domain(url)
+            and not _url_path_looks_like_a_directory_listing(url)
+            and not _url_embeds_any_org_number(url)
+        ):
             return url
     return None
+
+
+# A page that does not show the company's org number must carry a name that
+# covers at least this share of the legal name's words. "United" (a football
+# supporters' site) scored 100 against "PE UNITED AS" because partial_ratio
+# treats a name CONTAINED in the legal name as a perfect match.
+MIN_NAME_WORD_COVERAGE = 0.6
+
+
+# Words a legal name carries that a brand usually drops ("JUSTIFY ADVOKATFIRMA AS"
+# is "Justify"). They don't have to appear on the page; the distinctive words do.
+_GENERIC_NAME_WORDS = {
+    "og", "and", "co", "holding", "invest", "investering", "eiendom", "eiendomsutvikling",
+    "eiendomsdrift", "bygg", "entreprenør", "entreprenor", "service", "tjenester", "consult",
+    "consulting", "konsulent", "advokat", "advokatfirma", "advokatfirmaet", "regnskap",
+    "group", "gruppen", "norge", "norway", "drift", "utleie", "forvaltning", "bil",
+    "maskin", "maskinservice", "transport", "invest",
+}
+
+
+def _name_word_coverage(legal_name: str, candidate: str) -> float:
+    """Share of the legal name's DISTINCTIVE words (legal-form suffix and generic
+    descriptors removed) found in `candidate`, matching inside a candidate
+    written as one word ("HelenaVintage"). A name with nothing distinctive left
+    returns 1.0: the name-similarity gate alone decides, as it always did."""
+    words = [
+        w for w in re.split(r"[^0-9a-zæøå]+", _strip_legal_suffix(legal_name).lower())
+        if w and w not in _GENERIC_NAME_WORDS
+    ]
+    if not words:
+        return 1.0
+    flat = "".join(w for w in re.split(r"[^0-9a-zæøå]+", candidate.lower()) if w)
+    return sum(word in flat for word in words) / len(words)
 
 
 def _strip_legal_suffix(legal_name: str) -> str:
@@ -812,7 +894,7 @@ def verify_discovered_site(
         return None
     if _url_path_looks_like_a_directory_listing(url):
         return None
-    if _url_embeds_a_different_org_number(url, org_number):
+    if _url_embeds_any_org_number(url):
         return None
 
     if not budget.can_spend_request():
@@ -880,6 +962,12 @@ def verify_discovered_site(
     )
     if not confirmed_by_org_number and best_score < NAME_MATCH_THRESHOLD:
         return None
+    if not confirmed_by_org_number:
+        best_coverage = max(
+            (_name_word_coverage(name, c) for name in identity_names for c in name_candidates), default=0.0
+        )
+        if best_coverage < MIN_NAME_WORD_COVERAGE:
+            return None
     if confirmed_by_org_number:
         best_score = 100.0
 

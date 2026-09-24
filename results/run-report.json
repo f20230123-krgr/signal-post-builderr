@@ -50,5 +50,11 @@
     "spend_used_usd": 0.63,
     "wall_clock_seconds": 316.635,
     "degraded_providers": {}
+  },
+  "precision_fix_rerun": {
+    "reason": "Independent review after the corpus was generated found the discovered-website acceptance rules too loose: directory/listing pages keyed by org number, confirmed non-company domains (Spotify, LEI/company-data directories, a menu directory, etc.), a football club's site accepted for an unrelated company sharing a short brand word, a relative JSON-LD url published as the website verbatim, and a company's real site carrying a leftover web-agency template url pointing at a different domain. All five are now rejected; the affected companies (about 6% of discovered websites) were re-run with the fixed code.",
+    "profiles_replaced": 67,
+    "requests_used": 1354,
+    "spend_used_usd": 0.539
   }
 }

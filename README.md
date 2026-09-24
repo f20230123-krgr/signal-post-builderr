@@ -232,11 +232,11 @@ lower website coverage than the default command produces. Measured result:
 | | |
 |---|---|
 | Profiles | 1,000 / 1,000 |
-| Search spend | $6.89 in total ($6.26 for the run plus $0.63 to re-run one batch; the $10 cap was never reached) |
-| Requests | 12,919 across 10 batches of 100 (~1,290 per batch, limit 2,000), plus 1,288 to re-run one batch. Real requests, redirects and retries included |
-| Runtime | ~5 minutes per 100 companies of active processing (62 minutes for the whole run, which includes a short machine pause) |
-| Provider failures | none. data.brreg.no was briefly unavailable during the first batch of 100 (58 profiles came back with failed registry claims), so those same 100 organisation numbers were re-run and replace that batch; see `chunk_1_rerun` in `run-report.json` |
-| Available claims | 15,340. For all 1,000 companies: legal name, industry, legal form, operating status, dated activity and workplaces. Annual accounts 997, founding date 989, leaders 989, official website 298, company profiles 125, public brand 124, employee count 146 (only where the registry holds one), hiring signals 0 (this corpus was generated with a 14-day NAV window and a slow feed; the window is now 30 days, see `LIMITATIONS.md`) |
+| Search spend | $7.43 in total ($6.26 for the run, $0.63 to re-run one batch after a registry outage, $0.54 to re-run 67 companies after a website-precision fix; the $10 cap was never reached) |
+| Requests | 12,919 for the run, plus 1,288 and 1,354 for the two re-run passes below. Real requests, redirects and retries included |
+| Runtime | ~5 minutes per 100 companies of active processing |
+| Provider failures | none. `run-report.json` records two re-run passes: `chunk_1_rerun` (data.brreg.no was briefly unavailable during the first 100 companies) and `precision_fix_rerun` (independent review after generation found the website-acceptance rules too loose -- directory pages keyed by org number, a handful of confirmed non-company domains, a name-match that let an unrelated brand through, a relative JSON-LD url published verbatim, and a real site carrying a leftover web-agency template url; all now rejected, and the ~7% of discovered websites this affected were re-run) |
+| Available claims | 15,209. For all 1,000 companies: legal name, industry, legal form, operating status, dated activity and workplaces. Annual accounts 997, founding date 989, leaders 2,572 across 989 companies, official website 256, company profiles 103, public brand 103, employee count 146 (only where the registry holds one), hiring signals 0 (this corpus was generated with a 14-day NAV window and a slow feed; the window is now 30 days, see `LIMITATIONS.md`) |
 
 The corpus was generated on 2026-09-21/22 by the code in the commit submitted with it (real
 request counting, the outbound URL guard and the request trims described above), with one
@@ -249,7 +249,7 @@ run-wide spend cap.
 ## Submitting
 
 Per `starter-briefs/signalpost.md`: email `submit@builderr.ai` with the
-**repository URL and exact commit hash** (not a zip -- five versions in total, the first plus up to four revisions, are
+**repository URL and exact commit hash** (not an archive -- five versions in total, the first plus up to four revisions, are
 allowed before the deadline, each a new commit hash), completed-profile
 count (>=1,000), the organisation-number manifest (`manifest.txt`), the
 one-command run instruction above, models/APIs/licences used, and expected

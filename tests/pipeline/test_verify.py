@@ -256,3 +256,34 @@ def test_threshold_boundary_case_is_explicit(monkeypatch):
     monkeypatch.setattr(verify_module, "name_similarity", lambda a, b: NAME_MATCH_THRESHOLD - 0.01)
     rejected = verify(_fact("organization_name", "anything"), _entity())
     assert rejected is None
+
+
+def test_an_official_site_fact_pointing_at_a_different_domain_is_rejected():
+    """Real-world regression, confirmed live: GUNNERUD ENTREPRENOR AS's real
+    site gunnerudent.no carries a leftover WordPress-template JSON-LD block
+    ("name": "Default") whose "url" field points at the web agency's own
+    hosting platform (mintpage.prod03.mintmedias.no), not the company's site.
+    Sourced from the entity's own official domain, so on_official_domain is
+    true -- but an "official_site" fact whose VALUE points somewhere else
+    entirely is exactly the case domain provenance alone can't catch."""
+    fact = _fact(
+        "official_site", "https://mintpage.prod03.mintmedias.no",
+        source_url="https://gunnerudent.no/", context_name=None,
+    )
+    entity = _entity(legal_name="GUNNERUD ENTREPRENOR AS", official_site="https://gunnerudent.no/")
+
+    assert verify(fact, entity) is None
+
+
+def test_an_official_site_fact_that_matches_its_own_domain_is_still_accepted():
+    fact = _fact("official_site", "https://www.equinor.com/", source_url="https://www.equinor.com/about", context_name=None)
+
+    assert verify(fact, _entity()) is not None
+
+
+def test_an_official_site_fact_on_a_subdomain_of_the_official_domain_is_accepted():
+    """A page on the official domain declaring itself under a subdomain
+    (or vice versa) is still the same site, not a leftover template artifact."""
+    fact = _fact("official_site", "https://shop.equinor.com/", source_url="https://www.equinor.com/about", context_name=None)
+
+    assert verify(fact, _entity()) is not None

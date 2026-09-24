@@ -533,3 +533,38 @@ def test_feed_entries_without_a_date_are_skipped_and_output_is_capped():
 
 def test_non_feed_content_yields_nothing():
     assert feed_activity_facts("<html><body>not a feed</body></html>", "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
+
+
+# ---- a relative "url" in structured data ---------------------------------
+
+
+def _page_with_jsonld(url_value, page_url="https://www.vitoklinikken.no/"):
+    html = (
+        '<html><head><script type="application/ld+json">'
+        + '{"@type": "Organization", "name": "VitoKlinikken", "url": "' + url_value + '"}'
+        + "</script></head></html>"
+    )
+    return FetchedPage(
+        url=page_url, raw_html=html, fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        fetch_state=EvidenceState.AVAILABLE,
+    )
+
+
+def test_a_relative_url_in_structured_data_is_resolved_against_the_page():
+    """Real-world regression: a clinic's JSON-LD said "url": "/", and the
+    published official_website was the value "/"."""
+    facts = extract(_page_with_jsonld("/"))
+
+    assert [f.value for f in facts if f.field_name == "official_site"] == ["https://www.vitoklinikken.no/"]
+
+
+def test_a_url_in_structured_data_that_is_not_http_is_dropped():
+    for junk in ("mailto:post@example.no", "javascript:void(0)"):
+        facts = extract(_page_with_jsonld(junk))
+        assert [f for f in facts if f.field_name == "official_site"] == [], junk
+
+
+def test_an_absolute_url_in_structured_data_is_kept_as_is():
+    facts = extract(_page_with_jsonld("https://www.vitoklinikken.no/"))
+
+    assert [f.value for f in facts if f.field_name == "official_site"] == ["https://www.vitoklinikken.no/"]

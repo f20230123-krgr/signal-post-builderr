@@ -215,20 +215,26 @@ def test_verify_discovered_site_rejects_a_url_that_embeds_a_different_companys_o
     assert confirmed is None
 
 
-def test_verify_discovered_site_accepts_a_url_that_embeds_this_companys_own_org_number():
-    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Equinor ASA"}</script></head></html>'
+def test_verify_discovered_site_rejects_a_url_that_embeds_this_companys_own_org_number():
+    """Real-world regression, found regenerating the 1,000-company corpus: six
+    companies were given a directory page KEYED BY THEIR OWN ORG NUMBER as their
+    "official website" -- areg.no/816028612, listings.no/b/922899924,
+    forvalt.no/Nettbutikk/produkter/912410943 and
+    datalog.co.uk/browse/detail.php/CompanyNumber/NO890546242/... Each such page
+    lists the company's own org number, so the rule "a page that publishes this
+    company's org number is accepted" waved them through. A company's own
+    homepage doesn't carry its org number in the URL; a directory listing does."""
+    html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"STAVLAND HOLDING AS"}</script></head><body>Org.nr: 816 028 612</body></html>'
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
-    budget = BudgetGovernor()
 
-    confirmed = verify_discovered_site(
-        "https://www.equinor.com/about/org-number-923609016",
-        "EQUINOR ASA",
-        client,
-        budget,
-        org_number="923609016",
-    )
-
-    assert confirmed is not None
+    for url, org in (
+        ("https://areg.no/816028612", "816028612"),
+        ("https://listings.no/b/922899924", "922899924"),
+        ("https://forvalt.no/Nettbutikk/produkter/912410943", "912410943"),
+        ("https://datalog.co.uk/browse/detail.php/CompanyNumber/NO890546242/CompanyName/X", "890546242"),
+        ("https://www.equinor.com/about/org-number-923609016", "923609016"),
+    ):
+        assert verify_discovered_site(url, "STAVLAND HOLDING AS", client, BudgetGovernor(), org_number=org) is None, url
 
 
 def test_verify_discovered_site_with_no_org_number_mismatch_signal_still_works_as_before():
@@ -387,14 +393,16 @@ def test_verify_discovered_site_rejects_a_generic_directory_listing_url_shape():
 
 def test_verify_discovered_site_directory_path_check_does_not_reject_real_sites():
     """Guards against over-rejection: a real company's own '/about'-style
-    page, a housing co-op's own slug on its manager's platform, and the
-    existing org-number-in-path positive-control test must all still pass."""
+    page and a housing co-op's own slug on its manager's platform must
+    still pass. (The old positive control, a URL embedding the company's own
+    org number, is now a rejection: see
+    test_verify_discovered_site_rejects_a_url_that_embeds_this_companys_own_org_number.)"""
     html = '<html><head><script type="application/ld+json">{"@type":"Organization","name":"Equinor ASA"}</script></head></html>'
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
     budget = BudgetGovernor()
 
     assert verify_discovered_site(
-        "https://www.equinor.com/about/org-number-923609016", "EQUINOR ASA", client, budget, org_number="923609016"
+        "https://www.equinor.com/about", "EQUINOR ASA", client, budget, org_number="923609016"
     ) is not None
 
 
@@ -1415,3 +1423,138 @@ def test_no_run_spend_cap_means_no_run_level_limit():
     health = ProviderHealth()
     assert all(health.reserve_spend("exa", 0.007) for _ in range(2000))
     assert health.is_available("exa")
+
+
+def test_media_and_directory_domains_found_in_the_corpus_are_blacklisted():
+    """Every one confirmed as not a company's own site: streaming/social
+    platforms (a Spotify artist page was accepted as a company's website) and
+    company-data / listing directories."""
+    from src.pipeline.discovery import _is_blacklisted_domain
+
+    for url in (
+        "https://open.spotify.com/artist/1X1oXwj8XM1KE7BEHGKyK7",
+        "https://www.instagram.com/somecompany/",
+        "https://www.youtube.com/@somecompany",
+        "https://twitter.com/somecompany",
+        "https://x.com/somecompany",
+        "https://www.tiktok.com/@somecompany",
+        "https://forvalt.no/x",
+        "https://areg.no/x",
+        "https://listings.no/x",
+        "https://lei.report/x",
+        "https://datalog.co.uk/x",
+        "https://www.smartmeny.no/restauranter/viken/nes/2166/x",
+    ):
+        assert _is_blacklisted_domain(url), url
+
+
+def test_blacklisting_x_com_does_not_catch_unrelated_domains_ending_in_x():
+    from src.pipeline.discovery import _is_blacklisted_domain
+
+    for url in ("https://www.max.com", "https://www.linux.com", "https://foobox.no", "https://spotifyx.no"):
+        assert not _is_blacklisted_domain(url), url
+
+
+def test_selection_skips_directory_shaped_results_and_takes_the_next_real_site():
+    """Search returns several results; a directory listing keyed by the org
+    number, from a domain nobody has blacklisted yet, must not be the pick --
+    and must not end the round either: the next result is the real site."""
+    from src.pipeline.discovery import _first_webpage_url
+
+    results = [
+        {"url": "https://some-new-directory.no/816028612"},
+        {"url": "https://www.example.no/companies/stavland-holding"},
+        {"url": "https://stavlandholding.no/"},
+    ]
+
+    assert _first_webpage_url(results) == "https://stavlandholding.no/"
+
+
+# ---- a page name that only CONTAINS part of the legal name ---------------
+
+
+def _page_named(name, body=""):
+    import json
+
+    return (
+        '<html><head><script type="application/ld+json">'
+        + json.dumps({"@type": "Organization", "name": name})
+        + "</script></head><body>" + body + "</body></html>"
+    )
+
+
+def _verify(url, legal_name, html, org_number="988522651"):
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+    return verify_discovered_site(url, legal_name, client, BudgetGovernor(), org_number=org_number)
+
+
+def test_a_page_named_with_only_part_of_the_legal_name_is_not_accepted():
+    """Real-world regression: "PE UNITED AS" was given united.no -- a football
+    supporters' site titled just "United". partial_ratio scores a name that is
+    CONTAINED in the legal name at 100, so it passed. Without the company's org
+    number on the page, the page's own name has to cover most of the legal
+    name's words; a wrong company is worse than a missing site."""
+    assert _verify("https://www.united.no", "PE UNITED AS", _page_named("United")) is None
+    assert _verify("https://www.malmeeiendom.no", "MAKE EIENDOMSUTVIKLING AS", _page_named("Malme Eiendom")) is None
+
+
+def test_the_same_partial_name_is_accepted_when_the_page_shows_the_org_number():
+    """Norwegian sites must show their org number; that is hard evidence and
+    outranks how the brand is spelled."""
+    html = _page_named("United", body="Org.nr: 988 522 651")
+
+    assert _verify("https://www.united.no", "PE UNITED AS", html) is not None
+
+
+def test_names_that_cover_the_legal_name_are_still_accepted():
+    assert _verify("https://kahoot.com", "KAHOOT! AS", _page_named("Kahoot!")) is not None
+    assert _verify("https://sandnes-el.no", "SANDNES ELEKTRISKE AS", _page_named("Sandnes Elektriske")) is not None
+    # brand written as one word
+    assert _verify("https://helenavintage.no", "HELENA VINTAGE AS", _page_named("HelenaVintage")) is not None
+    # two of three words (0.67) is enough; the rest is usually a place or a suffix
+    assert _verify("https://ruud-pedersen.no", "BJ RUUD-PEDERSEN AS", _page_named("Ruud-Pedersen")) is not None
+
+
+def test_nordlei_is_blacklisted():
+    from src.pipeline.discovery import _is_blacklisted_domain
+
+    assert _is_blacklisted_domain("http://no.nordlei.org/lei/894500T30EDD2IS0B159/abc-bolig-eiendom-as")
+
+
+def test_generic_descriptor_words_in_the_legal_name_do_not_count_against_a_real_site():
+    """Legal names carry descriptors the brand drops: JUSTIFY ADVOKATFIRMA AS is
+    "Justify", CUSTOS INVEST AS is "Custos", ODDVAR BJELDE & CO AS BIL- OG
+    MASKINSERVICE is "Oddvar Bjelde". Only the distinctive words must be covered."""
+    assert _verify("https://www.justify.no", "JUSTIFY ADVOKATFIRMA AS", _page_named("Justify")) is not None
+    assert _verify("https://www.custos.no", "CUSTOS INVEST AS", _page_named("Custos")) is not None
+    assert _verify(
+        "https://www.oddvarbjelde.no/", "ODDVAR BJELDE & CO AS BIL- OG MASKINSERVICE", _page_named("Oddvar Bjelde AS")
+    ) is not None
+
+
+def test_a_distinctive_word_that_is_missing_still_rejects_even_with_generic_words_around_it():
+    """"PE UNITED AS" vs "United": PE is not a generic word. "MAKE
+    EIENDOMSUTVIKLING AS" vs "Malme Eiendom": the distinctive word MAKE is absent."""
+    assert _verify("https://www.united.no", "PE UNITED AS", _page_named("United")) is None
+    assert _verify("https://www.malmeeiendom.no", "MAKE EIENDOMSUTVIKLING AS", _page_named("Malme Eiendom")) is None
+
+
+def test_a_legal_name_made_only_of_generic_words_falls_back_to_the_similarity_gate():
+    """Nothing distinctive to cover -> the coverage rule has nothing to say and
+    the original name-similarity gate decides, as before."""
+    assert _verify("https://byggogeiendom.no", "BYGG OG EIENDOM AS", _page_named("Bygg og Eiendom")) is not None
+
+
+def test_directories_and_non_company_sites_confirmed_in_the_second_corpus_pass_are_blacklisted():
+    """Each fetched and confirmed: a "Norge LEI" company search, a restaurant
+    menu directory, a media agency's 403 hosting page and a global lost-and-found
+    app."""
+    from src.pipeline.discovery import _is_blacklisted_domain
+
+    for url in (
+        "https://norgelei.no/detaljert-informasjon/",
+        "https://restaurantmeny.no",
+        "https://mintpage.prod03.mintmedias.no",
+        "https://founditapp.org/",
+    ):
+        assert _is_blacklisted_domain(url), url

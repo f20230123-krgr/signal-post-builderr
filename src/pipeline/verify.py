@@ -171,6 +171,23 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
         if name_similarity(entity.legal_name, fact.context_name) < NAME_MATCH_THRESHOLD:
             return None
 
+    # Real-world regression, confirmed live: a site's own on-page JSON-LD can
+    # carry a leftover web-developer-template "url" field pointing at a
+    # completely different domain (GUNNERUD ENTREPRENOR AS's real site
+    # gunnerudent.no embeds an unedited WordPress "name": "Default" schema
+    # block whose "url" is the web agency's own hosting platform). Domain
+    # provenance (on_official_domain) only proves WHERE the fact was found,
+    # not that an official_site fact's VALUE is actually that same site --
+    # check both, same subdomain tolerance as crawl.py's ATS-domain matching.
+    if fact.field_name == "official_site":
+        value_domain = _domain(fact.value)
+        if not (
+            value_domain == official_domain
+            or value_domain.endswith("." + official_domain)
+            or official_domain.endswith("." + value_domain)
+        ):
+            return None
+
     if fact.field_name in _NAME_BEARING_FIELDS:
         score = name_similarity(entity.legal_name, fact.value)
         if score < NAME_MATCH_THRESHOLD:

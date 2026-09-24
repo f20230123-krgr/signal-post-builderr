@@ -123,7 +123,9 @@ one-command run instruction, models/APIs/licenses used, expected cost per
 
 ## Provided resources
 
-- Starter kit (runnable reference agent): `signalpost-starter-kit.zip`
+- Starter kit (runnable reference agent): `signalpost-starter-kit.tar.gz` (Builderr briefly
+  switched this to `.zip` with a `first_run.py` practice script around 2026-09-19/21, then
+  reverted to `.tar.gz` by 2026-09-24 -- checked live, not assumed)
 - Full brief: `starter-briefs/signalpost.md`
 - Company universe: `signalpost-company-universe-2025.jsonl.gz`
 - 100-company product sample (viewable, not embedded in the brief)
