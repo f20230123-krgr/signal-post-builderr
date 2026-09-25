@@ -164,3 +164,7 @@ All permissive; no copyleft (GPL-style) obligations.
   had aged out of the window; the window is now 30 days. The NAV list endpoint was too slow
   to re-verify this live on 2026-09-22, so the corpus in this repo was generated with the
   14-day window and has 0 NAV hiring signals.
+- **The social-link refresh only touches companies whose site was reachable at
+  refresh time.** 9 companies with a known official site could not be re-crawled
+  in three attempts on 2026-09-25 and were left at their original (pre-fix)
+  social-profile claims rather than risk wiping real data on a transient failure.

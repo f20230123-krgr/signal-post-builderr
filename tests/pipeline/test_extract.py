@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.pipeline.crawl import FetchedPage
-from src.pipeline.extract import MAX_FEED_ACTIVITY_ENTRIES, MAX_SOCIAL_PROFILE_LINKS, feed_activity_facts, social_profile_facts, extract
+from src.pipeline.extract import MAX_FEED_ACTIVITY_ENTRIES, MAX_SOCIAL_PROFILE_LINKS, feed_activity_facts, social_profile_facts, structured_facts, extract
 from src.models.profile import EvidenceState
 
 PAGES = Path(__file__).parent.parent.parent / "fixtures" / "pages"
@@ -568,3 +568,69 @@ def test_an_absolute_url_in_structured_data_is_kept_as_is():
     facts = extract(_page_with_jsonld("https://www.vitoklinikken.no/"))
 
     assert [f.value for f in facts if f.field_name == "official_site"] == ["https://www.vitoklinikken.no/"]
+
+
+# ---- social links Soham's feedback said were being lost -------------------
+# "run anchor/data-href/iframe/JSON-LD extraction over retained pages, reject
+# share/post URLs, and publish only links confirmed in the saved source."
+
+
+def test_a_facebook_page_plugin_s_data_href_becomes_a_company_profile_fact():
+    """The Facebook Page Plugin is a common embed pattern
+    (<div class="fb-page" data-href="...">) that carries the real profile URL
+    in a data-href attribute, not an <a href> -- invisible to the old scan."""
+    html = '<html><body><div class="fb-page" data-href="https://www.facebook.com/AcmeNorge" data-width="340"></div></body></html>'
+
+    facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert [f.value for f in facts] == ["https://www.facebook.com/AcmeNorge"]
+
+
+def test_a_share_button_s_data_href_is_still_rejected():
+    html = '<html><body><span data-href="https://www.facebook.com/sharer/sharer.php?u=https://acme.no">Share</span></body></html>'
+
+    assert social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
+
+
+def test_the_real_profile_url_embedded_in_an_iframe_embed_is_recovered():
+    """A Facebook Page Plugin iframe's own src is an embed/plugin URL
+    (rejected on its own -- it's not a profile page), but it carries the
+    real profile URL url-encoded in its own "href" query parameter."""
+    html = (
+        '<html><body><iframe src="https://www.facebook.com/plugins/page.php?'
+        'href=https%3A%2F%2Fwww.facebook.com%2FAcmeNorge&tabs=timeline&width=340" '
+        'width="340" height="500"></iframe></body></html>'
+    )
+
+    facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert [f.value for f in facts] == ["https://www.facebook.com/AcmeNorge"]
+    # the embed/plugin URL itself is never published as if it were the profile
+    assert not any("plugins" in f.value for f in facts)
+
+
+def test_an_iframe_with_no_recoverable_profile_url_yields_nothing():
+    html = '<html><body><iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe></body></html>'
+
+    assert social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
+
+
+def test_json_ld_sameas_is_filtered_the_same_way_as_plain_links():
+    """Real gap: sameAs published EVERY string verbatim, with no host check
+    and no share/intent filter -- a Wikipedia/Crunchbase link or even a
+    share-button URL embedded in bad schema markup would have been published
+    as a "company-owned profile" claim."""
+    html = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type":"Organization","name":"Acme Norge AS","sameAs":['
+        '"https://en.wikipedia.org/wiki/Acme",'
+        '"https://www.linkedin.com/company/acme-norge",'
+        '"https://www.facebook.com/sharer/sharer.php?u=https://acme.no"'
+        "]}"
+        "</script></head></html>"
+    )
+
+    facts = structured_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    profiles = [f.value for f in facts if f.field_name == "company_profile"]
+
+    assert profiles == ["https://www.linkedin.com/company/acme-norge"]

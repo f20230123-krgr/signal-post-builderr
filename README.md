@@ -129,6 +129,22 @@ same breakdown made it worth double-checking, by adding a `sources` list to
 every answer -- the rubric asks for a summary "with sources for its
 conclusions," and the answers had none before this.
 
+**Social links, per Soham's private-diagnostic feedback on 2026-09-25:** company
+pages we already crawl were carrying social-link evidence that wasn't reaching
+the output. `src/pipeline/extract.py` now also reads `data-href` attributes and
+recovers the real profile URL embedded in embed-widget iframes (the Facebook
+Page Plugin pattern), and JSON-LD `sameAs` links are filtered by the same
+host/share-URL rules as every other social-link source -- it used to publish
+any string verbatim (Wikipedia links, Google Maps links, share URLs included).
+Re-crawling only each company's already-known official site (no search
+discovery, so no Exa/Parallel spend) found 10 companies whose social-profile
+claims changed; other companies with a known site had it unreachable at the
+time of the refresh and were correctly left untouched rather than wiped to
+empty. `src/pipeline/nav_jobs.py`'s hiring signals were already role-level and
+JSON-LD `JobPosting` extraction was already the only source of a hiring
+claim -- Soham's "no generic careers keywords" ask was already satisfied,
+confirmed by re-reading that code, not assumed.
+
 On the self-check harness's fixture sample (10 companies: 4 hand-verified
 with websites, plus 6 with no website on file to represent the ~89% majority
 case), all three of our self-check targets are met: coverage 34.56/35, weighted

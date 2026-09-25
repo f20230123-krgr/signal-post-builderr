@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Literal, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 import extruct
 import trafilatura
@@ -287,8 +287,11 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
                     facts.append(RawFact("leader", value, source_url, "structured", extracted_at, context_name=context_name))
         same_as = obj.get("sameAs")
         if isinstance(same_as, list):
+            # Same filter as every other social-link source (see
+            # _is_acceptable_social_profile_url): sameAs used to publish any
+            # string verbatim, with no host check and no share/intent filter.
             for link in same_as:
-                if isinstance(link, str) and link:
+                if isinstance(link, str) and link and _is_acceptable_social_profile_url(link):
                     facts.append(RawFact("company_profile", link, source_url, "structured", extracted_at, context_name=context_name))
     return facts
 
@@ -341,29 +344,60 @@ _SOCIAL_NON_PROFILE_RE = re.compile(
     re.IGNORECASE,
 )
 _ANCHOR_HREF_RE = re.compile(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+# data-href: a common attribute for embeddable widgets, most notably the
+# Facebook Page Plugin (<div class="fb-page" data-href="...">) -- the real
+# profile URL, sitting outside any <a> tag entirely.
+_DATA_HREF_RE = re.compile(r'\bdata-href\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+# An <iframe> embed's own src is usually a plugin/embed URL on the platform's
+# own domain (rejected by _SOCIAL_NON_PROFILE_RE, correctly -- it isn't a
+# profile page), but that embed URL commonly carries the real profile URL
+# url-encoded in its own "href" or "u" query parameter (the Facebook Page
+# Plugin and the older Like Box both do this).
+_IFRAME_SRC_RE = re.compile(r'<iframe\b[^>]*\bsrc\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
 MAX_SOCIAL_PROFILE_LINKS = 8
+
+
+def _is_acceptable_social_profile_url(url: str) -> bool:
+    """Shared filter for every social-link source (plain <a href>, data-href,
+    an iframe embed's inner query parameter, and JSON-LD sameAs): a known
+    social-platform host, and not a share/intent/plugin/embed URL -- Soham's
+    feedback, 2026-09-25: "reject share/post URLs, and publish only links
+    confirmed in the saved source"."""
+    return bool(_SOCIAL_PROFILE_HOST_RE.match(url)) and not _SOCIAL_NON_PROFILE_RE.search(url)
+
+
+def _iframe_embedded_profile_urls(html: str) -> list[str]:
+    """The real profile URL(s) recoverable from an embed iframe's own query
+    string, decoded. The iframe's src itself is never returned directly --
+    only what its href=/u= parameter points at."""
+    found = []
+    for src in _IFRAME_SRC_RE.findall(html):
+        params = parse_qs(urlsplit(src).query)
+        for key in ("href", "u"):
+            for value in params.get(key, []):
+                if value:
+                    found.append(value)
+    return found
 
 
 def social_profile_facts(
     html: str, source_url: str, extracted_at: datetime, context_name: Optional[str] = None
 ) -> list[RawFact]:
-    """company_profile facts from plain <a href> social links on the page.
+    """company_profile facts from a page's own markup: plain <a href> links,
+    data-href attributes, and profile URLs recoverable from embed iframes.
 
     Deduped by URL and capped: a site-wide template repeats the same links on
     every page, and one page can list many, so without both this section
     would fill with duplicates of a single footer (same discipline as
     assemble.py's claim dedup)."""
+    candidates = _ANCHOR_HREF_RE.findall(html) + _DATA_HREF_RE.findall(html) + _iframe_embedded_profile_urls(html)
     seen: set[str] = set()
     facts: list[RawFact] = []
 
-    for href in _ANCHOR_HREF_RE.findall(html):
+    for href in candidates:
         link = href.strip()
-        if link in seen:
-            continue
-        if not _SOCIAL_PROFILE_HOST_RE.match(link):
-            continue
-        if _SOCIAL_NON_PROFILE_RE.search(link):
+        if link in seen or not _is_acceptable_social_profile_url(link):
             continue
         seen.add(link)
         facts.append(
