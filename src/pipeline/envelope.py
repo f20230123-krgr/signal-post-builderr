@@ -91,7 +91,7 @@ def to_envelope(
     completed_at = completed_at or ts
     operations = operations or {"requests": 0, "runtime_ms": 0, "third_party_cost_usd": 0.0}
 
-    evidence_ids_by_key: dict[tuple[str, Optional[str]], str] = {}
+    evidence_ids_by_key: dict[tuple[str, Optional[str], Optional[str]], str] = {}
     evidence_list: list[dict] = []
     claims: list[dict] = []
     errors: list[dict] = []
@@ -99,7 +99,12 @@ def to_envelope(
     for field_name, claim in _claim_entries(profile):
         evidence_ids: list[str] = []
         if claim.state == EvidenceState.AVAILABLE and claim.source:
-            key = (claim.source, claim.content_hash)
+            # The span is the text that supports THIS claim, so it is part of
+            # the key: two different claims from one page used to share one
+            # evidence entry, leaving the second claim citing the first one's
+            # span. Identical claims (same source, hash and span) still share.
+            span = claim.evidence_span or claim.value
+            key = (claim.source, claim.content_hash, span)
             evidence_id = evidence_ids_by_key.get(key)
             if evidence_id is None:
                 evidence_id = f"ev-{len(evidence_list) + 1}"
@@ -111,7 +116,9 @@ def to_envelope(
                         "source_class": claim.source_class,
                         "retrieved_at": _iso(claim.retrieved_at) if claim.retrieved_at else None,
                         "content_sha256": claim.content_hash,
-                        "claim_span": claim.value,
+                        "claim_span": span,
+                        "reporting_period": claim.reporting_period,
+                        "effective_at": claim.effective_date,
                         "linked_from": claim.linked_from,
                     }
                 )
@@ -123,6 +130,11 @@ def to_envelope(
                 "value": claim.value,
                 "availability": claim.state.value,
                 "confidence": round(claim.match_confidence / 100, 4) if claim.match_confidence is not None else None,
+                # "Keep the source, retrieval date and relevant reporting period
+                # for every claim": the period used to stop at our internal
+                # model and never reached the submitted artifact.
+                "reporting_period": claim.reporting_period,
+                "effective_at": claim.effective_date,
                 "evidence_ids": evidence_ids,
             }
         )

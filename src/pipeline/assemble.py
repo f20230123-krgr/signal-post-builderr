@@ -116,6 +116,8 @@ def _confirmed_claim(fact: ConfirmedFact) -> Claim:
         extraction_method=fact.extraction_method,
         match_confidence=fact.match_confidence,
         linked_from=fact.linked_from,
+        effective_date=fact.effective_date,
+        evidence_span=fact.evidence_span,
     )
 
 

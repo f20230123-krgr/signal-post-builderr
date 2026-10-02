@@ -100,6 +100,9 @@ class RawFact:
     # name-match the entity when present, closing that gap. None when the
     # source JSON-LD had no name of its own to check.
     context_name: Optional[str] = None
+    # Verbatim excerpt of the page that supports this fact (see
+    # models.profile.Claim.evidence_span). None when not captured.
+    evidence_span: Optional[str] = None
 
 
 _BLOCK_BOUNDARY = "␞"  # sentinel, not real markup -- see docstring below

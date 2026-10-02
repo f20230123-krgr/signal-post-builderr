@@ -73,6 +73,12 @@ class ConfirmedFact:
     # Set only when accepted via the ATS link-chain path below (evaluator
     # feedback: "Preserve that link chain as evidence").
     linked_from: Optional[str] = None
+    # ISO date the fact is effective as of (accounting-period end, role
+    # last-changed, registry event date); see models.profile.Claim.
+    effective_date: Optional[str] = None
+    # Verbatim supporting excerpt of the captured source; see
+    # models.profile.Claim.evidence_span.
+    evidence_span: Optional[str] = None
 
 
 def _domain(url: str) -> str:
@@ -206,4 +212,5 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
         extraction_method=fact.extraction_method,
         source_class="company_owned" if on_official_domain else "external",
         linked_from=fact.linked_from if via_official_link_chain else None,
+        evidence_span=fact.evidence_span,
     )

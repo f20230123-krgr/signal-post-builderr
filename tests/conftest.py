@@ -29,6 +29,8 @@ def available_claim(
     extraction_method: Optional[str] = None,
     match_confidence: Optional[float] = None,
     linked_from: Optional[str] = None,
+    effective_date: Optional[str] = None,
+    evidence_span: Optional[str] = None,
 ) -> Claim:
     return Claim(
         value=value,
@@ -41,6 +43,8 @@ def available_claim(
         extraction_method=extraction_method,
         match_confidence=match_confidence,
         linked_from=linked_from,
+        effective_date=effective_date,
+        evidence_span=evidence_span,
     )
 
 

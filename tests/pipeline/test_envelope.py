@@ -58,26 +58,88 @@ def test_unavailable_claim_has_no_evidence_and_null_value():
     assert legal_name_claim["evidence_ids"] == []
 
 
-def test_claims_from_the_same_page_share_one_deduplicated_evidence_entry():
-    same_source_kwargs = dict(
-        source="https://www.equinor.com/about",
-        content_hash="page-hash",
-        source_class="company_owned",
-        extraction_method="text",
-        match_confidence=95.0,
+def test_identical_claims_from_the_same_page_share_one_evidence_entry():
+    """Two claims with the same value, source and content share one evidence
+    entry (the same page, the same span) rather than repeating it."""
+    same = dict(
+        source="https://www.equinor.com/about", content_hash="page-hash",
+        source_class="company_owned", extraction_method="text", match_confidence=95.0,
     )
     profile = make_profile(
         org_number="923609016",
-        hiring_signals=[available_claim("Hiring: Backend Engineer", **same_source_kwargs)],
-        dated_activity=[available_claim("2026-08-01: new office opened", **same_source_kwargs)],
+        hiring_signals=[available_claim("Backend Engineer", **same)],
+        dated_activity=[available_claim("Backend Engineer", **same)],
     )
 
     envelope = to_envelope(profile, run_id="run-1")
 
     assert len(envelope["evidence"]) == 1
-    hiring_claim = next(c for c in envelope["claims"] if c["field"] == "hiring_signal")
-    dated_claim = next(c for c in envelope["claims"] if c["field"] == "dated_activity")
-    assert hiring_claim["evidence_ids"] == dated_claim["evidence_ids"]
+
+
+def test_different_claims_from_the_same_page_each_carry_their_own_evidence_span():
+    """Evidence-span validity: a claim's span must be the text that supports
+    THAT claim. Sharing one entry between two different claims gave the second
+    claim the first one's span."""
+    same = dict(source="https://www.equinor.com/about", content_hash="page-hash", source_class="company_owned")
+    profile = make_profile(
+        org_number="923609016",
+        hiring_signals=[available_claim("Hiring: Backend Engineer", **same)],
+        dated_activity=[available_claim("2026-08-01: new office opened", **same)],
+    )
+
+    envelope = to_envelope(profile, run_id="run-1")
+
+    hiring = next(c for c in envelope["claims"] if c["field"] == "hiring_signal")
+    dated = next(c for c in envelope["claims"] if c["field"] == "dated_activity")
+    assert hiring["evidence_ids"] != dated["evidence_ids"]
+    spans = {e["id"]: e["claim_span"] for e in envelope["evidence"]}
+    assert spans[hiring["evidence_ids"][0]] == "Hiring: Backend Engineer"
+    assert spans[dated["evidence_ids"][0]] == "2026-08-01: new office opened"
+
+
+def test_the_reporting_period_and_effective_date_are_exported_on_claim_and_evidence():
+    """Builderr's rule: "keep the source, retrieval date and relevant reporting
+    period for every claim." The period used to live only in our internal model
+    and never reached the submitted envelope."""
+    profile = make_profile(
+        annual_latest=available_claim(
+            "Revenue: 914,000,000 NOK; Net result: 853,000,000 NOK",
+            source="https://data.brreg.no/regnskapsregisteret/regnskap/938702675",
+            reporting_period="FY2025", effective_date="2025-12-31",
+        ),
+    )
+
+    envelope = to_envelope(profile, run_id="run-1")
+
+    claim = next(c for c in envelope["claims"] if c["field"] == "annual_accounts_latest")
+    assert claim["reporting_period"] == "FY2025"
+    assert claim["effective_at"] == "2025-12-31"
+    evidence = next(e for e in envelope["evidence"] if e["id"] == claim["evidence_ids"][0])
+    assert evidence["reporting_period"] == "FY2025"
+    assert evidence["effective_at"] == "2025-12-31"
+
+
+def test_a_claim_with_no_period_exports_explicit_nulls():
+    envelope = to_envelope(make_profile(legal_name=available_claim("EQUINOR ASA")), run_id="run-1")
+
+    claim = next(c for c in envelope["claims"] if c["field"] == "legal_name")
+    assert claim["reporting_period"] is None and claim["effective_at"] is None
+
+
+def test_the_evidence_span_is_the_verbatim_excerpt_when_the_claim_has_one():
+    """The value we publish is a formatted string ("Anders Opedal (CEO)") that
+    does not appear verbatim in the registry JSON; the span must be text a
+    checker can find in the captured source."""
+    excerpt = '"fornavn":"Anders","etternavn":"Opedal"'
+    profile = make_profile(
+        leaders=[available_claim("Anders Opedal (Daglig leder)", source="https://data.brreg.no/x", evidence_span=excerpt)]
+    )
+
+    envelope = to_envelope(profile, run_id="run-1")
+
+    claim = next(c for c in envelope["claims"] if c["field"] == "leader")
+    evidence = next(e for e in envelope["evidence"] if e["id"] == claim["evidence_ids"][0])
+    assert evidence["claim_span"] == excerpt
 
 
 def test_list_fields_produce_one_claim_entry_each():

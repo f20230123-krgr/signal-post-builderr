@@ -55,6 +55,19 @@ class Claim(BaseModel):
     # official site -- the URL of that official-site page, preserving the
     # link chain as evidence (evaluator feedback, 2026-09). None otherwise.
     linked_from: Optional[str] = None
+    # ISO date (YYYY-MM-DD) the fact itself is effective/true as of -- the end
+    # of an accounting period, a role's last-changed date, a registry event's
+    # date. Distinct from retrieved_at (when we fetched it) and from the
+    # human-readable reporting_period ("FY2025"). Builderr's rule: keep "the
+    # source, retrieval date and relevant reporting period for every claim".
+    effective_date: Optional[str] = None
+    # A short VERBATIM excerpt of the captured source that supports this claim
+    # (evidence-span validity is a listed measurement). The published value is
+    # often a formatted string that never appears literally in the source
+    # (e.g. "Anders Opedal (CEO)" vs {"fornavn":"Anders","etternavn":"Opedal"});
+    # this is the text a checker can actually find. None -> envelope falls back
+    # to the value.
+    evidence_span: Optional[str] = None
 
     @model_validator(mode="after")
     def _value_only_when_available(self) -> "Claim":
