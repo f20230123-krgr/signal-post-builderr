@@ -53,7 +53,7 @@ from src.orchestrator.budget import BudgetGovernor
 from src.storage.cache import ResponseCache
 from src.pipeline.extract import structured_facts, text_fallback_facts
 from src.pipeline.careers import page_heading
-from src.pipeline.keyless_sites import SiteHints, page_confirms_contact
+from src.pipeline.keyless_sites import SiteHints, page_confirms_contact, page_shows_location
 from src.pipeline.site_evidence import org_number_span
 from src.pipeline.verify import NAME_MATCH_THRESHOLD, ConfirmedFact, name_similarity
 
@@ -979,7 +979,9 @@ def verify_discovered_site(
         (name_similarity(name, c) for name in identity_names for c in name_candidates), default=0.0
     )
     identity_proven = confirmed_by_org_number or confirmed_by_contact
-    if require_proof and not identity_proven:
+    # A name-derived guess needs more than the name: proof of identity, or at
+    # least the registered postcode and town on the page alongside the name match.
+    if require_proof and not identity_proven and not (hints and page_shows_location(response.text, hints)):
         return None
     if not identity_proven and best_score < NAME_MATCH_THRESHOLD:
         return None

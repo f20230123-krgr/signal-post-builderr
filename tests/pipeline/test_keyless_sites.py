@@ -10,6 +10,7 @@ from src.pipeline.keyless_sites import (
     keyless_candidates,
     name_domain_candidates,
     page_confirms_contact,
+    page_shows_location,
 )
 
 
@@ -180,3 +181,25 @@ def test_a_redirect_to_a_login_or_error_url_is_not_recorded_as_the_sites_address
     fact = verify_discovered_site("https://nysnoinvest.no/", "NYSNØ AS", client, BudgetGovernor(), org_number="923456789")
 
     assert fact.value == "https://nysnoinvest.no/"  # the address we asked for, not the error redirect
+
+
+def test_the_registered_postcode_and_town_together_show_a_norwegian_location():
+    hints = SiteHints(postcode="0183", poststed="OSLO")
+
+    assert page_shows_location("<p>Bernt Ankers Gate 31, 0183 Oslo</p>", hints)
+    assert page_shows_location("<p>0183  oslo</p>", hints)
+    assert not page_shows_location("<p>Oslo, Norway. PO 0183</p>", hints)
+    assert not page_shows_location("<p>Oslo</p>", SiteHints())
+
+
+def test_a_name_guess_is_accepted_on_name_plus_registered_location_but_not_on_name_alone():
+    page = "<html><head><title>Sago AS</title></head><body>Sago AS, Storgata 1, 0183 Oslo</body></html>"
+    hints = SiteHints(postcode="0183", poststed="OSLO")
+
+    def run(html, h):
+        client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+        return verify_discovered_site("https://sago.no/", "SAGO AS", client, BudgetGovernor(), org_number="923456789", hints=h, require_proof=True)
+
+    assert run(page, hints) is not None
+    assert run(page.replace("0183 Oslo", "Austin, Texas"), hints) is None  # same name, wrong country
+    assert run(page, None) is None

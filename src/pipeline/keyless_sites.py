@@ -56,6 +56,7 @@ class SiteHints:
     phones: list[str] = field(default_factory=list)
     street: Optional[str] = None
     postcode: Optional[str] = None
+    poststed: Optional[str] = None
     nav_homepages: list[str] = field(default_factory=list)
 
 
@@ -77,6 +78,9 @@ def hints_from_registry_record(body: dict) -> SiteHints:
         postcode = address.get("postnummer")
         if isinstance(postcode, str) and re.fullmatch(r"\d{4}", postcode.strip()):
             hints.postcode = postcode.strip()
+        poststed = address.get("poststed")
+        if isinstance(poststed, str) and poststed.strip():
+            hints.poststed = poststed.strip()
     return hints
 
 
@@ -196,3 +200,14 @@ def page_confirms_contact(text: str, hints: SiteHints) -> bool:
         street = " ".join(hints.street.lower().split())
         return street in lowered and hints.postcode in lowered
     return False
+
+
+def page_shows_location(text: str, hints: SiteHints) -> bool:
+    """True when the page shows the registered postcode followed by its town
+    ("0183 Oslo"). Weaker than the phone or street address, so on its own it never
+    proves identity; it is what lets a name match stand for a name-derived guess,
+    because a same-named company abroad will not show a Norwegian postcode and town."""
+    if not (hints.postcode and hints.poststed):
+        return False
+    flattened = " ".join(re.sub(r"<[^>]+>", " ", text).split())
+    return re.search(rf"(?<!\d){hints.postcode}\s*,?\s+{re.escape(hints.poststed)}", flattened, re.IGNORECASE) is not None
