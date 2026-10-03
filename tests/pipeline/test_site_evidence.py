@@ -42,6 +42,15 @@ def test_the_name_span_prefers_the_page_name_closest_to_the_legal_name():
     assert name_span("<html><body>nothing</body></html>", "EQUINOR ASA") is None
 
 
+def test_a_slogan_that_does_not_name_the_company_is_not_evidence_of_it():
+    """A housing co-op registered at its property manager's site: the manager's
+    title says nothing about the co-op, so the registry claim is kept."""
+    html = "<html><head><title>Forretningsfører for sameie og borettslag | Bytt enkelt og trygt</title></head></html>"
+
+    assert name_span(html, "HAUGE BYGÅRD") is None
+    assert official_site_evidence([_page("https://example.com/", title="Forretningsfører for sameie og borettslag")], _entity("https://example.com/")) is None
+
+
 # --- the fact ------------------------------------------------------------------
 
 

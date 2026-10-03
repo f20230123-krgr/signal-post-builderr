@@ -75,15 +75,21 @@ def org_number_span(html: str, org_number: str) -> Optional[str]:
     return None
 
 
+# A page name has to read like the company to count as evidence of it. Below this
+# it is a slogan or somebody else's page (a property manager's title on a
+# housing co-op's registered address), and the registry claim stands instead.
+MIN_NAME_SPAN_SIMILARITY = 80
+
+
 def name_span(html: str, legal_name: str) -> Optional[str]:
     """The page's own name for the company, verbatim: the best-matching of its
-    site name / JSON-LD name and its title or heading, if any is a plausible
-    name; otherwise the title or heading itself, since it is still the page's
-    own words."""
+    site name / JSON-LD name and its title or heading, provided that it actually
+    reads like the company's name."""
     candidates = [c for c in (_page_organization_name_from_html(html), page_heading(html)) if c]
     if not candidates:
         return None
-    return max(candidates, key=lambda c: name_similarity(legal_name, c))
+    best = max(candidates, key=lambda c: name_similarity(legal_name, c))
+    return best if name_similarity(legal_name, best) >= MIN_NAME_SPAN_SIMILARITY else None
 
 
 def official_site_evidence(
