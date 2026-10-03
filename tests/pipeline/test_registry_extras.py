@@ -617,3 +617,52 @@ def test_live_identity_never_guesses_a_field_the_record_does_not_carry():
     details = fetch_live_registry_details(_entity(), BudgetGovernor(), client=client, now=lambda: NOW)
 
     assert _identity(details) == {}
+
+
+def test_roles_carry_the_registrys_last_changed_date_and_the_holders_name_as_written():
+    body = (
+        '{"rollegrupper":[{"type":{"kode":"DAGL"},"sistEndret":"2024-03-15","roller":[{"type":{"kode":"DAGL","beskrivelse":"Daglig leder"},'
+        '"person":{"navn":{"fornavn":"Kari","etternavn":"Nordmann"},"erDoed":false},"avregistrert":false}]}]}'
+    )
+
+    def handler(request):
+        return httpx.Response(200, text=body) if str(request.url).endswith("/roller") else httpx.Response(404)
+
+    facts, _ = fetch_registry_extras(_entity(), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)))
+    leader = next(f for f in facts if f.field_name == "leader")
+
+    assert leader.value == "Kari Nordmann (Daglig leder)"
+    assert leader.effective_date == "2024-03-15"
+    assert leader.evidence_span == '"fornavn":"Kari","etternavn":"Nordmann"'
+    assert leader.evidence_span in body
+
+
+def test_a_role_with_no_changed_date_or_unmatched_json_still_publishes_without_them():
+    body = (
+        '{"rollegrupper":[{"type":{"kode":"STYR"},"roller":[{"type":{"kode":"LEDE","beskrivelse":"Styrets leder"},'
+        '"person":{"navn":{"fornavn":"Ola","mellomnavn":"X","etternavn":"Hansen"}}}]}]}'
+    )
+
+    def handler(request):
+        return httpx.Response(200, text=body) if str(request.url).endswith("/roller") else httpx.Response(404)
+
+    facts, _ = fetch_registry_extras(_entity(), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)))
+    leader = next(f for f in facts if f.field_name == "leader")
+
+    assert leader.value == "Ola X Hansen (Styrets leder)" and leader.effective_date is None
+
+
+def test_the_name_span_is_found_when_the_registry_lists_the_family_name_first():
+    """The live registry writes keys alphabetically: etternavn before fornavn."""
+    body = (
+        '{"rollegrupper":[{"type":{"kode":"DAGL"},"sistEndret":"2020-11-02","roller":[{"type":{"kode":"DAGL","beskrivelse":"Daglig leder"},'
+        '"person":{"navn":{"etternavn":"Opedal","fornavn":"Anders"}}}]}]}'
+    )
+
+    def handler(request):
+        return httpx.Response(200, text=body) if str(request.url).endswith("/roller") else httpx.Response(404)
+
+    facts, _ = fetch_registry_extras(_entity(), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)))
+    leader = next(f for f in facts if f.field_name == "leader")
+
+    assert leader.evidence_span == '"etternavn":"Opedal","fornavn":"Anders"' and leader.evidence_span in body

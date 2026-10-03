@@ -108,6 +108,8 @@ def _leadership_facts(
     for group in body.get("rollegrupper", []):
         if group.get("type", {}).get("kode") not in INCLUDED_ROLE_GROUPS:
             continue
+        changed = group.get("sistEndret")
+        changed_on = changed[:10] if isinstance(changed, str) and re.match(r"\d{4}-\d{2}-\d{2}", changed) else None
         for role in group.get("roller", []):
             if role.get("avregistrert"):
                 continue
@@ -124,10 +126,31 @@ def _leadership_facts(
             facts.append(
                 ConfirmedFact(
                     "leader", value, url, 100.0, now,
+                    effective_date=changed_on, evidence_span=_role_span(response.text, role),
                     content_hash=content_hash, extraction_method="registry", source_class="official_registry",
                 )
             )
     return facts
+
+
+def _role_span(text: str, role: dict) -> Optional[str]:
+    """The role holder's name exactly as the registry's JSON writes it
+    (`"fornavn":"Anders","etternavn":"Opedal"`), so the published "Anders Opedal
+    (President and CEO)" has a quotable source. None if the JSON layout differs."""
+    person = role.get("person")
+    if not isinstance(person, dict):
+        return None
+    navn = person.get("navn") or {}
+    first, last = navn.get("fornavn"), navn.get("etternavn")
+    if not first or not last:
+        return None
+    given, family = rf'"fornavn"\s*:\s*"{re.escape(first)}"', rf'"etternavn"\s*:\s*"{re.escape(last)}"'
+    # The registry's JSON lists keys alphabetically (etternavn before fornavn); accept either order.
+    for pattern in (rf"{family}[^{{}}]*?{given}", rf"{given}[^{{}}]*?{family}"):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
+    return None
 
 
 def _format_accounts_value(entry: dict) -> Optional[str]:
