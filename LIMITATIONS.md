@@ -21,7 +21,11 @@ evidence"), and the simplest way to honor that is not to use one at all yet.
 | `data.brreg.no` (Brønnøysundregisteret Enhetsregisteret, `roller`, `regnskapsregisteret`, `underenheter`) | Legal identity, official site, leadership roles, filed annual accounts, registered sub-units | Free, public | None |
 | `signalpost-company-universe-2025.jsonl.gz` (Builderr-provided) | Zero-cost, byte-identical identity anchoring when the org number is covered | Free (already downloaded) | None |
 | The resolved entity's own official website (+ same-domain paths: `/about`, `/careers`, `/contact`, `/news`, `/investor`, etc., plus sitemap.xml/robots.txt-discovered pages) | Public brand, leadership mentions, hiring signals, dated activity, company-owned profile links (e.g. LinkedIn, read only as a self-published link, never scraped directly) | Free | None |
-| Official ATS platforms (Greenhouse, Lever, Workable, Teamtailor, Workday) -- only ever fetched when linked directly from the entity's own official site, link chain preserved as evidence | Hiring signals | Free | None |
+| Official ATS platforms (Greenhouse, Lever, Workable, Teamtailor, Workday, Recman, Jobylon, Webcruiter, Easycruit, HR Manager, Varbi, Emply, Homerun, Personio, BambooHR, SmartRecruiters, Ashby, Recruitee, Breezy) -- only ever fetched when linked directly from the entity's own official site, link chain preserved as evidence. Shared job aggregators (finn.no, jobbnorge.no) are deliberately excluded. | Hiring signals | Free | None |
+| The careers and news pages the entity's own pages link to (same site or its subdomains; found by reading links, never by guessing paths; at most 2 + 2 pages per company) | Hiring signals (a careers page, with open roles when its HTML lists them) and dated news headlines | Free | None |
+| `data.brreg.no` record fields `epostadresse`, `telefon`, `mobil`, `forretningsadresse` | Keyless website discovery: the registered e-mail's own-company domain is a candidate; the registered phone and street address corroborate a candidate | Free, public | None |
+| DNS lookups (`getaddrinfo`) of a few name-derived domains per company without a registered website | Keyless website discovery: a guessed domain is fetched only if its name resolves, and is accepted only on proof (org number, registered phone or address, or registered postcode and town with the name) | Free | None |
+| NAV job ad's `employer.homepage` (read from the ad already fetched for hiring signals; only when the ad names the company's own org number) | A website candidate, verified like any other | Free | None |
 | Exa Search API (`api.exa.ai/search`) | Candidate website discovery for companies with none on file -- candidate generation only, independently re-verified via the same name-match gate before acceptance (never trusted as evidence itself). Tried first in the discovery chain. | Free tier: 20,000 requests/month, no card required | `EXA_API_KEY` env var |
 | Parallel Search API (`api.parallel.ai/v1/search`) | Same candidate-generation role as Exa, tried second (only if Exa is unconfigured or returns nothing) | Free tier: ~5,000 requests/month, no card required | `PARALLEL_API_KEY` env var |
 | NAV job-vacancy feed (`pam-stilling-feed.nav.no`) | Hiring signals: NAV's official national job board, published as a feed for outside developers with a public token. An ad is published only when its own employer org number equals the company's; only the job title and dates are published, never contact details. | Free, public token | None |
@@ -141,9 +145,9 @@ All permissive; no copyleft (GPL-style) obligations.
 - **NAV hiring signals depend on NAV's public feed being reachable.** During testing on
   2026-09-21 the feed timed out; the agent then simply publishes no NAV signals (and spends
   2-4 requests finding out). Nothing else is affected.
-- **Guessing company domains was measured and not built.** On 87 companies with no
-  registered website it verified one site that search missed (about +1 per 100), at the
-  cost of new code and precision risk.
+- **Guessing company domains: measured, then built (2026-10-03, see below).** The
+  2026-09-21 measurement (+1 per 100) was taken with a search key; with no search key at all
+  the same idea verified 9 of 100 companies that have no registered website.
 - **The outbound URL guard resolves a name before the request and the HTTP client resolves
   it again**, so a hostile DNS server could in principle answer differently the second
   time (DNS rebinding). Names that do not resolve are let through (the request just fails).
@@ -168,3 +172,43 @@ All permissive; no copyleft (GPL-style) obligations.
   refresh time.** 9 companies with a known official site could not be re-crawled
   in three attempts on 2026-09-25 and were left at their original (pre-fix)
   social-profile claims rather than risk wiping real data on a transient failure.
+
+## Known limits added 2026-10-03
+
+- **The scored run cannot be assumed to have search keys.** Builderr cannot use credentials
+  tied to an entrant's own account, and secrets reach a run only through documented
+  environment variables, so every field now works without `EXA_API_KEY` / `PARALLEL_API_KEY`.
+  Keys remain optional: when present they are used after the keyless candidates. A run prints
+  one informational line saying which it has and records it as `search_keys` in
+  `run-report.json`; it never prompts or waits.
+- **Keyless website discovery is modest.** Measured on 100 random companies with no
+  registered website: 9 sites found, all correct on manual review, each with the org-number
+  line or the company's own name quoted. A name-derived domain is accepted only on proof,
+  so some genuine sites (a small shop whose page shows neither its org number nor its
+  registered phone, address or postcode) are missed rather than risked. A housing co-op gets
+  no e-mail-domain candidate, because its registered e-mail is its property manager's.
+- **A careers claim is one of two things, and says which.** "Careers page lists N open
+  roles, e.g. ..." only when the page's HTML shows at least two job-detail links with titles.
+  Otherwise "Careers page: <url>", which claims the page exists and nothing about openings
+  (listings loaded by script leave no roles in static HTML). A page saying there are no
+  openings, an error page, a footer or legal link, a link to a general job board, and a
+  careers page on a site the company only occupies one page of publish nothing.
+- **At most two careers claims per company, and two news pages.** A site with many
+  sub-pages is one careers signal, not many.
+- **News is read from article and list-item blocks that carry a date.** Norwegian and
+  English date formats and `<time datetime>` are recognised; a date more than a month ahead
+  (an event teaser) is not news. Pages that show headlines and dates in layouts without
+  article or list-item blocks yield nothing rather than a guessed pairing.
+- **Financial figures cover the two newest filings.** Revenue, operating result, result
+  before tax, annual result, assets, equity and debt are published per filed year with their
+  period, period end date and the filing's own text; a figure the filing does not state is
+  omitted, never zero. A link to the filed accounts is published only for years the registry
+  lists (the address pattern answers 200 even for years with no filing). Where a company
+  filed both its own and a group's accounts for a year, the company's own are used.
+- **Employee count exists for 15% of the universe.** Brønnøysund holds a count only for
+  companies that report one (59,821 of 411,160); an absent count is omitted, never zero.
+- **Norid's domain WHOIS was tried and is not used.** Port 43 states it gives no holder
+  information and the holder lookup's terms prohibit this use.
+- **The registry website is now evidenced by the site, not the registry snapshot.** When the
+  site can be fetched and a page names the company (org number, or a name that reads like it),
+  the claim's source is that page; otherwise the registry claim stands unchanged.
