@@ -305,14 +305,15 @@ def test_assembly_prefers_role_level_careers_claims_and_never_drops_a_nav_ad():
     assert [c.value for c in _limit_careers_claims(claims)] == [role, "Elektriker - NAV"]
 
 
-def test_the_summary_says_careers_page_for_a_bare_page_and_hiring_for_roles_or_ads():
+def test_the_summary_states_a_careers_claim_as_it_is_and_leads_a_nav_ad_with_hiring():
     from src.synthesis import build_summary
     from tests.conftest import make_profile
 
     bare = make_profile(org_number="923609016", hiring_signals=[_claim(f"{CAREERS_VALUE_PREFIX}: https://s.no/karriere")])
     nav = make_profile(org_number="923609016", hiring_signals=[_claim("Elektriker - NAV")])
 
-    assert "Careers: Careers page: https://s.no/karriere" in build_summary(bare).text
+    assert "Careers page: https://s.no/karriere" in build_summary(bare).text
+    assert "Careers: Careers page" not in build_summary(bare).text
     assert "Hiring: Elektriker - NAV" in build_summary(nav).text
 
 

@@ -121,5 +121,16 @@ def test_embedded_data_cannot_close_the_script_element():
 def test_the_viewer_offers_find_compare_and_verify():
     html = render_html_report([make_profile()], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
 
-    for needle in ('id="q"', 'id="filters"', 'id="cmpGo"', 'id="drawer"', "Evidence", 'role="group"', "prefers-color-scheme"):
+    for needle in ('id="q"', 'id="filters"', 'id="cmpGo"', 'id="drawer"', "Evidence", 'role="group"', 'data-theme="light"'):
         assert needle in html
+
+
+def test_the_viewer_opens_in_dark_mode_by_default_and_light_is_an_explicit_choice():
+    html = render_html_report([make_profile()], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    base = html.index(":root {")
+    light = html.index(':root[data-theme="light"]')
+    assert base < light
+    assert "--bg: #0b171e" in html[base:light]  # the bare :root is the dark palette
+    assert "prefers-color-scheme" not in html  # no automatic switch to light
+    assert 'data-theme="light"' in html

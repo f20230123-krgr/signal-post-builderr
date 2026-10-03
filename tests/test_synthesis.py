@@ -229,7 +229,7 @@ def test_summary_is_one_short_dated_narrative_with_the_key_facts():
     assert "Anders Opedal (managing director)" in summary.text
     assert "Jon Erik Reinhardsen (chair of the board)" in summary.text
     assert "official website equinor.com" in summary.text
-    assert "Hiring: Careers page lists open roles" in summary.text
+    assert "Careers page lists open roles" in summary.text and "Hiring: Careers page" not in summary.text
     assert "employee_count: '20000' -> '21000'" in summary.text
     assert len(summary.text.split()) < 160
 

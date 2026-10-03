@@ -467,8 +467,11 @@ def _hiring_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     first = ranked[0]
     when = f" (seen {_day(first)})" if _day(first) else ""
     more = f" and {len(signals) - 1} more" if len(signals) > 1 else ""
-    label = "Careers" if only_a_page(first) else "Hiring"
-    return SummarySentence(f"{label}: {first.value}{more}{when}.", ["hiring_signal"], [first])
+    # A careers claim already reads as a sentence ("Careers page: <url>" or
+    # "Careers page lists 3 open roles, ..."); only a NAV ad or a job posting needs
+    # the "Hiring:" lead-in.
+    text = first.value if first.value.startswith(CAREERS_VALUE_PREFIX) else f"Hiring: {first.value}"
+    return SummarySentence(f"{text}{more}{when}.", ["hiring_signal"], [first])
 
 
 def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:

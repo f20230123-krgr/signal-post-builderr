@@ -3,31 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark light">
 <title>Signalpost Atlas</title>
 <style>
 :root {
-  --bg: #edf1f3; --panel: #ffffff; --panel-2: #f5f8f9; --ink: #0e222d; --muted: #566a75; --line: #d3dce1;
-  --accent: #0a6a89; --accent-soft: #dcecf2; --accent-ink: #ffffff;
-  --ok: #176b43; --ok-soft: #dff1e7; --warn: #9a5a07; --warn-soft: #fbecd2; --bad: #a93a30; --bad-soft: #f8e0dd;
-  --reg: #1d5fa8; --own: #1f8a5b; --ext: #c47a12; --mark: #fff0b8; --shadow: 0 1px 2px rgba(14,34,45,.06), 0 6px 18px rgba(14,34,45,.06);
-  --radius: 10px;
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0b171e; --panel: #12232d; --panel-2: #0f1e27; --ink: #e5eef2; --muted: #92a8b3; --line: #243a46;
-    --accent: #4db3d4; --accent-soft: #123747; --accent-ink: #06222c;
-    --ok: #52c58c; --ok-soft: #123626; --warn: #e3a54c; --warn-soft: #3a2a0e; --bad: #f08a80; --bad-soft: #3d1b18;
-    --reg: #6fa8ec; --own: #4fc491; --ext: #e6a143; --mark: #5c4b12; --shadow: none;
-  }
-}
-:root[data-theme="dark"] {
   --bg: #0b171e; --panel: #12232d; --panel-2: #0f1e27; --ink: #e5eef2; --muted: #92a8b3; --line: #243a46;
   --accent: #4db3d4; --accent-soft: #123747; --accent-ink: #06222c;
   --ok: #52c58c; --ok-soft: #123626; --warn: #e3a54c; --warn-soft: #3a2a0e; --bad: #f08a80; --bad-soft: #3d1b18;
   --reg: #6fa8ec; --own: #4fc491; --ext: #e6a143; --mark: #5c4b12; --shadow: none;
+  --radius: 10px;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  color-scheme: dark;
+}
+/* Dark is the default for everyone; light is an explicit choice from the Theme button. */
+:root[data-theme="light"] {
+  --bg: #edf1f3; --panel: #ffffff; --panel-2: #f5f8f9; --ink: #0e222d; --muted: #566a75; --line: #d3dce1;
+  --accent: #0a6a89; --accent-soft: #dcecf2; --accent-ink: #ffffff;
+  --ok: #176b43; --ok-soft: #dff1e7; --warn: #9a5a07; --warn-soft: #fbecd2; --bad: #a93a30; --bad-soft: #f8e0dd;
+  --reg: #1d5fa8; --own: #1f8a5b; --ext: #c47a12; --mark: #fff0b8; --shadow: 0 1px 2px rgba(14,34,45,.06), 0 6px 18px rgba(14,34,45,.06);
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -55,7 +50,7 @@ a { color: var(--accent); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--accent); white-space: nowrap; }
 
 /* layout */
-.app { display: grid; grid-template-columns: minmax(320px, 400px) 1fr; height: calc(100vh - 57px); height: calc(100dvh - 57px); }
+.app { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); height: calc(100vh - 57px); height: calc(100dvh - 57px); }
 .list-pane { display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel-2); min-height: 0; }
 .tools { padding: 12px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .search { position: relative; }
@@ -82,7 +77,8 @@ a { color: var(--accent); }
 .empty { padding: 24px 16px; color: var(--muted); text-align: center; }
 
 main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60px; }
-.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 16px; }
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.wrap > * { min-width: 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
 .card h2 { margin: 0 0 10px; font-size: .78rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
 .head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-start; }
@@ -117,6 +113,18 @@ main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60p
 .fact .why { border: 1px solid var(--line); background: transparent; border-radius: 6px; font-size: .78rem; padding: 2px 8px; color: var(--accent); }
 .fact .why:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .fact .sub { color: var(--muted); font-size: .82rem; }
+.fact.cont { border-top-color: transparent; }
+.fact.cont .k { visibility: hidden; }
+.fin { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 6px 0 12px; font-variant-numeric: tabular-nums; }
+.fin th, .fin td { padding: 7px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.fin th:first-child, .fin td:first-child { text-align: left; color: var(--muted); font-weight: 500; }
+.fin thead th { color: var(--muted); font-weight: 650; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
+.fin tbody tr { border-left: 3px solid var(--reg); }
+.cellbtn { background: none; border: 0; padding: 0; color: var(--ink); font: inherit; cursor: pointer; text-decoration: underline dotted var(--muted); text-underline-offset: 4px; }
+.cellbtn:hover { color: var(--accent); }
+.chg.up { color: var(--ok); }
+.chg.down { color: var(--bad); }
+.dash { color: var(--muted); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .82rem; color: var(--muted); margin-bottom: 8px; }
 .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; background: var(--c); }
 
@@ -140,7 +148,10 @@ main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60p
 .scroll-x { overflow-x: auto; }
 .tray { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--ink); color: var(--bg); border-radius: 999px; padding: 8px 10px 8px 18px; display: none; gap: 12px; align-items: center; box-shadow: 0 8px 28px rgba(0,0,0,.3); z-index: 30; max-width: calc(100vw - 24px); }
 .tray.on { display: flex; }
-.tray .btn { border-color: transparent; }
+/* The tray is dark on a light page and light on a dark one (it uses --ink as its ground), so its buttons take the page colour for text. */
+.tray .btn { border-color: color-mix(in srgb, var(--bg) 40%, transparent); background: transparent; color: var(--bg); }
+.tray .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tray .btn.primary:disabled { opacity: .55; }
 
 /* drawer */
 dialog { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
@@ -161,7 +172,7 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
 
 .only-mobile { display: none; }
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; }
+  .app { grid-template-columns: minmax(0, 1fr); }
   body[data-view="detail"] .list-pane, body[data-view="compare"] .list-pane, body[data-view="overview"] .list-pane { display: none; }
   body[data-view="list"] main, body[data-view="home"] main { display: none; }
   body[data-view="home"] .list-pane, body[data-view="list"] .list-pane { display: flex; }
@@ -172,6 +183,14 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
   .cov .r .bar { grid-column: 1 / -1; order: 3; }
   .brand .asof { display: none; }
   .tray { bottom: 10px; }
+}
+@media (max-width: 560px) {
+  .top { gap: 4px; padding: 8px 10px; }
+  .top .sp { flex: 1 1 0; min-width: 0; }
+  .brand h1 { font-size: .92rem; }
+  .top .btn { padding: 5px 8px; font-size: .86rem; }
+  .story .sent { grid-template-columns: 1fr; gap: 2px; }
+  .story .topic { padding-top: 0; }
 }
 @media (prefers-reduced-motion: no-preference) { .card, .row { transition: background .15s; } }
 @media print { .top, .list-pane, .tray, .actions, .why { display: none !important; } .app { display: block; height: auto; } main { overflow: visible; } }
@@ -267,7 +286,8 @@ const SECTIONS = [
 ];
 const FLAGS = [
   ["site", "Official website"], ["social", "Company-owned social profiles"], ["hiring", "Hiring signals"],
-  ["leaders", "Leadership"], ["accounts", "Annual accounts"], ["activity", "Dated public activity"], ["workplaces", "Registered workplaces"]
+  ["news", "Company news (from its own site)"], ["financials", "Financial figures"],
+  ["leaders", "Leadership"], ["workplaces", "Registered workplaces"]
 ];
 
 /* ---------- data ---------- */
@@ -292,9 +312,14 @@ function prep(env) {
   const amount = x => { const m = x && /^(-?[\d,]+)/.exec(x.value); return m ? Number(m[1].replace(/,/g, "")) : null; };
   if (amount(newest("revenue")) != null) c.revenue = amount(newest("revenue"));
   if (amount(newest("annual_result")) != null) c.result = amount(newest("annual_result"));
+  // News means a dated item from the company's own pages; the registry's own change events
+  // exist for every company and would make this bar read 100%.
+  const fromSite = claim => (claim.evidence_ids || []).some(i => ev[i] && ev[i].source_class !== "official_registry");
+  c.siteNews = ok("dated_activity").filter(fromSite);
   c.flags = {
     site: !!c.site, social: ok("company_profile").length > 0, hiring: ok("hiring_signal").length > 0,
-    leaders: ok("leader").length > 0, accounts: !!acc, activity: ok("dated_activity").length > 0, workplaces: ok("workplace").length > 0
+    news: ok("dated_activity").some(fromSite), financials: ok("revenue").length > 0 || !!acc,
+    leaders: ok("leader").length > 0, workplaces: ok("workplace").length > 0
   };
   c.score = FLAGS.filter(f => c.flags[f[0]]).length;
   c.changed = (env.changes || []).length > 0;
@@ -308,7 +333,7 @@ const byOrg = Object.fromEntries(companies.map(c => [c.org, c]));
 const state = { q: "", filters: new Set(), sort: "name", limit: 60, picked: [], open: null, view: "home" };
 const FILTERS = {
   site: ["Website", c => c.flags.site], social: ["Social", c => c.flags.social], hiring: ["Hiring", c => c.flags.hiring],
-  leaders: ["Leadership", c => c.flags.leaders], accounts: ["Accounts", c => c.flags.accounts],
+  news: ["News", c => c.flags.news], leaders: ["Leadership", c => c.flags.leaders], financials: ["Financials", c => c.flags.financials],
   active: ["Active only", c => (c.status || "").toLowerCase() === "active"], changed: ["Changed", c => c.changed]
 };
 const SORTS = {
@@ -358,6 +383,7 @@ function renderList() {
     "</button></li>").join("") +
     (rows.length > shown.length ? '<li class="more"><button class="btn" id="moreBtn" type="button">Show ' + Math.min(60, rows.length - shown.length) + " more</button></li>" : "")
     : '<li class="empty">No company matches. Clear a filter or change the search.</li>';
+  if (state.view === "home" || state.view === "overview") renderHome();
 }
 function renderTools() {
   $("#filters").innerHTML = Object.keys(FILTERS).map(k => '<button type="button" class="chip" data-f="' + k + '" aria-pressed="' + state.filters.has(k) + '">' + FILTERS[k][0] + "</button>").join("");
@@ -381,9 +407,12 @@ function keysNote() {
   return '<p class="changes">' + esc(text) + "</p>";
 }
 function renderHome() {
-  const n = companies.length, cnt = k => companies.filter(c => c.flags[k]).length;
-  const evCount = companies.reduce((s, c) => s + Object.keys(c.ev).length, 0);
-  const claimCount = companies.reduce((s, c) => s + c.claims.filter(x => x.availability === "available").length, 0);
+  // The overview describes the companies currently listed: filter or search and the bars follow.
+  const set = filtered(), n = set.length, cnt = k => set.filter(c => c.flags[k]).length;
+  const evCount = set.reduce((s, c) => s + Object.keys(c.ev).length, 0);
+  const claimCount = set.reduce((s, c) => s + c.claims.filter(x => x.availability === "available").length, 0);
+  const narrowed = n !== companies.length ? '<p class="changes">Showing the ' + fmt(n) + " of " + fmt(companies.length) + " companies that match the current search or filters.</p>" : "";
+  if (!n) { $("#main").innerHTML = '<div class="wrap"><div class="card"><h2>No company matches</h2><p>Clear a filter or change the search.</p></div></div>'; return; }
   const rows = FLAGS.map(f => ({ label: f[1], p: n ? cnt(f[0]) / n : 0, k: cnt(f[0]) })).sort((a, b) => b.p - a.p);
   const weakest = rows[rows.length - 1];
   $("#main").innerHTML = '<div class="wrap"><button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
@@ -391,7 +420,7 @@ function renderHome() {
     '<div class="kpi"><div class="n">' + fmt(n) + '</div><div class="l">companies, one envelope each</div></div>' +
     '<div class="kpi"><div class="n">' + fmt(claimCount) + '</div><div class="l">verified claims</div></div>' +
     '<div class="kpi"><div class="n">' + fmt(evCount) + '</div><div class="l">evidence records</div></div>' +
-    '<div class="kpi"><div class="n">' + esc(DATA.as_of) + '</div><div class="l">data as of</div></div></div></div>' +
+    '<div class="kpi"><div class="n">' + esc(DATA.as_of) + '</div><div class="l">data as of</div></div></div>' + narrowed + "</div>" +
     '<div class="card"><h2>What we found, by information type</h2><div class="cov">' +
     rows.map(r => '<div class="r"><span>' + esc(r.label) + '</span><span class="bar' + (r.p < .3 ? " low" : "") + '"><b style="width:' + (r.p * 100).toFixed(1) + '%"></b></span><span class="num">' + (r.p * 100).toFixed(1) + "%</span></div>").join("") +
     '</div><p class="changes">Weakest area: <b>' + esc(weakest.label.toLowerCase()) + "</b> (" + fmt(weakest.k) + " of " + fmt(n) + '). A missing value is shown as "not found", never as zero.</p></div>' +
@@ -409,29 +438,64 @@ function citeButtons(c, ids) {
   const rest = have.length - shown.length;
   return shown.map(btn).join("") + (rest > 0 ? '<button type="button" class="cite" data-ev="' + esc(have[3]) + '" title="' + rest + ' more evidence records, listed under Every fact below">+' + rest + "</button>" : "");
 }
-function factRow(c, f, claim) {
+// A list field (roles, workplaces ...) shows its label once, on the first row.
+function factRow(c, f, claim, first) {
   const cls = claimClass(c, claim);
   const val = claim.value;
   let extra = "";
   if (claim.reporting_period) extra += '<div class="sub">Period ' + esc(claim.reporting_period) + (claim.effective_at ? ", to " + esc(claim.effective_at) : "") + "</div>";
   else if (claim.effective_at) extra += '<div class="sub">Effective ' + esc(claim.effective_at) + "</div>";
-  return '<div class="fact src-' + esc(cls) + '"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">' + valueHtml(val) + extra + "</div>" +
+  return '<div class="fact src-' + esc(cls) + (first === false ? " cont" : "") + '"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">' + valueHtml(val) + extra + "</div>" +
     '<button type="button" class="why" data-ci="' + claim.i + '">Evidence</button></div>';
 }
-function naRow(c, f) {
-  const st = (c.all(f)[0] || {}).availability || "not_available";
-  return '<div class="fact na"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">Not found <span class="pill ' + esc(st) + '" title="' + esc(STATE_HELP[st] || "") + '">' + esc(st.replace("_", " ")) + "</span></div><span></span></div>";
+const SEVERITY = ["failed", "blocked", "ambiguous", "not_applicable", "not_available"];
+// Every field of a section that has nothing becomes ONE line, not one row each.
+function naLine(c, fields, labelOverride) {
+  const states = fields.map(f => (c.all(f)[0] || {}).availability || "not_available");
+  const st = SEVERITY.find(s => states.includes(s)) || "not_available";
+  const names = labelOverride || fields.map(f => LABEL[f]).join(", ");
+  return '<div class="fact na"><div class="k">Not found</div><div class="v">' + esc(names) + ' <span class="pill ' + esc(st) + '" title="' + esc(STATE_HELP[st] || "") + '">' + esc(st.replace("_", " ")) + "</span></div><span></span></div>";
+}
+const FIN_FIELDS = ["revenue", "operating_result", "profit_before_tax", "annual_result", "total_assets", "total_equity", "total_debt"];
+const amountOf = v => { const m = /^(-?[\d,]+)\s*([A-Z]{3})?$/.exec(v || ""); return m ? [Number(m[1].replace(/,/g, "")), m[2] || ""] : null; };
+// The filed figures as a small table, one column per filed year, with the change between the two newest.
+function financialTable(c) {
+  const periods = [...new Set(FIN_FIELDS.flatMap(f => c.ok(f).map(x => x.reporting_period)).filter(Boolean))].sort().reverse();
+  if (!periods.length) return "";
+  const claimOf = (f, p) => c.ok(f).find(x => x.reporting_period === p);
+  const change = f => {
+    if (periods.length < 2) return "";
+    const a = claimOf(f, periods[0]), b = claimOf(f, periods[1]);
+    const x = a && amountOf(a.value), y = b && amountOf(b.value);
+    if (!x || !y || x[1] !== y[1] || y[0] === 0) return "";
+    const pct = (x[0] - y[0]) / Math.abs(y[0]) * 100;
+    return '<span class="chg ' + (pct > 0 ? "up" : pct < 0 ? "down" : "") + '">' + (pct > 0 ? "&#9650; " : pct < 0 ? "&#9660; " : "") + Math.abs(pct).toFixed(1) + "%</span>";
+  };
+  const cell = (f, p) => { const x = claimOf(f, p); return x ? '<button type="button" class="why cellbtn" data-ci="' + x.i + '" title="Open the evidence for this figure">' + esc(x.value) + "</button>" : '<span class="dash">&ndash;</span>'; };
+  const rows = FIN_FIELDS.filter(f => c.ok(f).length).map(f =>
+    "<tr><th scope=\"row\">" + esc(LABEL[f]) + "</th>" + periods.map(p => "<td>" + cell(f, p) + "</td>").join("") + "<td>" + change(f) + "</td></tr>").join("");
+  const pdfs = c.ok("annual_report_pdf");
+  const pdfRow = pdfs.length ? "<tr><th scope=\"row\">Filed accounts</th>" + periods.map(p => { const x = pdfs.find(y => y.reporting_period === p); return "<td>" + (x ? '<a href="' + esc(x.value) + '" target="_blank" rel="noopener noreferrer">PDF</a>' : '<span class="dash">&ndash;</span>') + "</td>"; }).join("") + "<td></td></tr>" : "";
+  return '<div class="scroll-x"><table class="fin"><thead><tr><th></th>' + periods.map(p => "<th scope=\"col\">" + esc(p) + "</th>").join("") +
+    "<th scope=\"col\">Change</th></tr></thead><tbody>" + rows + pdfRow + "</tbody></table></div>";
 }
 function section(c, title, fields) {
-  let html = "<h3>" + esc(title) + "</h3>";
+  let html = "<h3>" + esc(title) + "</h3>", missing = [], found = 0;
+  if (title === "Annual accounts") {
+    const table = financialTable(c);
+    // The combined latest/earlier strings only matter when there are no discrete figures.
+    fields = fields.filter(f => !FIN_FIELDS.includes(f) && f !== "annual_report_pdf" && !(table && /^annual_accounts_/.test(f)));
+    if (table) { html += table; found++; }
+  }
   fields.forEach(f => {
     let list = c.ok(f);
     if (f === "dated_activity") list = list.slice().sort((a, b) => latestDate(b.value).localeCompare(latestDate(a.value)));
-    if (!list.length) { html += naRow(c, f); return; }
-    const head = list.slice(0, 8).map(x => factRow(c, f, x)).join("");
-    html += head;
-    if (list.length > 8) html += "<details><summary>Show " + (list.length - 8) + " more</summary>" + list.slice(8).map(x => factRow(c, f, x)).join("") + "</details>";
+    if (!list.length) { missing.push(f); return; }
+    found++;
+    html += list.slice(0, 8).map((x, i) => factRow(c, f, x, i === 0)).join("");
+    if (list.length > 8) html += "<details><summary>Show " + (list.length - 8) + " more</summary>" + list.slice(8).map(x => factRow(c, f, x, false)).join("") + "</details>";
   });
+  if (missing.length) html += naLine(c, missing, title === "Annual accounts" && !found ? "Financial figures" : null);
   return html;
 }
 const TOPIC = {
@@ -439,8 +503,10 @@ const TOPIC = {
   official_website: "Online", hiring_signal: "Hiring", dated_activity: "Latest"
 };
 function topicOf(x, i, n) {
+  if (/^Revenue (up|down|flat)/.test(x.text)) return "Trend";
   const hit = (x.fields || []).find(f => TOPIC[f]);
   if (hit) return TOPIC[hit];
+  if (/^Revenue (up|down|flat)/.test(x.text)) return "Trend";
   return /^First snapshot|^No material|^Changed since/.test(x.text) ? "Changes" : "Gaps";
 }
 function renderCompany(c) {
@@ -477,7 +543,7 @@ function renderCompare() {
     ["Workplaces", c => c.ok("workplace").length ? String(c.ok("workplace").length) : null],
     ["Website", c => c.site && host(c.site)], ["Social profiles", c => c.ok("company_profile").length ? c.ok("company_profile").map(x => host(x.value)).join(", ") : null],
     ["Hiring", c => c.ok("hiring_signal").length ? c.ok("hiring_signal")[0].value : null],
-    ["Latest activity", c => { const a = c.ok("dated_activity").map(x => latestDate(x.value)).sort().pop(); return a || null; }],
+    ["Latest company news", c => { const a = c.siteNews.map(x => x.effective_at || latestDate(x.value)).filter(Boolean).sort().pop(); return a || null; }],
     ["Information types found", c => c.score + " of " + FLAGS.length], ["Evidence records", c => String(Object.keys(c.ev).length)]
   ];
   const head = "<thead><tr><th></th>" + cs.map(c => '<th scope="col"><button class="btn ghost" data-o="' + c.org + '" type="button">' + esc(c.name) + '</button><div class="mono">' + esc(c.org) + "</div></th>").join("") + "</tr></thead>";
@@ -608,13 +674,15 @@ function exportCsv() {
   const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score]));
   download("signalpost-companies.csv", [head].concat(rows).map(r => r.map(q).join(",")).join("\n"), "text/csv");
 }
-function cycleTheme() {
-  const cur = document.documentElement.dataset.theme || "auto", next = cur === "auto" ? "dark" : cur === "dark" ? "light" : "auto";
-  if (next === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
-  $("#themeBtn").textContent = "Theme: " + next;
-  try { localStorage.setItem("atlas-theme", next); } catch (e) { /* storage may be blocked */ }
+// Dark by default; the button switches to light and back, and the choice is remembered.
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $("#themeBtn").setAttribute("aria-label", "Switch to " + (theme === "dark" ? "light" : "dark") + " theme");
+  $("#themeBtn").title = "Switch to " + (theme === "dark" ? "light" : "dark") + " theme";
+  try { localStorage.setItem("atlas-theme", theme); } catch (e) { /* storage may be blocked */ }
 }
-try { const t = localStorage.getItem("atlas-theme"); if (t === "dark" || t === "light") { document.documentElement.dataset.theme = t; $("#themeBtn").textContent = "Theme: " + t; } } catch (e) { /* ignore */ }
+function cycleTheme() { setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); }
+try { if (localStorage.getItem("atlas-theme") === "light") setTheme("light"); } catch (e) { /* ignore */ }
 
 $("#asof").textContent = "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
 renderTools(); renderTray(); route();
