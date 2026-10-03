@@ -873,8 +873,13 @@ def verify_discovered_site(
     org_number: Optional[str] = None,
     alternate_names: Optional[list[str]] = None,
     hints: Optional[SiteHints] = None,
+    require_proof: bool = False,
 ) -> Optional[ConfirmedFact]:
-    """`hints` (the phone number and street address the company registered in
+    """`require_proof` demands the page show the company's org number or its
+    registered phone/address: a name match alone is not enough. Used for
+    name-derived domain guesses, where a different company may own the domain.
+
+    `hints` (the phone number and street address the company registered in
     Brønnøysund) let a page that shows them stand in for a name match: a small
     company often runs its site under a brand that reads nothing like its legal
     name, but its phone number and address are its own. Org-number proof still
@@ -974,6 +979,8 @@ def verify_discovered_site(
         (name_similarity(name, c) for name in identity_names for c in name_candidates), default=0.0
     )
     identity_proven = confirmed_by_org_number or confirmed_by_contact
+    if require_proof and not identity_proven:
+        return None
     if not identity_proven and best_score < NAME_MATCH_THRESHOLD:
         return None
     if not identity_proven:
@@ -993,8 +1000,12 @@ def verify_discovered_site(
         span = max(name_candidates, key=lambda c: max(name_similarity(n, c) for n in identity_names))
     if span is None:
         span = page_heading(response.text)
+    # Where the request landed, unless that is another site or a URL carrying a
+    # query string (a login or error redirect is not the company's address).
     landed = str(response.url)
-    value = landed if urlsplit(landed).netloc.lower().removeprefix("www.") == urlsplit(url).netloc.lower().removeprefix("www.") else url
+    landed_parts, sent_parts = urlsplit(landed), urlsplit(url)
+    same_site = landed_parts.netloc.lower().removeprefix("www.") == sent_parts.netloc.lower().removeprefix("www.")
+    value = landed if same_site and not landed_parts.query and not landed_parts.fragment else url
 
     return ConfirmedFact(
         field_name="official_site",

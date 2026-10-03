@@ -45,8 +45,8 @@ def test_candidates_come_in_trust_order_and_only_when_they_resolve():
 
     out = keyless_candidates("FIRMA AS", hints, resolves=resolves)
 
-    assert out[0] == "https://www.firma-offisiell.no"  # NAV's homepage first
-    assert "https://firma.no" not in out  # did not resolve
+    assert out[0].url == "https://www.firma-offisiell.no" and out[0].kind == "nav"  # NAV's homepage first
+    assert "https://firma.no" not in [c.url for c in out]  # did not resolve
     assert seen.index("firma-offisiell.no") < seen.index("firma.no")  # email domain before name guesses
 
 
@@ -55,7 +55,7 @@ def test_the_same_host_is_not_tried_twice_and_the_list_is_capped():
 
     out = keyless_candidates("FIRMA AS", hints, resolves=lambda h: True)
 
-    assert [u.split("//")[1].removeprefix("www.").rstrip("/") for u in out].count("firma.no") == 1
+    assert [c.url.split("//")[1].removeprefix("www.").rstrip("/") for c in out].count("firma.no") == 1
     assert len(out) <= 3
 
 
@@ -132,3 +132,51 @@ def test_a_discovered_site_is_evidenced_by_the_org_number_line_on_its_own_page()
 
     assert fact is not None
     assert "923 456 789" in fact.evidence_span
+
+
+def test_only_a_name_guess_needs_proof_beyond_the_name():
+    out = keyless_candidates("FIRMA AS", SiteHints(email="x@firma-epost.no", nav_homepages=["https://firma-nav.no"]), resolves=lambda h: True)
+
+    assert {c.kind: c.needs_proof for c in out} == {"nav": False, "email": False, "guess": True}
+
+
+def test_a_housing_coop_gets_no_email_candidate_because_the_address_is_its_managers():
+    hints = SiteHints(email="post@styrerommet.no")
+
+    kinds = {c.kind for c in keyless_candidates("FOSSUM TERRASSE BOLIGSAMEIE", hints, resolves=lambda h: True)}
+
+    assert "email" not in kinds
+
+
+def test_a_name_match_alone_is_not_enough_when_proof_is_required():
+    """sago.com for SAGO AS: the obvious domain can belong to a different company."""
+    page = "<html><head><title>Sago AS</title></head><body>Sago AS</body></html>"
+
+    assert _verify(page, name="SAGO AS", url="https://sago.com/") is not None
+    assert verify_discovered_site(
+        "https://sago.com/", "SAGO AS", httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=page))),
+        BudgetGovernor(), org_number="923456789", require_proof=True,
+    ) is None
+
+
+def test_proof_by_org_number_or_registered_phone_satisfies_the_requirement():
+    def run(page, hints=None):
+        client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=page)))
+        return verify_discovered_site("https://sago.no/", "SAGO AS", client, BudgetGovernor(), org_number="923456789", hints=hints, require_proof=True)
+
+    assert run("<title>Sago</title><footer>Org.nr: 923 456 789</footer>") is not None
+    assert run("<title>Sago</title><p>Tlf 22 22 22 99</p>", SiteHints(phones=["22222299"])) is not None
+
+
+def test_a_redirect_to_a_login_or_error_url_is_not_recorded_as_the_sites_address():
+    page = "<title>Nysnø AS</title>Org.nr: 923 456 789"
+
+    def handler(request):
+        if request.url.query:
+            return httpx.Response(200, text=page)
+        return httpx.Response(302, headers={"location": "https://nysnoinvest.no/?error=true&message=login_required"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    fact = verify_discovered_site("https://nysnoinvest.no/", "NYSNØ AS", client, BudgetGovernor(), org_number="923456789")
+
+    assert fact.value == "https://nysnoinvest.no/"  # the address we asked for, not the error redirect

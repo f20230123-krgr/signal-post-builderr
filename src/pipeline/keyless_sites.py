@@ -129,28 +129,50 @@ def dns_resolves(host: str) -> bool:
         return False
 
 
+@dataclass(frozen=True)
+class Candidate:
+    """A site to check and how it was proposed. A name-derived guess ("guess") has
+    nothing but the name behind it, so it must be proven by the company's org
+    number or registered contact details, never by a name match alone: a different
+    company can own the obvious domain."""
+
+    url: str
+    kind: str  # "nav" | "email" | "guess"
+
+    @property
+    def needs_proof(self) -> bool:
+        return self.kind == "guess"
+
+
+_HOUSING_WORDS = ("borettslag", "boligsameie", "sameie", "brl", "bolig")
+
+
 def keyless_candidates(
     legal_name: str, hints: SiteHints, resolves: Optional[Callable[[str], bool]] = None
-) -> list[str]:
-    """Candidate site URLs in the order they should be tried, de-duplicated, each
-    resolving in DNS. At most MAX_CANDIDATES_VERIFIED are returned."""
+) -> list[Candidate]:
+    """Candidates in the order they should be tried, de-duplicated, each resolving
+    in DNS. At most MAX_CANDIDATES_VERIFIED are returned.
+
+    A housing co-op registers its property manager's address as its own e-mail, so
+    its e-mail domain is the manager's site, not its own: no e-mail candidate for
+    those."""
     resolves = resolves or dns_resolves  # looked up per call so tests can replace it
-    ordered: list[str] = [u if "://" in u else f"https://{u}" for u in hints.nav_homepages]
+    ordered: list[Candidate] = [Candidate(u if "://" in u else f"https://{u}", "nav") for u in hints.nav_homepages]
     from_email = email_domain_candidate(hints.email)
-    if from_email:
-        ordered.append(from_email)
-    ordered += [f"https://{d}" for d in name_domain_candidates(legal_name)]
+    if from_email and not any(w in legal_name.lower() for w in _HOUSING_WORDS):
+        ordered.append(Candidate(from_email, "email"))
+    ordered += [Candidate(f"https://{d}", "guess") for d in name_domain_candidates(legal_name)]
 
     seen: set[str] = set()
-    out: list[str] = []
-    for url in ordered:
-        host = urlsplit(url).netloc.lower()
+    out: list[Candidate] = []
+    for candidate in ordered:
+        host = urlsplit(candidate.url).netloc.lower()
         host_key = host[4:] if host.startswith("www.") else host
         if not host_key or host_key in seen:
             continue
         seen.add(host_key)
         if resolves(host_key):
-            out.append(url)
+            out.append(candidate)
         if len(out) >= MAX_CANDIDATES_VERIFIED:
             break
     return out

@@ -189,8 +189,8 @@ def _default_process_one(
                 if budget.should_degrade():
                     break
                 discovered_site_fact = verify_discovered_site(
-                    candidate, entity.legal_name, real_client, budget, now=now,
-                    org_number=entity.org_number, hints=site_hints,
+                    candidate.url, entity.legal_name, real_client, budget, now=now,
+                    org_number=entity.org_number, hints=site_hints, require_proof=candidate.needs_proof,
                 )
                 if discovered_site_fact:
                     break
@@ -282,7 +282,10 @@ def _default_process_one(
 
     confirmed_facts = [c for c in (verify(f, crawl_entity) for f in raw_facts) if c is not None]
     if discovered_site_fact:
-        confirmed_facts.append(discovered_site_fact)
+        # First, so it outranks a canonical-link fact scraped off the same site
+        # (assemble takes the first official_site fact): the discovered fact
+        # carries the org-number/name span and the page hash.
+        confirmed_facts.insert(0, discovered_site_fact)
     elif crawl_entity.resolution_state == EvidenceState.AVAILABLE and crawl_entity.official_site_candidate:
         # A registered website: back the claim with the site's own page.
         site_evidence = official_site_evidence(pages, crawl_entity)
