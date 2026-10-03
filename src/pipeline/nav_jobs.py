@@ -205,6 +205,7 @@ def nav_hiring_signal_facts(
     sleep: Callable[[float], None] = time.sleep,
     max_ads: int = MAX_ADS_PER_COMPANY,
     subunit_org_numbers: Optional[set[str]] = None,
+    homepages_out: Optional[list[str]] = None,
 ) -> list[ConfirmedFact]:
     """hiring_signal facts for `entity` from ads whose employer name matched.
 
@@ -244,6 +245,18 @@ def nav_hiring_signal_facts(
         employer = content.get("employer") or {}
         if str(employer.get("orgnr") or "") not in own_org_numbers:
             continue
+        # The employer's own homepage, as the ad states it, is a website candidate
+        # (never evidence: it still has to pass the identity gate). Only when the ad
+        # names THIS company's number -- a sub-unit's homepage is often its parent's.
+        homepage = employer.get("homepage")
+        if (
+            homepages_out is not None
+            and str(employer.get("orgnr") or "") == entity.org_number
+            and isinstance(homepage, str)
+            and homepage.strip().lower().startswith(("http://", "https://"))
+            and homepage.strip() not in homepages_out
+        ):
+            homepages_out.append(homepage.strip())
         title = content.get("title")
         if not isinstance(title, str) or not title.strip():
             continue

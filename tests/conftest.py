@@ -89,3 +89,13 @@ def make_profile(
             is_first_run=is_first_run,
         ),
     )
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def no_live_dns(monkeypatch):
+    """Tests never touch the network, DNS included: no name resolves unless a test
+    passes its own resolver to keyless_candidates."""
+    monkeypatch.setattr("src.pipeline.keyless_sites.dns_resolves", lambda host: False)

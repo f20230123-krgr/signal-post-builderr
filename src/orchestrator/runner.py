@@ -33,6 +33,7 @@ from src.models.profile import CompanyProfile, EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
 from src.pipeline.assemble import assemble
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
+from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.site_evidence import official_site_evidence
 from src.pipeline.discovery import (
     ProviderHealth,
@@ -121,6 +122,24 @@ def _default_process_one(
     # once here instead of once for the search and again for the profile.
     registry_facts, accounts_state = fetch_registry_extras(entity, budget, client=client)
 
+    # NAV job ads before discovery: the same ad lookup that yields hiring signals
+    # can also state the employer's homepage, a website candidate (see keyless_sites).
+    nav_facts: list[ConfirmedFact] = []
+    nav_homepages: list[str] = []
+    if nav_job_index is not None:
+        nav_client = client or new_client()
+        try:
+            nav_facts = nav_hiring_signal_facts(
+                entity, nav_job_index, nav_client, budget, now=now,
+                subunit_org_numbers=subunit_org_numbers(registry_facts),
+                homepages_out=nav_homepages,
+            )
+        finally:
+            if client is None:
+                nav_client.close()
+    site_hints = live_details.hints
+    site_hints.nav_homepages = nav_homepages
+
     discovered_site_fact = None
     if (
         entity.resolution_state == EvidenceState.AVAILABLE
@@ -160,10 +179,24 @@ def _default_process_one(
                     return None
                 return verify_discovered_site(
                     candidate, entity.legal_name, real_client, budget, now=now, org_number=entity.org_number,
-                    alternate_names=alternate_names,
+                    alternate_names=alternate_names, hints=site_hints,
                 )
 
-            discovered_site_fact = _discover_and_verify(entity.legal_name, first_round=True)
+            # Candidates that need no key come first: they cost nothing, and a
+            # site found here saves a paid search. Each goes through the same
+            # identity gate as a search hit.
+            for candidate in keyless_candidates(entity.legal_name, site_hints):
+                if budget.should_degrade():
+                    break
+                discovered_site_fact = verify_discovered_site(
+                    candidate, entity.legal_name, real_client, budget, now=now,
+                    org_number=entity.org_number, hints=site_hints,
+                )
+                if discovered_site_fact:
+                    break
+
+            if discovered_site_fact is None:
+                discovered_site_fact = _discover_and_verify(entity.legal_name, first_round=True)
 
             if discovered_site_fact is None:
                 # Leader/founder bridge (agent playbook §2): a verified CEO/
@@ -276,16 +309,7 @@ def _default_process_one(
         # No manifest (e.g. a clean checkout): the live record supplies the
         # same identity claims. With a manifest they are already above.
         confirmed_facts += live_details.identity_facts
-    if nav_job_index is not None:
-        nav_client = client or new_client()
-        try:
-            confirmed_facts += nav_hiring_signal_facts(
-                entity, nav_job_index, nav_client, budget, now=now,
-                subunit_org_numbers=subunit_org_numbers(registry_facts),
-            )
-        finally:
-            if client is None:
-                nav_client.close()
+    confirmed_facts += nav_facts
     return assemble(entity, confirmed_facts, previous_snapshot, accounts_state=accounts_state, now=now)
 
 

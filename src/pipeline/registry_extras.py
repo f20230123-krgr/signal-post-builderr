@@ -40,6 +40,7 @@ from typing import Callable, Optional
 import httpx
 
 from src.orchestrator.budget import BudgetGovernor
+from src.pipeline.keyless_sites import SiteHints, hints_from_registry_record
 from src.pipeline.net import new_client
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact
@@ -442,6 +443,9 @@ class LiveRegistryDetails:
     # they are only used when the universe manifest isn't supplying the same
     # four claims, so nothing is published twice.
     identity_facts: list[ConfirmedFact] = field(default_factory=list)
+    # E-mail, phone and address the company registered: candidates and
+    # corroboration for website discovery (see keyless_sites.py).
+    hints: SiteHints = field(default_factory=SiteHints)
 
 
 def fetch_live_registry_details(
@@ -490,6 +494,7 @@ def fetch_live_registry_details(
                 return details
             content_hash = _content_hash(response)
         retrieved_at = now()
+        details.hints = hints_from_registry_record(body)
 
         def fact(field_name: str, value: str) -> ConfirmedFact:
             return ConfirmedFact(

@@ -37,6 +37,7 @@ only." Never hardcode a key or commit one to the repo.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -44,12 +45,16 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Callable, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
 from src.orchestrator.budget import BudgetGovernor
 from src.storage.cache import ResponseCache
 from src.pipeline.extract import structured_facts, text_fallback_facts
+from src.pipeline.careers import page_heading
+from src.pipeline.keyless_sites import SiteHints, page_confirms_contact
+from src.pipeline.site_evidence import org_number_span
 from src.pipeline.verify import NAME_MATCH_THRESHOLD, ConfirmedFact, name_similarity
 
 logger = logging.getLogger(__name__)
@@ -867,8 +872,15 @@ def verify_discovered_site(
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     org_number: Optional[str] = None,
     alternate_names: Optional[list[str]] = None,
+    hints: Optional[SiteHints] = None,
 ) -> Optional[ConfirmedFact]:
-    """`alternate_names` are other names this same entity is registered
+    """`hints` (the phone number and street address the company registered in
+    Brønnøysund) let a page that shows them stand in for a name match: a small
+    company often runs its site under a brand that reads nothing like its legal
+    name, but its phone number and address are its own. Org-number proof still
+    outranks this (it alone waives the venue-page and foreign-domain rules).
+
+    `alternate_names` are other names this same entity is registered
     under (its own former names, from the live registry record): a company
     renamed recently often still runs its site under the old name, so the
     page is matched against those too. The caller is responsible for
@@ -955,28 +967,43 @@ def verify_discovered_site(
     # inference. Without this, every real company trading under a brand name
     # unrelated to its registered legal name is rejected.
     confirmed_by_org_number = org_number_confirmed
+    confirmed_by_contact = bool(hints) and page_confirms_contact(response.text, hints)
 
     identity_names = [legal_name] + [n for n in (alternate_names or []) if n]
     best_score = max(
         (name_similarity(name, c) for name in identity_names for c in name_candidates), default=0.0
     )
-    if not confirmed_by_org_number and best_score < NAME_MATCH_THRESHOLD:
+    identity_proven = confirmed_by_org_number or confirmed_by_contact
+    if not identity_proven and best_score < NAME_MATCH_THRESHOLD:
         return None
-    if not confirmed_by_org_number:
+    if not identity_proven:
         best_coverage = max(
             (_name_word_coverage(name, c) for name in identity_names for c in name_candidates), default=0.0
         )
         if best_coverage < MIN_NAME_WORD_COVERAGE:
             return None
-    if confirmed_by_org_number:
+    if identity_proven:
         best_score = 100.0
+
+    # The evidence is the company's own page: quote where it names the company
+    # (its org number, else the best-matching name, else its title), keep the
+    # page's hash, and record the address the request actually landed on.
+    span = org_number_span(response.text, org_number) if org_number_confirmed and org_number else None
+    if span is None and name_candidates:
+        span = max(name_candidates, key=lambda c: max(name_similarity(n, c) for n in identity_names))
+    if span is None:
+        span = page_heading(response.text)
+    landed = str(response.url)
+    value = landed if urlsplit(landed).netloc.lower().removeprefix("www.") == urlsplit(url).netloc.lower().removeprefix("www.") else url
 
     return ConfirmedFact(
         field_name="official_site",
-        value=url,
-        source_url=url,
+        value=value,
+        source_url=value,
         match_confidence=float(best_score),
         retrieved_at=retrieved_at,
+        content_hash=hashlib.sha256(response.text.encode("utf-8")).hexdigest(),
         extraction_method="discovery",
         source_class="external",
+        evidence_span=span,
     )
