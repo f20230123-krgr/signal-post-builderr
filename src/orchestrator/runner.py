@@ -33,6 +33,7 @@ from src.models.profile import CompanyProfile, EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
 from src.pipeline.assemble import assemble
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
+from src.pipeline.site_evidence import official_site_evidence
 from src.pipeline.discovery import (
     ProviderHealth,
     discover_candidate_site,
@@ -229,6 +230,7 @@ def _default_process_one(
         crawl_entity = dataclasses.replace(entity, official_site_candidate=discovered_site_fact.value)
 
     raw_facts = []
+    pages: list = []
     if crawl_entity.resolution_state == EvidenceState.AVAILABLE:
         pages = crawl(
             crawl_entity,
@@ -248,6 +250,11 @@ def _default_process_one(
     confirmed_facts = [c for c in (verify(f, crawl_entity) for f in raw_facts) if c is not None]
     if discovered_site_fact:
         confirmed_facts.append(discovered_site_fact)
+    elif crawl_entity.resolution_state == EvidenceState.AVAILABLE and crawl_entity.official_site_candidate:
+        # A registered website: back the claim with the site's own page.
+        site_evidence = official_site_evidence(pages, crawl_entity)
+        if site_evidence:
+            confirmed_facts.append(site_evidence)
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
     confirmed_facts += registry_facts

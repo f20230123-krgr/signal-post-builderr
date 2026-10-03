@@ -96,7 +96,12 @@ def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[Confirmed
     """
     registry_claim = _registry_claim(entity.official_site_candidate, entity)
     if registry_claim.state == EvidenceState.AVAILABLE:
-        return registry_claim
+        # A registered website is the identity anchor; when the crawl also has
+        # evidence FROM the site (see site_evidence.py) that is the better claim:
+        # it is sourced from a page we retrieved and quotes where it names the
+        # company, instead of citing a data file.
+        from_site = _first_matching(confirmed_facts, "official_site_evidence")
+        return _confirmed_claim(from_site) if from_site else registry_claim
 
     discovered = _first_matching(confirmed_facts, "official_site")
     if discovered:

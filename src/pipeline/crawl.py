@@ -142,6 +142,10 @@ class FetchedPage:
     # the entity's own official domain (see `ats_domains`) -- preserves the
     # link chain as evidence, per evaluator feedback.
     linked_from: Optional[str] = None
+    # Where the request actually ended up after redirects (abax.com ->
+    # abax.com/en-gb), when it differs from `url` and the page was fetched live
+    # rather than read from the cache. The site's own address as it resolves.
+    final_url: Optional[str] = None
 
 
 def _domain(url: str) -> str:
@@ -453,6 +457,7 @@ def crawl(
             # gate below, not after, or an exhausted budget would block a
             # fetch that costs nothing.
             cached_html = cache.get(url, date_bucket) if cache is not None else None
+            final_url: Optional[str] = None
 
             if cached_html is None and (budget_exhausted or not budget.can_spend_request()):
                 budget_exhausted = True
@@ -483,6 +488,8 @@ def crawl(
                     continue
 
                 if 200 <= response.status_code < 300:
+                    if str(response.url) != url:
+                        final_url = str(response.url)
                     sent, landed = urlsplit(url), urlsplit(str(response.url))
                     if (sent.scheme, sent.netloc) != (landed.scheme, landed.netloc) and _domain(str(response.url)) in allowed:
                         rebase[f"{sent.scheme}://{sent.netloc}"] = f"{landed.scheme}://{landed.netloc}"
@@ -504,7 +511,12 @@ def crawl(
             if cache is not None and cached_html is None:
                 cache.put(url, date_bucket, html)
 
-            pages.append(FetchedPage(url=url, raw_html=html, fetched_at=now(), fetch_state=EvidenceState.AVAILABLE, linked_from=linked_from))
+            pages.append(
+                FetchedPage(
+                    url=url, raw_html=html, fetched_at=now(), fetch_state=EvidenceState.AVAILABLE,
+                    linked_from=linked_from, final_url=final_url,
+                )
+            )
 
             if linked_from is None and follow_careers:
                 # The careers page is found by reading the links the company's
