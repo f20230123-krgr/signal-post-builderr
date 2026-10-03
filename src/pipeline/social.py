@@ -43,7 +43,10 @@ def _platform(host: str) -> Optional[str]:
 
 def canonical_social_profile_url(url: str) -> Optional[str]:
     """The company-profile URL in canonical form, or None when `url` is not one."""
-    parts = urlsplit(url.strip())
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:  # malformed link (unclosed IPv6 bracket)
+        return None
     if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
         return None
     platform = _platform(parts.netloc)

@@ -102,7 +102,10 @@ def _text(fragment: str) -> str:
 
 
 def _domain(url: str) -> str:
-    netloc = urlsplit(url).netloc.lower()
+    try:
+        netloc = urlsplit(url).netloc.lower()
+    except ValueError:  # malformed link (unclosed IPv6 bracket)
+        return ""
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 
@@ -124,7 +127,10 @@ def _anchors(html: str, base_url: str) -> list[tuple[str, str]]:
         raw = unescape(href.group(1).strip())
         if raw.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
-        out.append((urljoin(base_url, raw), _text(inner)))
+        try:
+            out.append((urljoin(base_url, raw), _text(inner)))
+        except ValueError:  # malformed href: skip it, don't fail the page
+            continue
     return out
 
 

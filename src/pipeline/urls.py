@@ -33,14 +33,19 @@ def normalize_url(url: str) -> str:
     """Canonicalize `url`: lowercase scheme/host, drop a leading "www.",
     drop the default port for the scheme, strip tracking query params and
     any fragment, and drop a trailing "/" (except on the bare root path)."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        # A malformed link on a real page (port 99999, an unclosed IPv6 bracket) is
+        # compared as written rather than crashing the company it was found on.
+        return url
 
     scheme = parts.scheme.lower()
     host = parts.hostname or ""
     host = host.lower()
     if host.startswith("www."):
         host = host[4:]
-    port = parts.port
     netloc = host
     if port is not None and str(port) != _DEFAULT_PORTS.get(scheme):
         netloc = f"{host}:{port}"

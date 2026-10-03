@@ -329,3 +329,16 @@ def test_a_listing_at_the_root_of_a_careers_subdomain_counts_roles_under_its_own
     [fact] = careers_page_facts(html, "https://career.example.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
 
     assert "lists 2 open roles" in fact.value
+
+
+def test_malformed_links_on_a_real_page_are_skipped_not_fatal():
+    html = (
+        '<a href="http://example.no:99999/karriere">Karriere</a><a href="http://[::1/jobs">Jobs</a>'
+        '<a href="https://www.example.no/karriere">Karriere</a>'
+    )
+
+    assert _links(html) == ["https://www.example.no/karriere"]
+    assert crawl(
+        _entity("https://example.com/"), BudgetGovernor(),
+        client=_client({"https://example.com/": html.replace("example.no", "example.com")}), follow_careers=True, follow_news=True,
+    )[0].url == "https://example.com/"

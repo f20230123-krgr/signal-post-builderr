@@ -95,3 +95,8 @@ def test_sameas_in_json_ld_is_filtered_the_same_way():
     values = [f.value for f in structured_facts(html, "https://acme.no", NOW) if f.field_name == "company_profile"]
 
     assert values == ["https://www.linkedin.com/company/acme/"]
+
+
+def test_a_malformed_link_is_not_a_profile_and_not_a_crash():
+    assert canonical_social_profile_url("https://[::1/linkedin.com/company/x") is None
+    assert social_profile_facts('<a href="http://[bad">x</a><a href="https://www.facebook.com/acme">f</a>', "https://acme.no", NOW)[0].value == "https://www.facebook.com/acme"

@@ -47,3 +47,13 @@ def test_same_normalized_url_matches_equivalent_variants():
 
 def test_same_normalized_url_rejects_different_paths():
     assert same_normalized_url("https://example.com/about", "https://example.com/careers") is False
+
+
+def test_a_malformed_link_is_compared_as_written_and_never_raises():
+    """A real site linked a URL with port 99999: normalize_url raised ValueError and
+    that took the whole company's profile down with it."""
+    from src.pipeline.urls import normalize_url
+
+    for bad in ("http://example.com:99999/jobs", "http://[::1/careers", "https://exa mple.com:abc/"):
+        assert normalize_url(bad) == bad
+    assert normalize_url("https://www.Example.com:443/a/") == "https://example.com/a"

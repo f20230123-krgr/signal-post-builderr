@@ -150,7 +150,10 @@ class FetchedPage:
 
 
 def _domain(url: str) -> str:
-    netloc = urlsplit(url).netloc.lower()
+    try:
+        netloc = urlsplit(url).netloc.lower()
+    except ValueError:  # malformed link (unclosed IPv6 bracket)
+        return ""
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 
@@ -334,7 +337,13 @@ def _discover_sitemap_urls(
 
 
 def _extract_outbound_links(html: str, page_url: str) -> list[str]:
-    return [urljoin(page_url, href) for href in _HREF_RE.findall(html)]
+    links: list[str] = []
+    for href in _HREF_RE.findall(html):
+        try:
+            links.append(urljoin(page_url, href))
+        except ValueError:  # malformed href: skip it, don't fail the page
+            continue
+    return links
 
 
 _FEED_LINK_RE = re.compile(
