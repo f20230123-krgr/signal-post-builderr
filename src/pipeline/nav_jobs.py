@@ -70,6 +70,34 @@ def normalize_employer_name(name: str) -> str:
     return " ".join(str(name).upper().split())
 
 
+_LEGAL_SUFFIXES = {"AS", "ASA", "ANS", "DA", "SA", "ENK", "NUF", "BA", "KS", "IKS", "STIFTELSE"}
+_PUNCTUATION_RE = re.compile(r"[^\w\s]|_", re.UNICODE)
+# Words too common to identify an employer on their own.
+_GENERIC_WORDS = {"NORGE", "NORWAY", "HOLDING", "GRUPPEN", "GROUP", "EIENDOM", "INVEST", "SERVICE", "DRIFT", "KOMMUNE", "THE", "OG"}
+MAX_NAME_MATCH_CANDIDATES = 12
+
+
+def employer_tokens(name: str) -> list[str]:
+    """The distinctive words of an employer name: upper case, no punctuation, no
+    trailing legal-form words ("Fjord1 - Maritim Drift, Fjord1 AS" -> FJORD1 MARITIM
+    DRIFT FJORD1)."""
+    words = _PUNCTUATION_RE.sub(" ", str(name).upper()).split()
+    while words and words[-1] in _LEGAL_SUFFIXES:
+        words.pop()
+    return words
+
+
+def _contains_run(haystack: list[str], needle: list[str]) -> bool:
+    n = len(needle)
+    return n > 0 and any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
+
+
+def _distinctive(tokens: list[str]) -> bool:
+    """Enough to stand for a company on its own: two or more words, or one long
+    word that is not a generic one."""
+    return len(tokens) >= 2 or (len(tokens) == 1 and len(tokens[0]) >= 5 and tokens[0] not in _GENERIC_WORDS)
+
+
 @dataclass
 class NavJobIndex:
     token: Optional[str] = None
@@ -82,10 +110,47 @@ class NavJobIndex:
     def active_ads(self) -> int:
         return sum(len(ads) for ads in self.ads_by_employer.values())
 
+    def _token_index(self) -> dict[str, list[tuple[str, list[str]]]]:
+        """word -> [(employer key, its tokens)], built once and reused by every
+        company (the list is read-only after the index is built)."""
+        index = self.__dict__.get("_tokens")
+        if index is None or self.__dict__.get("_tokens_for") != len(self.ads_by_employer):
+            index = {}
+            for key in self.ads_by_employer:
+                tokens = employer_tokens(key)
+                for word in set(tokens):
+                    index.setdefault(word, []).append((key, tokens))
+            self.__dict__["_tokens"], self.__dict__["_tokens_for"] = index, len(self.ads_by_employer)
+        return index
+
     def candidates_for(self, legal_name: Optional[str]) -> list[dict]:
+        """Ads whose employer NAME could be this company, exact matches first.
+
+        The feed's list items carry only a display name ("Fjord1 - Maritim Drift,
+        Fjord1 AS", "Universitetet i Agder (UiA)"), never an org number, so a company
+        is also matched when its distinctive name appears as a run of words inside the
+        employer name, or the reverse. This only chooses which ads to fetch: an ad is
+        published only if the ad's own employer org number is the company's (see
+        nav_hiring_signal_facts), so a loose name match can cost a request but never
+        attribute an ad to the wrong company."""
         if not legal_name:
             return []
-        return self.ads_by_employer.get(normalize_employer_name(legal_name), [])
+        exact = self.ads_by_employer.get(normalize_employer_name(legal_name), [])
+        wanted = employer_tokens(legal_name)
+        found: dict[str, int] = {}
+        if _distinctive(wanted):
+            for key, tokens in self._token_index().get(wanted[0], []) + (
+                self._token_index().get(wanted[-1], []) if wanted[-1] != wanted[0] else []
+            ):
+                if key == normalize_employer_name(legal_name) or key in found:
+                    continue
+                # Only the forward direction: the employer name must CONTAIN the company's
+                # name. The reverse ("EUROPE" inside "22ND CENTURY BY DESIGN EUROPE")
+                # matched unrelated employers.
+                if _contains_run(tokens, wanted):
+                    found[key] = len(tokens)
+        ordered = [self.ads_by_employer[k] for k in sorted(found, key=lambda k: (found[k], k))[:MAX_NAME_MATCH_CANDIDATES]]
+        return list(exact) + [ad for ads in ordered for ad in ads]
 
     def report(self) -> dict:
         return {
