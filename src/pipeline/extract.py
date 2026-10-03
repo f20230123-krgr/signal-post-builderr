@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from typing import Callable, Literal, Optional
 from urllib.parse import parse_qs, urljoin, urlsplit
 
+from email.utils import parsedate_to_datetime
+
 import extruct
 import trafilatura
 
@@ -438,6 +440,16 @@ def _feed_text(raw: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", unwrapped)).strip()
 
 
+def _feed_iso_date(published: str) -> Optional[str]:
+    """YYYY-MM-DD from an RSS (RFC 2822) or Atom (ISO 8601) timestamp, else None."""
+    try:
+        return parsedate_to_datetime(published).date().isoformat()
+    except (TypeError, ValueError, IndexError):
+        pass
+    match = re.match(r"\s*(\d{4})-(\d{2})-(\d{2})", published)
+    return f"{match.group(1)}-{match.group(2)}-{match.group(3)}" if match else None
+
+
 def looks_like_feed(content: str) -> bool:
     head = content[:2000].lower()
     return "<rss" in head or "<feed" in head or "<rdf:rdf" in head
@@ -461,8 +473,12 @@ def feed_activity_facts(content: str, source_url: str, extracted_at: datetime) -
         published = _feed_text(date_match.group(1))
         if not title or not published:
             continue
+        iso = _feed_iso_date(published)
         facts.append(
-            RawFact("dated_activity", f"{title} ({published})", source_url, "structured", extracted_at)
+            RawFact(
+                "dated_activity", f"{title} ({iso or published})", source_url, "structured", extracted_at,
+                evidence_span=title, effective_date=iso,
+            )
         )
         if len(facts) >= MAX_FEED_ACTIVITY_ENTRIES:
             break

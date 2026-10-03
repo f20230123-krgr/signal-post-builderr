@@ -25,7 +25,8 @@ def test_dates_are_read_in_the_formats_norwegian_and_english_sites_use():
 def test_implausible_dates_are_not_dates():
     assert parse_date("31.02.2024", TODAY) is None  # no such day
     assert parse_date("copyright 1999-01-01", TODAY) is None  # before 2000
-    assert parse_date("2030-01-01", TODAY) is None  # more than a year ahead
+    assert parse_date("2026-12-01", TODAY) is None  # two months ahead: an event teaser, not news
+    assert parse_date("2026-10-20", TODAY) == "2026-10-20"  # soon: allowed
     assert parse_date("no date here", TODAY) is None
 
 

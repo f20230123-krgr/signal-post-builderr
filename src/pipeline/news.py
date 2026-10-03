@@ -51,6 +51,7 @@ MAX_NEWS_PAGES = 2
 _MIN_TITLE_LEN = 8
 _MAX_TITLE_LEN = 200
 _FIRST_PLAUSIBLE_YEAR = 2000
+_MAX_DAYS_AHEAD = 30
 
 
 def _valid(year: int, month: int, day: int, today: date) -> Optional[str]:
@@ -59,8 +60,8 @@ def _valid(year: int, month: int, day: int, today: date) -> Optional[str]:
     except ValueError:
         return None
     # No dates from long ago that are really copyright years or sample text, and
-    # none from the future beyond a campaign or event a year out.
-    if parsed.year < _FIRST_PLAUSIBLE_YEAR or (parsed - today).days > 366:
+    # none more than a month ahead: an event teaser is not news.
+    if parsed.year < _FIRST_PLAUSIBLE_YEAR or (parsed - today).days > _MAX_DAYS_AHEAD:
         return None
     return parsed.isoformat()
 

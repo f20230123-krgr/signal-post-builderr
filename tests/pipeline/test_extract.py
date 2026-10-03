@@ -504,6 +504,9 @@ def test_rss_feed_entries_become_dated_activity():
 
     assert any("Acme opens Bergen office" in v and "2026" in v for v in values)
     assert all(f.field_name == "dated_activity" for f in facts)
+    first = next(f for f in facts if "Bergen" in f.value)
+    assert first.value == "Acme opens Bergen office (2026-09-01)"
+    assert first.effective_date == "2026-09-01" and first.evidence_span == "Acme opens Bergen office"
 
 
 def test_atom_feed_entries_become_dated_activity():
