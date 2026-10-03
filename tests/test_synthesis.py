@@ -280,3 +280,85 @@ def test_a_legal_form_without_a_plain_phrase_is_stated_as_its_code():
 
     assert "is a registered Norwegian entity (legal form ESEK)" in text
     assert "a ESEK" not in text
+
+
+# --- accounts from discrete figures, and the trend -------------------------------
+
+def _with_figures(profile, **by_period):
+    """Attach discrete figure claims: _with_figures(p, revenue={"FY2025": "120 NOK", "FY2024": "100 NOK"})."""
+    for name, periods in by_period.items():
+        profile.annual_accounts.metrics[name] = [
+            available_claim(value, reporting_period=period, effective_date=f"{period[2:]}-12-31")
+            for period, value in periods.items()
+        ]
+    return profile
+
+
+def test_the_accounts_sentence_uses_the_latest_periods_discrete_figures():
+    from src.synthesis import build_summary
+
+    profile = _with_figures(
+        make_profile(org_number="923609016", legal_name=available_claim("ACME AS")),
+        revenue={"FY2025": "1,200 NOK", "FY2024": "1,000 NOK"},
+        annual_result={"FY2025": "90 NOK", "FY2024": "70 NOK"},
+        total_assets={"FY2025": "5,000 NOK"},
+    )
+
+    text = build_summary(profile).text
+
+    assert "Latest filed accounts (FY2025, period ending 2025-12-31): revenue 1,200 NOK, net result 90 NOK, total assets 5,000 NOK." in text
+
+
+def test_the_trend_is_computed_from_the_two_sourced_revenues_and_quotes_both():
+    from src.synthesis import build_summary
+
+    profile = _with_figures(
+        make_profile(org_number="923609016", legal_name=available_claim("ACME AS")),
+        revenue={"FY2025": "1,200 NOK", "FY2024": "1,000 NOK"},
+        annual_result={"FY2025": "90 NOK", "FY2024": "70 NOK"},
+    )
+
+    text = build_summary(profile).text
+
+    assert "Revenue up 20.0% from FY2024 to FY2025 (1,000 NOK to 1,200 NOK); net result 70 NOK to 90 NOK." in text
+
+
+def test_a_decline_is_stated_as_a_decline():
+    from src.synthesis import build_summary
+
+    profile = _with_figures(make_profile(legal_name=available_claim("ACME AS")), revenue={"FY2025": "750 NOK", "FY2024": "1,000 NOK"})
+
+    assert "Revenue down 25.0% from FY2024 to FY2025" in build_summary(profile).text
+
+
+def test_no_trend_is_stated_across_currencies_from_zero_or_with_a_single_year():
+    from src.synthesis import build_summary
+
+    base = lambda: make_profile(legal_name=available_claim("ACME AS"))
+    mixed = _with_figures(base(), revenue={"FY2025": "1,200 USD", "FY2024": "1,000 NOK"})
+    zero = _with_figures(base(), revenue={"FY2025": "1,200 NOK", "FY2024": "0 NOK"})
+    single = _with_figures(base(), revenue={"FY2025": "1,200 NOK"})
+
+    for profile in (mixed, zero, single):
+        assert "Revenue up" not in build_summary(profile).text and "Revenue down" not in build_summary(profile).text
+
+
+def test_the_trend_sentence_cites_the_claims_it_is_computed_from():
+    from src.pipeline.envelope import to_envelope
+
+    profile = _with_figures(
+        make_profile(org_number="923609016", legal_name=available_claim("ACME AS")),
+        revenue={"FY2025": "1,200 NOK", "FY2024": "1,000 NOK"},
+    )
+
+    sentence = next(s for s in to_envelope(profile, run_id="r")["summary"]["sentences"] if s["text"].startswith("Revenue up"))
+
+    assert len(sentence["evidence_ids"]) >= 1 and sentence["fields"] == ["revenue", "annual_result"]
+
+
+def test_annual_accounts_are_not_reported_unknown_when_only_discrete_figures_exist():
+    from src.synthesis import build_summary
+
+    profile = _with_figures(make_profile(legal_name=available_claim("ACME AS")), revenue={"FY2025": "1,200 NOK"})
+
+    assert "annual accounts" not in build_summary(profile).unknowns

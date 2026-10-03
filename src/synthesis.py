@@ -317,7 +317,47 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     return SummarySentence(text, ["legal_name", "legal_form", "industry", "founded_date", "operating_status", "employee_count"], claims)
 
 
+_METRIC_WORDS = [
+    ("revenue", "revenue"), ("operating_result", "operating result"), ("annual_result", "net result"),
+    ("total_assets", "total assets"), ("total_equity", "equity"), ("total_debt", "debt"),
+]
+_AMOUNT_RE = re.compile(r"^(-?[\d,]+)\s*([A-Z]{3})?$")
+
+
+def _amount(value: str) -> Optional[tuple[int, str]]:
+    match = _AMOUNT_RE.match(value.strip())
+    return (int(match.group(1).replace(",", "")), match.group(2) or "") if match else None
+
+
+def _metric_by_period(profile: CompanyProfile, name: str) -> dict[str, Claim]:
+    """The available claims of one figure, keyed by their reporting period."""
+    return {
+        c.reporting_period: c
+        for c in profile.annual_accounts.metrics.get(name, [])
+        if c.state == EvidenceState.AVAILABLE and c.value and c.reporting_period
+    }
+
+
 def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    """The latest filing's figures, from the discrete claims when there are any
+    (each with its own period), else from the combined latest-accounts claim."""
+    revenue_periods = {
+        period for name, _ in _METRIC_WORDS for period in _metric_by_period(profile, name)
+    }
+    if revenue_periods:
+        period = max(revenue_periods)
+        claims, parts = [], []
+        for name, word in _METRIC_WORDS:
+            claim = _metric_by_period(profile, name).get(period)
+            if claim:
+                claims.append(claim)
+                parts.append(f"{word} {claim.value}")
+        end = f", period ending {claims[0].effective_date[:10]}" if claims[0].effective_date else ""
+        return SummarySentence(
+            f"Latest filed accounts ({period}{end}): " + ", ".join(parts) + ".",
+            [name for name, _ in _METRIC_WORDS], claims,
+        )
+
     claim = profile.annual_accounts.latest
     value = _value_or_none(claim)
     if value is None:
@@ -328,6 +368,34 @@ def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     if history:
         text += f" {len(history)} earlier filing{'s' if len(history) != 1 else ''} on record."
     return SummarySentence(text, ["annual_accounts_latest", "annual_accounts_history"], [claim] + history[:1])
+
+
+def _trend_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    """How the company is doing: the change in revenue between its two newest
+    filings, computed from the two sourced figures and quoted with both. Only when
+    both are in the same currency and the earlier one is not zero."""
+    revenue = _metric_by_period(profile, "revenue")
+    if len(revenue) < 2:
+        return None
+    newest, previous = sorted(revenue, reverse=True)[:2]
+    a, b = _amount(revenue[newest].value), _amount(revenue[previous].value)
+    if not a or not b or a[1] != b[1] or b[0] == 0:
+        return None
+    change = (a[0] - b[0]) / abs(b[0]) * 100
+    direction = "up" if change > 0.05 else "down" if change < -0.05 else "flat"
+    text = (
+        f"Revenue {direction} {abs(change):.1f}% from {previous} to {newest} "
+        f"({revenue[previous].value} to {revenue[newest].value})"
+        if direction != "flat" else f"Revenue flat between {previous} and {newest} ({revenue[newest].value})"
+    )
+    result = _metric_by_period(profile, "annual_result")
+    claims = [revenue[newest], revenue[previous]]
+    if newest in result and previous in result:
+        r_new, r_old = _amount(result[newest].value), _amount(result[previous].value)
+        if r_new and r_old and r_new[1] == r_old[1]:
+            text += f"; net result {result[previous].value} to {result[newest].value}"
+            claims += [result[newest], result[previous]]
+    return SummarySentence(text + ".", ["revenue", "annual_result"], claims)
 
 
 def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
@@ -421,7 +489,7 @@ def build_summary(profile: CompanyProfile) -> Summary:
     support, and every gap is named under `unknowns` instead of guessed."""
     as_of = profile.run_timestamp.date().isoformat()
     builders = (
-        _identity_sentence, _accounts_sentence, _leadership_sentence, _workplaces_sentence,
+        _identity_sentence, _accounts_sentence, _trend_sentence, _leadership_sentence, _workplaces_sentence,
         _web_sentence, _hiring_sentence, _activity_sentence,
     )
     sentences = [s for s in (build(profile) for build in builders) if s is not None]
@@ -431,7 +499,7 @@ def build_summary(profile: CompanyProfile) -> Summary:
         unknowns.append("official website")
     if not profile.online_presence.company_profiles:
         unknowns.append("company-owned social profiles")
-    if _value_or_none(profile.annual_accounts.latest) is None:
+    if _value_or_none(profile.annual_accounts.latest) is None and not profile.annual_accounts.metrics:
         unknowns.append("annual accounts")
     if not profile.leadership.leaders:
         unknowns.append("leadership")
