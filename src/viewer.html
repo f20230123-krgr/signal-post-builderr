@@ -204,7 +204,7 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
     </div>
     <ul class="list" id="list"></ul>
   </section>
-  <main id="main" tabindex="-1"></main>
+  <main id="main" tabindex="-1"><div class="wrap"><div class="card"><h2>Loading</h2><p>Reading the company data embedded in this page. If this message stays, the page is not running its script: open the file in Chrome, Edge, Firefox or Safari rather than a preview pane.</p></div></div></main>
 </div>
 
 <div class="tray" id="tray" role="region" aria-label="Comparison">
@@ -218,6 +218,16 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
 
 <noscript>{{NOSCRIPT}}</noscript>
 
+<script>
+/* Registered first so that a failure anywhere below shows up on the page instead of leaving it blank. */
+window.addEventListener("error", function (ev) {
+  var m = document.getElementById("main");
+  if (m && !m.dataset.ready) {
+    m.innerHTML = '<div class="wrap"><div class="card"><h2>The viewer could not start</h2><p></p><p>Open the browser console for details.</p></div></div>';
+    m.querySelector("p").textContent = String(ev && ev.message ? ev.message : "unknown error");
+  }
+});
+</script>
 <script type="application/json" id="atlas-data">{{ATLAS_DATA}}</script>
 <script>
 "use strict";
@@ -601,6 +611,7 @@ try { const t = localStorage.getItem("atlas-theme"); if (t === "dark" || t === "
 
 $("#asof").textContent = "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
 renderTools(); renderTray(); route();
+$("#main").dataset.ready = "1";
 })();
 </script>
 </body>

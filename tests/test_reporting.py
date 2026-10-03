@@ -115,7 +115,7 @@ def test_embedded_data_cannot_close_the_script_element():
 
     html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
 
-    assert html.count("</script>") == 2  # the data block and the app script only
+    assert html.count("</script>") == 3  # the error handler, the data block and the app script only
 
 
 def test_the_viewer_offers_find_compare_and_verify():
