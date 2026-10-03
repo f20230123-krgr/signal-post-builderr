@@ -30,6 +30,7 @@ import trafilatura
 from src.pipeline.careers import careers_page_facts, is_careers_url
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
 from src.pipeline.news import news_item_facts
+from src.pipeline.social import social_profile_link
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
@@ -300,8 +301,9 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
             # _is_acceptable_social_profile_url): sameAs used to publish any
             # string verbatim, with no host check and no share/intent filter.
             for link in same_as:
-                if isinstance(link, str) and link and _is_acceptable_social_profile_url(link):
-                    facts.append(RawFact("company_profile", link, source_url, "structured", extracted_at, context_name=context_name))
+                found = social_profile_link(link) if isinstance(link, str) and link and not _SOCIAL_NON_PROFILE_RE.search(link) else None
+                if found:
+                    facts.append(RawFact("company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name))
     return facts
 
 
@@ -406,11 +408,12 @@ def social_profile_facts(
 
     for href in candidates:
         link = href.strip()
-        if link in seen or not _is_acceptable_social_profile_url(link):
+        found = social_profile_link(link) if not _SOCIAL_NON_PROFILE_RE.search(link) else None
+        if found is None or found[1] in seen:
             continue
-        seen.add(link)
+        seen.add(found[1])
         facts.append(
-            RawFact("company_profile", link, source_url, "structured", extracted_at, context_name=context_name)
+            RawFact("company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name)
         )
         if len(facts) >= MAX_SOCIAL_PROFILE_LINKS:
             break
