@@ -83,6 +83,13 @@ CompanyProfile:
   annual_accounts:
     latest: Claim
     history: list[Claim]
+    # Discrete figures of the newest two filings, keyed by claim field:
+    # revenue, operating_result, profit_before_tax, annual_result, total_assets,
+    # total_equity, total_debt, plus annual_report_pdf (link to the filed
+    # accounts). Each claim has reporting_period ("FY2025"), effective_date (the
+    # period end) and an evidence_span quoting the filing's own text. A figure the
+    # filing does not state is omitted, never zero.
+    metrics: dict[str, list[Claim]]
 
   # 3. Leadership and registered workplaces
   leadership:
