@@ -268,3 +268,15 @@ def test_summary_has_no_sentences_about_missing_facts():
     text = build_summary(make_profile(org_number="923609016")).text
 
     assert "Hiring:" not in text and "Latest filed accounts" not in text and "Run by" not in text
+
+
+def test_a_legal_form_without_a_plain_phrase_is_stated_as_its_code():
+    from src.synthesis import build_summary
+
+    profile = make_profile(org_number="818751362", legal_name=available_claim("HAUGE BYGARD"))
+    profile.legal_identity.legal_form = available_claim("ESEK")
+
+    text = build_summary(profile).text
+
+    assert "is a registered Norwegian entity (legal form ESEK)" in text
+    assert "a ESEK" not in text

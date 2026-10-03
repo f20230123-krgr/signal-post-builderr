@@ -33,6 +33,7 @@ from src.models.profile import (
     OnlinePresence,
     RefreshMetadata,
 )
+from src.pipeline.careers import CAREERS_VALUE_PREFIX
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact
 from src.storage.snapshots import diff_material_changes
@@ -152,6 +153,27 @@ def _dedup_claims(claims: list[Claim]) -> list[Claim]:
     return deduped
 
 
+MAX_CAREERS_CLAIMS = 2
+
+
+def _limit_careers_claims(claims: list[Claim]) -> list[Claim]:
+    """At most MAX_CAREERS_CLAIMS careers-page claims per company, role-level
+    ones first and, among bare pages, the shortest URL (the main careers page
+    rather than a sub-page or a language copy). Other hiring signals (a NAV ad,
+    a JSON-LD JobPosting) are never touched. A site that publishes /career,
+    /career/apprentices and /career/job-opportunities is one careers page, not
+    three signals."""
+    def is_careers(claim: Claim) -> bool:
+        return bool(claim.value) and claim.value.startswith(CAREERS_VALUE_PREFIX)
+
+    careers = [c for c in claims if is_careers(c)]
+    if len(careers) <= MAX_CAREERS_CLAIMS:
+        return claims
+    role_level = [c for c in careers if " open roles" in c.value]
+    keep = role_level[:MAX_CAREERS_CLAIMS] or sorted(careers, key=lambda c: len(c.value))[:MAX_CAREERS_CLAIMS]
+    return [c for c in claims if not is_careers(c) or c in keep]
+
+
 def assemble(
     entity: ResolvedEntity,
     confirmed_facts: list[ConfirmedFact],
@@ -176,7 +198,9 @@ def assemble(
     company_profile_claims = _dedup_claims(
         [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "company_profile")]
     )
-    hiring_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
+    hiring_claims = _limit_careers_claims(
+        _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
+    )
     dated_activity_claims = _dedup_claims(
         [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")]
     )

@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 
 from rapidfuzz import fuzz
 
+from src.pipeline.careers import CAREERS_VALUE_PREFIX
 from src.pipeline.extract import RawFact
 from src.pipeline.resolve import ResolvedEntity
 
@@ -130,6 +131,18 @@ def _is_housing_coop(legal_name: str) -> bool:
     return any(term in lowered for term in _HOUSING_COOP_TERMS)
 
 
+_LANGUAGE_SEGMENTS = {"no", "nb", "nn", "en", "se", "sv", "da", "dk", "de", "fi", "nor", "eng", "norsk", "english"}
+
+
+def _site_is_a_page_of_a_larger_site(site_url: str) -> bool:
+    """True when the registered website is a deep page rather than a site root
+    (e.g. https://group.no/our-kindergartens/branch-x/). Such a company is one
+    unit of a bigger site, so the site's careers page belongs to the group, not
+    to this company. A language prefix (/en, /no) is not depth."""
+    segments = [s for s in urlsplit(site_url).path.split("/") if s]
+    return any(s.lower() not in _LANGUAGE_SEGMENTS for s in segments)
+
+
 def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     """
     Return a ConfirmedFact if `fact`'s source page identity matches `entity`
@@ -150,6 +163,15 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     via_official_link_chain = fact.linked_from is not None and _domain(fact.linked_from) == official_domain
 
     if not on_official_domain and not via_official_link_chain:
+        return None
+
+    # A careers page found on a site this company only occupies a page of is the
+    # larger organisation's hiring page, not this company's: skip it.
+    if (
+        fact.field_name == "hiring_signal"
+        and fact.value.startswith(CAREERS_VALUE_PREFIX)
+        and _site_is_a_page_of_a_larger_site(entity.official_site_candidate)
+    ):
         return None
 
     # Hard filter: a housing co-op's own official_site claim is exactly how

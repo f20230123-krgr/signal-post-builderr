@@ -305,8 +305,13 @@ const SORTS = {
 function setView(v) { state.view = v; document.body.dataset.view = v; }
 function claimClass(c, claim) { const e = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean)[0]; return e ? e.source_class : ""; }
 function valueHtml(v) {
-  if (isUrl(v)) return '<a href="' + esc(v) + '" target="_blank" rel="noopener noreferrer">' + esc(v) + "</a>";
-  return esc(v);
+  // A value may be a bare URL or prose containing one ("Careers page: https://..."):
+  // every http(s) URL in it becomes a link, everything else stays escaped text.
+  return String(v == null ? "" : v).split(/(https?:\/\/[^\s"'<>]+)/).map((part, i) => {
+    if (i % 2 === 0) return esc(part);
+    const url = part.replace(/[.,;:)]+$/, ""), tail = part.slice(url.length);
+    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(url) + "</a>" + esc(tail);
+  }).join("");
 }
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));

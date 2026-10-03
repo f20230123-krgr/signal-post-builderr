@@ -237,6 +237,7 @@ def _default_process_one(
             company_owned_paths=DEFAULT_COMPANY_OWNED_PATHS,
             use_sitemap=True,
             ats_domains=DEFAULT_ATS_DOMAINS,
+            follow_careers=True,
             cache=cache,
             now=now,
         )

@@ -34,6 +34,7 @@ import httpx
 
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor
+from src.pipeline.careers import find_careers_links
 from src.pipeline.net import UnsafeOutboundUrl, new_client
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.urls import normalize_url
@@ -100,10 +101,23 @@ MAX_SITEMAP_URLS = 20
 # each fetched and inspected directly, and both render a genuine
 # "@type": "JobPosting" JSON-LD block. Norwegian-market platforms, unlike
 # the rest of this list, which is mostly US-centric.
+#
+# The Norwegian and Nordic platforms below were added for hiring-signal coverage
+# (the pool's hiring facts are careers pages): a link FROM the company's own site
+# to one of them is the company pointing at its own vacancies page. Shared job
+# aggregators (e.g. jobbnorge.no, finn.no) are deliberately NOT here -- a page
+# there can list other employers.
 DEFAULT_ATS_DOMAINS = {
     "greenhouse.io", "lever.co", "workable.com", "teamtailor.com", "myworkdayjobs.com",
     "recman.no", "jobylon.com",
+    "webcruiter.no", "webcruiter.com", "easycruit.com", "hr-manager.net", "hrmanager.no", "varbi.com",
+    "emply.com", "emply.net", "homerun.co", "personio.de", "personio.com", "bamboohr.com",
+    "smartrecruiters.com", "ashbyhq.com", "recruitee.com", "breezy.hr",
 }
+# Hiring pages followed per company, so a site with a job board linking out to a
+# hundred postings can't turn into a crawl of its own.
+MAX_CAREERS_PAGES = 2
+MAX_ATS_PAGES = 3
 
 # A fetched page whose visible text (tags/scripts/styles stripped) is shorter
 # than this is treated as a JS-shell candidate for the Playwright fallback.
@@ -350,6 +364,7 @@ def crawl(
     company_owned_paths: Optional[list[str]] = None,
     use_sitemap: bool = False,
     ats_domains: Optional[set[str]] = None,
+    follow_careers: bool = False,
     cache: Optional[ResponseCache] = None,
     render_js: Optional[Callable[[str], str]] = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -366,7 +381,9 @@ def crawl(
     (respecting Disallow) and sitemap.xml to discover real same-domain pages
     instead of guessing a fixed path list. `ats_domains`, if given, follows
     outbound links found on official-domain pages to those specific external
-    domains only (see module docstring). `cache`, if given, makes a repeat
+    domains only (see module docstring). `follow_careers`, if True, also
+    follows up to MAX_CAREERS_PAGES careers/jobs links found on the entity's own
+    pages (see src/pipeline/careers.py). `cache`, if given, makes a repeat
     fetch of the same (url, date_bucket) free against the request budget.
     All opt-in (default None/False) so existing single-URL callers/tests are
     unaffected.
@@ -418,6 +435,9 @@ def crawl(
         # of paying for the same redirect hop on every page.
         failures: dict[str, int] = {}
         rebase: dict[str, str] = {}
+        careers_followed = 0
+        ats_followed = 0
+        queued_links: set[str] = set()
 
         while queue:
             url, linked_from = queue.pop(0)
@@ -486,9 +506,41 @@ def crawl(
 
             pages.append(FetchedPage(url=url, raw_html=html, fetched_at=now(), fetch_state=EvidenceState.AVAILABLE, linked_from=linked_from))
 
+            if linked_from is None and follow_careers:
+                # The careers page is found by reading the links the company's
+                # own pages already contain -- never by guessing paths -- so a
+                # site with no careers link costs nothing. A link to the same
+                # site (or a subdomain such as karriere.example.no) or to a
+                # known applicant-tracking platform qualifies.
+                official_domain = _domain(entity.official_site_candidate)
+                for link in find_careers_links(html, url, official_domain, ats_domains):
+                    if careers_followed >= MAX_CAREERS_PAGES:
+                        break
+                    normalized_link = normalize_url(link)
+                    if normalized_link in seen_normalized or normalized_link in queued_links:
+                        continue
+                    careers_followed += 1
+                    queued_links.add(normalized_link)
+                    if _domain(link) == official_domain:
+                        # Plain provenance. (Linked entries are de-duplicated when
+                        # popped; unlinked ones must be marked seen here.)
+                        seen_normalized.add(normalized_link)
+                        queue.append((link, None))
+                    else:
+                        # A subdomain or an ATS host: reached by a link chain.
+                        queue.append((link, url))
             if ats_domains and linked_from is None:
                 for link in _extract_outbound_links(html, url):
-                    if _domain_matches_any(_domain(link), ats_domains) and normalize_url(link) not in seen_normalized:
+                    if ats_followed >= MAX_ATS_PAGES:
+                        break
+                    normalized_link = normalize_url(link)
+                    if (
+                        _domain_matches_any(_domain(link), ats_domains)
+                        and normalized_link not in seen_normalized
+                        and normalized_link not in queued_links
+                    ):
+                        ats_followed += 1
+                        queued_links.add(normalized_link)
                         queue.append((link, url))
 
             # A declared RSS/Atom feed is the company's own published

@@ -25,7 +25,8 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 import extruct
 import trafilatura
 
-from src.pipeline.crawl import FetchedPage
+from src.pipeline.careers import careers_page_facts, is_careers_url
+from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
@@ -534,6 +535,10 @@ def extract(
     facts += _meta_tag_facts(page.raw_html, page.url, extracted_at)
     facts += _activity_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
     facts += social_profile_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
+    if is_careers_url(page.url, DEFAULT_ATS_DOMAINS):
+        facts += careers_page_facts(
+            page.raw_html, page.url, extracted_at, context_name=page_context_name, ats_domains=DEFAULT_ATS_DOMAINS
+        )
 
     content_hash = hashlib.sha256(page.raw_html.encode("utf-8")).hexdigest()
     for fact in facts:

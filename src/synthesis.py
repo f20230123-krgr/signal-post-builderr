@@ -17,6 +17,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
+from src.pipeline.careers import CAREERS_VALUE_PREFIX
 
 
 def _value_or_none(claim: Claim) -> str | None:
@@ -295,9 +296,14 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     status = _optional_value(li.operating_status)
     employees = _optional_value(li.employee_count)
 
-    text = f"{name} (org. no. {profile.org_number}) is a {_LEGAL_FORMS.get(form, form)}" if form else (
-        f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity"
-    )
+    # A form code we have no plain-English phrase for is stated as the code, not
+    # forced into "is a ESEK".
+    if form in _LEGAL_FORMS:
+        text = f"{name} (org. no. {profile.org_number}) is a {_LEGAL_FORMS[form]}"
+    elif form:
+        text = f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity (legal form {form})"
+    else:
+        text = f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity"
     if industry:
         text += f" in the industry {industry}"
     if founded:
@@ -383,10 +389,18 @@ def _hiring_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     signals = [c for c in profile.activity.hiring_signals if c.state == EvidenceState.AVAILABLE and c.value]
     if not signals:
         return None
-    first = signals[0]
+    # Role-level evidence ("Careers page lists 3 open roles, e.g. ...") is a
+    # hiring statement; a bare "Careers page: <url>" only says the page exists,
+    # and the summary must not say more than the claim does.
+    def only_a_page(claim: Claim) -> bool:
+        return claim.value.startswith(CAREERS_VALUE_PREFIX) and " open roles" not in claim.value
+
+    ranked = sorted(signals, key=only_a_page)  # role-level evidence first
+    first = ranked[0]
     when = f" (seen {_day(first)})" if _day(first) else ""
     more = f" and {len(signals) - 1} more" if len(signals) > 1 else ""
-    return SummarySentence(f"Hiring: {first.value}{more}{when}.", ["hiring_signal"], [first])
+    label = "Careers" if only_a_page(first) else "Hiring"
+    return SummarySentence(f"{label}: {first.value}{more}{when}.", ["hiring_signal"], [first])
 
 
 def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
