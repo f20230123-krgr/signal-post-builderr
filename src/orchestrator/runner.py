@@ -140,6 +140,17 @@ def _default_process_one(
     site_hints = live_details.hints
     site_hints.nav_homepages = nav_homepages
 
+    # The live registry record often states a website the universe snapshot lacks
+    # (65 of 78 notable companies without one in the snapshot had it live). It is the
+    # registry's own statement, so it is used exactly like a registered website: no
+    # discovery, and the crawl and verification treat it as the official site.
+    if (
+        entity.resolution_state == EvidenceState.AVAILABLE
+        and entity.official_site_candidate is None
+        and live_details.website is not None
+    ):
+        entity = dataclasses.replace(entity, official_site_candidate=live_details.website.value)
+
     discovered_site_fact = None
     if (
         entity.resolution_state == EvidenceState.AVAILABLE
@@ -295,6 +306,8 @@ def _default_process_one(
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
     confirmed_facts += registry_facts
+    if live_details.website is not None:
+        confirmed_facts.append(live_details.website)  # cites the live record (see assemble)
     # Industry/employees/legal form/status straight out of the universe record
     # already in memory -- zero requests, same registry trust tier.
     confirmed_facts += universe_identity_facts(org_number, universe_entry, now())

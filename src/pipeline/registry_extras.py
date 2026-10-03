@@ -33,6 +33,7 @@ import hashlib
 import json
 import re
 import time
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -589,6 +590,30 @@ class LiveRegistryDetails:
     # E-mail, phone and address the company registered: candidates and
     # corroboration for website discovery (see keyless_sites.py).
     hints: SiteHints = field(default_factory=SiteHints)
+    # The company's own website as the LIVE registry record states it
+    # (`hjemmeside`). Builderr's universe snapshot lacks it for most companies that
+    # have one (measured on 78 notable companies: 65 of them have it live), so it
+    # is read from the record this function fetches anyway. None when absent.
+    website: Optional[ConfirmedFact] = None
+
+
+_SOCIAL_HOSTS = ("linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com", "youtube.com", "tiktok.com")
+
+
+def _registered_website(value: object) -> Optional[str]:
+    """`https://host/...` from the registry's free-text `hjemmeside`, or None when it
+    is empty, not a web address (an e-mail, "ingen", "-"), or just a social profile
+    (a company's profile on a platform is a company_profile, never its website)."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or " " in text or "@" in text or "." not in text:
+        return None
+    url = text if re.match(r"^https?://", text, re.IGNORECASE) else f"https://{text}"
+    host = urlsplit(url).netloc.lower().split(":")[0]
+    if not host or "." not in host or any(host == h or host.endswith("." + h) for h in _SOCIAL_HOSTS):
+        return None
+    return url
 
 
 def fetch_live_registry_details(
@@ -623,6 +648,7 @@ def fetch_live_registry_details(
     owns_client = client is None
     client = client or new_client()
     try:
+        raw_text: Optional[str] = None
         if reuse_record:
             # resolve() just downloaded this exact record: reuse it.
             body, content_hash = entity.raw_record, entity.content_hash
@@ -636,6 +662,7 @@ def fetch_live_registry_details(
             except ValueError:
                 return details
             content_hash = _content_hash(response)
+            raw_text = response.text
         retrieved_at = now()
         details.hints = hints_from_registry_record(body)
 
@@ -644,6 +671,14 @@ def fetch_live_registry_details(
                 field_name, value, url, 100.0, retrieved_at,
                 content_hash=content_hash, extraction_method="registry", source_class="official_registry",
             )
+
+        registered_site = _registered_website(body.get("hjemmeside"))
+        if registered_site:
+            raw = body.get("hjemmeside").strip()
+            span = re.search(rf'"hjemmeside"\s*:\s*"{re.escape(raw)}"', raw_text or "")
+            site_fact = fact("official_site_registry", registered_site)
+            site_fact.evidence_span = span.group(0) if span else None
+            details.website = site_fact
 
         founded = body.get("stiftelsesdato")
         if isinstance(founded, str) and founded.strip():

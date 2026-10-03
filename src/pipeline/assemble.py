@@ -102,7 +102,14 @@ def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[Confirmed
         # it is sourced from a page we retrieved and quotes where it names the
         # company, instead of citing a data file.
         from_site = _first_matching(confirmed_facts, "official_site_evidence")
-        return _confirmed_claim(from_site) if from_site else registry_claim
+        if from_site:
+            return _confirmed_claim(from_site)
+        # A website the LIVE registry record states (the universe snapshot lacks it for
+        # most companies that have one) is cited to that record, not to the snapshot.
+        live = _first_matching(confirmed_facts, "official_site_registry")
+        if live and live.value == entity.official_site_candidate:
+            return _confirmed_claim(live)
+        return registry_claim
 
     discovered = _first_matching(confirmed_facts, "official_site")
     if discovered:
