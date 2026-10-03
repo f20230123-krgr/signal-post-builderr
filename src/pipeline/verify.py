@@ -234,5 +234,6 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
         extraction_method=fact.extraction_method,
         source_class="company_owned" if on_official_domain else "external",
         linked_from=fact.linked_from if via_official_link_chain else None,
+        effective_date=fact.effective_date,
         evidence_span=fact.evidence_span,
     )

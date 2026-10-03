@@ -273,6 +273,7 @@ def _default_process_one(
             use_sitemap=True,
             ats_domains=DEFAULT_ATS_DOMAINS,
             follow_careers=True,
+            follow_news=True,
             cache=cache,
             now=now,
         )

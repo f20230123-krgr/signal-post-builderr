@@ -27,6 +27,7 @@ import trafilatura
 
 from src.pipeline.careers import careers_page_facts, is_careers_url
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
+from src.pipeline.news import news_item_facts
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
@@ -104,6 +105,8 @@ class RawFact:
     # Verbatim excerpt of the page that supports this fact (see
     # models.profile.Claim.evidence_span). None when not captured.
     evidence_span: Optional[str] = None
+    # ISO date the fact is effective as of (a news item's publication date).
+    effective_date: Optional[str] = None
 
 
 _BLOCK_BOUNDARY = "␞"  # sentinel, not real markup -- see docstring below
@@ -535,6 +538,7 @@ def extract(
     facts += _meta_tag_facts(page.raw_html, page.url, extracted_at)
     facts += _activity_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
     facts += social_profile_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
+    facts += news_item_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
     if is_careers_url(page.url, DEFAULT_ATS_DOMAINS):
         facts += careers_page_facts(
             page.raw_html, page.url, extracted_at, context_name=page_context_name, ats_domains=DEFAULT_ATS_DOMAINS
