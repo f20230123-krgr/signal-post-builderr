@@ -170,6 +170,41 @@ JSON-LD `JobPosting` extraction was already the only source of a hiring
 claim -- Soham's "no generic careers keywords" ask was already satisfied,
 confirmed by re-reading that code, not assumed.
 
+A fourth pass (October 2026) followed Builderr's per-family coverage feedback on the
+third submission (websites 4.5%, hiring 0.0%, social 72.7%, dated news 46.8%; "turn the
+facts into a shorter dated summary instead of a list"). Every external family starts from
+the company's own site, and the scored run cannot be assumed to have search keys, so the
+work is keyless first:
+
+- **Hiring signals (was 0%).** The crawler reads the careers link a company's own pages
+  already contain (never a guessed path; same site, its subdomains or a known
+  applicant-tracking platform). It publishes "Careers page lists N open roles, e.g. ..."
+  when the page's HTML lists job-detail links, otherwise "Careers page: <url>", which says
+  the page exists and nothing about openings. No-openings pages, error pages, footer links
+  and general job boards publish nothing. On 100 real companies with sites, 0 -> 10 with a
+  hiring claim.
+- **Website evidence.** A registered website used to be cited to the registry snapshot with
+  the URL repeated as its span. It is now sourced from the company's own page (hash,
+  retrieval time, the org-number line or the page's own name for the company), at the
+  address the site resolves to.
+- **Keyless website discovery.** For companies with no registered website: NAV's employer
+  homepage, the registered e-mail's own domain, and a few name-derived domains that resolve
+  in DNS. Every candidate passes the same identity gate as a search hit, which now also
+  accepts a page showing the registered phone or street address; a name-derived guess
+  additionally needs proof (org number, phone, address, or registered postcode and town with
+  the name). 100 random companies with no registered website: 9 sites found, all correct.
+- **Dated news.** Norwegian and English date formats and `<time datetime>`, each date paired
+  with its headline ("Headline (YYYY-MM-DD)", the headline as the span), plus the site's own
+  news link. Companies with a site-sourced news claim: 8 -> 23 of 100.
+- **Financial figures.** Revenue, operating result, result before tax, annual result, assets,
+  equity and debt per filed year (newest two), each with its period, period end date and the
+  filing's own text; a link to the filed accounts for years the registry lists. A figure the
+  filing does not state is omitted, never zero.
+- **Social profiles.** Only a company's own profile: no staff members' personal LinkedIn pages,
+  Instagram posts, share links or videos; tracking parameters stripped; one claim per profile.
+- **Roles and workplaces.** Roles carry the registry's last-changed date and the holder's name
+  as written; workplaces carry their full registered address.
+
 On the self-check harness's fixture sample (10 companies: 4 hand-verified
 with websites, plus 6 with no website on file to represent the ~89% majority
 case), all three of our self-check targets are met: coverage 34.56/35, weighted
