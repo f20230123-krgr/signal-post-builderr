@@ -131,6 +131,33 @@ def startup_key_check(
     return health, requests_used
 
 
+_SEARCH_KEY_VARS = (("exa", "EXA_API_KEY"), ("parallel", "PARALLEL_API_KEY"))
+
+
+def search_key_status(disabled: dict) -> dict[str, str]:
+    """Per optional search provider: "active" (key set and accepted), "disabled"
+    (key set but rejected or out of credit) or "absent" (no key in the
+    environment). Keys are optional; every run works without them."""
+    return {
+        name: "disabled" if name in disabled else "active" if os.environ.get(var) else "absent"
+        for name, var in _SEARCH_KEY_VARS
+    }
+
+
+def search_keys_notice(status: dict[str, str]) -> Optional[str]:
+    """One informational line, never a prompt: a run must not wait on input."""
+    active = [n for n, s in status.items() if s == "active"]
+    if len(active) == len(status):
+        return None
+    if not active:
+        return (
+            "Search keys not set: running keyless (registry, company sites and free sources). "
+            "Set EXA_API_KEY and PARALLEL_API_KEY for wider website coverage."
+        )
+    missing = [n for n, s in status.items() if s != "active"]
+    return f"Search providers active: {', '.join(active)}. Not active: {', '.join(missing)}."
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a Signalpost company batch.")
     parser.add_argument("--input", required=True, type=Path, help="JSONL of org numbers")
@@ -177,6 +204,11 @@ def main() -> None:
     provider_health, _ = startup_key_check(
         args.stop_if_key_dead, spend_cap_usd=args.max_search_spend
     )
+
+    key_status = search_key_status(provider_health.disabled)
+    notice = search_keys_notice(key_status)
+    if notice:
+        print(notice)
 
     org_numbers = [
         line.strip() for line in args.input.read_text().splitlines() if line.strip()
@@ -281,6 +313,8 @@ def main() -> None:
         # be. Measured: the same 100-company batch found 19 official websites
         # with a healthy Exa key and 10-11 without.
         "degraded_providers": aggregate.get("degraded_providers", {}),
+        # Which optional search keys the run actually had (see search_key_status).
+        "search_keys": key_status,
         # NAV hiring-signal index for this run: list pages read (hard-capped),
         # requests spent, active ads indexed, and whether the page cap cut off
         # the newest ads.
@@ -290,7 +324,7 @@ def main() -> None:
 
     # Decision-useful synthesis + a legible desktop/mobile results view --
     # see src/synthesis.py / src/reporting.py.
-    html_report = render_html_report(profiles, generated_at=datetime.now(timezone.utc), envelopes=envelopes)
+    html_report = render_html_report(profiles, generated_at=datetime.now(timezone.utc), envelopes=envelopes, search_keys=key_status)
     (args.out / "report.html").write_text(html_report, encoding="utf-8")
 
     print(f"Produced {len(profiles)} profiles for {len(org_numbers)} inputs.")

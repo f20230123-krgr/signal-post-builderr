@@ -158,3 +158,40 @@ def test_api_key_values_never_appear_in_output_or_logs(monkeypatch, capsys, capl
     everything = seen.out + seen.err + caplog.text
     assert "SECRET-EXA-VALUE-123" not in everything
     assert "SECRET-PARALLEL-VALUE-456" not in everything
+
+
+def test_search_key_status_reports_absent_active_and_disabled(monkeypatch):
+    from src.run_batch import search_key_status
+
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setenv("PARALLEL_API_KEY", "p")
+
+    assert search_key_status({}) == {"exa": "absent", "parallel": "active"}
+    assert search_key_status({"parallel": "out of credit"}) == {"exa": "absent", "parallel": "disabled"}
+
+
+def test_the_keyless_notice_is_one_informational_line_and_never_asks_for_input(monkeypatch):
+    from src.run_batch import search_keys_notice
+
+    notice = search_keys_notice({"exa": "absent", "parallel": "absent"})
+
+    assert "running keyless" in notice and "EXA_API_KEY" in notice and "PARALLEL_API_KEY" in notice
+    assert "\n" not in notice
+    assert search_keys_notice({"exa": "active", "parallel": "active"}) is None
+    assert "Not active: parallel" in search_keys_notice({"exa": "active", "parallel": "absent"})
+
+
+def test_the_viewer_records_which_search_keys_the_run_had():
+    import json
+    import re
+    from datetime import datetime, timezone
+
+    from src.reporting import render_html_report
+    from tests.conftest import make_profile
+
+    html = render_html_report(
+        [make_profile()], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc), search_keys={"exa": "absent", "parallel": "absent"}
+    )
+
+    data = json.loads(re.search(r'id="atlas-data">(.*?)</script>', html, re.S).group(1))
+    assert data["search_keys"] == {"exa": "absent", "parallel": "absent"}

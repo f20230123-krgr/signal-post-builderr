@@ -19,7 +19,7 @@ read it before making any change.
 pip install -r requirements.txt
 python -m pytest tests/                                # all green, no live network
 curl -LO https://builderr.ai/signalpost-company-universe-2025.jsonl.gz  # optional: fetched automatically if missing
-export EXA_API_KEY=... PARALLEL_API_KEY=...            # your own keys -- see "API keys and cost"
+export EXA_API_KEY=... PARALLEL_API_KEY=...            # OPTIONAL: more website coverage -- see "API keys and cost"
 python -m src.run_batch --input batch.jsonl --out results/
 python -m src.scoring.self_check --fixtures fixtures/   # coverage/recall/precision vs our targets
 ```
@@ -34,10 +34,35 @@ python -m src.scoring.self_check --fixtures fixtures/   # coverage/recall/precis
 `run_batch` writes into `--out`:
 - `envelopes.jsonl` -- one submission envelope per input, matching the
   reference agent's `OUTPUT_CONTRACT.md` shape (`claims`/`evidence`/`run`/
-  `changes`/`errors`/`operations`) -- this is the file to submit
+  `changes`/`errors`/`operations`) plus a `summary` -- this is the file to submit
+- `report.html` -- **Signalpost Atlas**, a self-contained viewer of those same
+  envelopes (open it in any browser, no server): search and filter the
+  companies, compare up to four side by side, and press *Evidence* on any fact
+  to see its source link, retrieval time, reporting period, content hash and
+  the exact quoted text. Works on desktop and phone, light and dark.
 - `manifest.txt` -- the exact organisation-number manifest processed
-- `run-report.json` -- machine-readable requests/spend/runtime totals
+- `run-report.json` -- machine-readable requests/spend/runtime totals, and which
+  optional search keys the run had (`search_keys`)
 - `snapshots/` -- append-only `CompanyProfile` history (idempotent refresh)
+
+**The summary.** Each envelope's `summary` is one short, dated narrative: what
+the company is, its latest filed accounts and period, who runs it, where it
+operates, its web presence, hiring and latest dated activity, what changed
+since the previous run, and what could not be found. Every sentence lists the
+claim fields it rests on and the ids of the evidence records that support it;
+a gap is named under `unknowns`, never guessed or turned into zero.
+
+```json
+{"as_of": "2026-09-21",
+ "text": "As of 2026-09-21: INSIDER FACILITY SOLUTIONS AS (org. no. 834327082) is a limited company (AS) ... Not found: hiring signals.",
+ "sentences": [{"text": "...", "fields": ["legal_name", "..."], "evidence_ids": ["ev-1", "ev-4"]}],
+ "changes": [], "unknowns": ["hiring signals"]}
+```
+
+**Keys are optional.** Without `EXA_API_KEY` / `PARALLEL_API_KEY` the run uses
+the registry, company-owned sites and free sources only, prints one
+informational line saying so, and carries on; it never prompts or waits for
+input. With keys present they are used on top, for more website discovery.
 
 If `signalpost-company-universe-2025.jsonl.gz` is present in the working
 directory (or passed via `--universe`), identity resolution for any covered

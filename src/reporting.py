@@ -90,6 +90,7 @@ def render_html_report(
     profiles: list[CompanyProfile],
     generated_at: datetime,
     envelopes: Optional[list[dict]] = None,
+    search_keys: Optional[dict[str, str]] = None,
 ) -> str:
     """One self-contained, responsive viewer covering every profile in `profiles`.
 
@@ -102,6 +103,7 @@ def render_html_report(
         "generated_at": generated_at.isoformat(),
         "run_id": run_id,
         "as_of": as_of,
+        "search_keys": search_keys or {},
         "envelopes": [_slim(e) for e in envs],
     }
     fallback = (

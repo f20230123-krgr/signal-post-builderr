@@ -237,7 +237,16 @@ def test_summary_is_one_short_dated_narrative_with_the_key_facts():
 def test_summary_reports_the_latest_dated_activity_not_the_first_listed():
     from src.synthesis import build_summary
 
-    assert "Most recent dated activity (2026-03-23)" in build_summary(_rich_profile()).text
+    assert "Last registry update on 2026-03-23" in build_summary(_rich_profile()).text
+
+
+def test_dated_activity_that_is_real_news_keeps_its_wording():
+    from src.synthesis import build_summary
+
+    profile = make_profile(org_number="923609016", legal_name=available_claim("ACME AS"))
+    profile.activity.dated_activity = [available_claim("Opened a new plant in Bergen on 2026-05-02")]
+
+    assert "Most recent dated activity (2026-05-02): Opened a new plant in Bergen on 2026-05-02." in build_summary(profile).text
 
 
 def test_summary_names_what_is_unknown_and_invents_nothing_for_an_empty_profile():

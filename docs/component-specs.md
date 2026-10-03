@@ -333,31 +333,37 @@ output JSONL, not `CompanyProfile.model_dump_json()` directly.
 **Input:** `CompanyProfile`, a `run_id`, optional `operations`/`started_at`/`completed_at`.
 
 **Output:** `dict` matching `OUTPUT_CONTRACT.md`'s shape, plus one addition:
-an `answers` key holding `src/synthesis.py`'s `answer_business_questions()`
-output. `OUTPUT_CONTRACT.md` itself doesn't document this field, but it's the
-only way the rubric's "decision-useful synthesis" answers reach the actual
-submitted artifact — `src/reporting.py`'s `report.html` is a local-only view,
-never part of the submission (real gap: commit e44e85c, scored by Builderr on
-2026-09-16, had no synthesis content anywhere in `envelopes.jsonl` at all and
-scored 0/10 on synthesis; fixed in commit 6c3d454 by embedding `answers` here).
+a `summary` key holding `src/synthesis.py`'s `build_summary()` output.
+`OUTPUT_CONTRACT.md` itself doesn't document this field, but it's the only way
+the rubric's "decision-useful synthesis" reaches the actual submitted artifact
+-- `src/reporting.py`'s `report.html` is a local view, never part of the
+submission (real gap: commit e44e85c, scored by Builderr on 2026-09-16, had no
+synthesis content anywhere in `envelopes.jsonl` and scored 0/10 on synthesis).
 
-Each answer is `{"question", "answer", "state", "sources"}` — `sources` (added
-2026-09-24, after that same synthesis breakdown showed 0/10 with no way to
-tell whether the missing content or the missing citations caused it) is the
-deduplicated list of the underlying Claim(s)' `.source` URLs/identifiers, so
-"the profile ... explain[s] ... with sources for its conclusions" is true of
-the answer itself, not just of the separate `claims`/`evidence` arrays.
-`src/reporting.py`'s `report.html` links each sourced answer to its source too.
+`summary` is ONE short dated narrative, not a Q&A list (official feedback on the
+3rd submission: "turn the facts into a shorter dated summary instead of a
+list"): `{"as_of", "text", "sentences": [{"text", "fields", "evidence_ids"}],
+"changes", "unknowns"}`. Every sentence names the claim fields it rests on and
+the ids of the evidence records that support it, so the conclusions carry their
+sources; gaps are named under `unknowns` and never guessed. It is templated
+only from claims that passed `verify()`. The earlier `answers` Q&A list was
+removed from the envelope (`answer_business_questions()` remains in
+`src/synthesis.py` for callers that want it).
+
+Each claim and evidence entry also carries `reporting_period` and `effective_at`
+(ISO date the fact is effective), and each evidence entry's `claim_span` is the
+verbatim supporting excerpt where the claim has one; evidence is deduplicated on
+`(source_url, content_hash, claim_span)`.
 
 **Must:**
-- Deduplicate evidence by `(source_url, content_hash)` — claims sharing a
-  source (e.g. two activity signals scraped off one page) share one evidence
-  entry, referenced by id, not repeated per-claim.
+- Deduplicate evidence by `(source_url, content_hash, claim_span)` — identical
+  claims from one page share one evidence entry, referenced by id; different
+  claims from the same page each keep their own supporting span.
 - Map every section of `CompanyProfile` to a flat claim, including list
   sections (one claim entry per list item).
 - Surface `failed`/`blocked` claims in `errors` in addition to `claims`.
-- Embed `answer_business_questions(profile)` under `answers` — never leave
-  synthesis output reachable only through `report.html`.
+- Embed `build_summary(profile)` under `summary` — never leave synthesis
+  output reachable only through `report.html`.
 
 **Must not:** drop a claim because it's `not_available`/etc — it still
 appears in `claims` (value `null`, empty `evidence_ids`), per the "missing

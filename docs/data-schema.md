@@ -26,7 +26,19 @@ Claim:
   source_class: <"official_registry" | "company_owned" | "external", or null>
   extraction_method: <"registry" | "structured" | "text", or null>
   linked_from: <URL of the official-site page this was reached from, or null>
+  effective_date: <ISO date (YYYY-MM-DD) the fact is effective as of -- an
+                   accounting period end, a role's last-changed date -- or null>
+  evidence_span: <short VERBATIM excerpt of the captured source that supports
+                  the claim, or null (the envelope then falls back to the value)>
 ```
+
+`effective_date` and `evidence_span` were added for the 4th revision: Builderr
+asks to "keep the source, retrieval date and relevant reporting period for every
+claim" and measures evidence-span validity. A published value is often a
+formatted string that never appears literally in the source (a person's name
+plus role assembled from JSON fields), so the span is the text a checker can
+actually find. Both are exported on each envelope claim/evidence entry
+(`effective_at`, `claim_span`).
 
 `linked_from` was added alongside the allow-listed-ATS-platform crawl path
 (see `crawl.py`'s `ats_domains`): a claim sourced from e.g. a Greenhouse job

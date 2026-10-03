@@ -349,6 +349,15 @@ function renderTray() {
 }
 
 /* ---------- home ---------- */
+function keysNote() {
+  const k = DATA.search_keys || {}, names = Object.keys(k);
+  if (!names.length) return "";
+  const active = names.filter(n => k[n] === "active");
+  const text = active.length === names.length ? "Optional search providers active: " + active.join(", ") + "."
+    : active.length ? "Optional search providers active: " + active.join(", ") + "; not active: " + names.filter(n => k[n] !== "active").join(", ") + "."
+    : "This run used no search keys: it relied on the registry, company sites and free sources. Website coverage is higher when EXA_API_KEY and PARALLEL_API_KEY are set.";
+  return '<p class="changes">' + esc(text) + "</p>";
+}
 function renderHome() {
   const n = companies.length, cnt = k => companies.filter(c => c.flags[k]).length;
   const evCount = companies.reduce((s, c) => s + Object.keys(c.ev).length, 0);
@@ -364,6 +373,7 @@ function renderHome() {
     '<div class="card"><h2>What we found, by information type</h2><div class="cov">' +
     rows.map(r => '<div class="r"><span>' + esc(r.label) + '</span><span class="bar' + (r.p < .3 ? " low" : "") + '"><b style="width:' + (r.p * 100).toFixed(1) + '%"></b></span><span class="num">' + (r.p * 100).toFixed(1) + "%</span></div>").join("") +
     '</div><p class="changes">Weakest area: <b>' + esc(weakest.label.toLowerCase()) + "</b> (" + fmt(weakest.k) + " of " + fmt(n) + '). A missing value is shown as "not found", never as zero.</p></div>' +
+    keysNote() +
     '<div class="card"><h2>Find, compare, verify</h2><ol class="steps">' +
     "<li><b>Find</b> a company: search by name, organisation number, industry or website, or filter by what we found.</li>" +
     "<li><b>Compare</b> up to four companies side by side: tick the boxes in the list, then press Compare.</li>" +

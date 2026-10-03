@@ -394,6 +394,10 @@ def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     if latest is None:
         return None
     claim, date = latest
+    # "Registry record updated (Endring) on 2026-04-28 - Brønnøysundregistrene"
+    # says nothing more than the date; don't repeat it as if it were news.
+    if claim.value.startswith("Registry record updated"):
+        return SummarySentence(f"Last registry update on {date}.", ["dated_activity"], [claim])
     return SummarySentence(f"Most recent dated activity ({date}): {claim.value}.", ["dated_activity"], [claim])
 
 
