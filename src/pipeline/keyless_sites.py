@@ -193,7 +193,7 @@ def contact_span(text: str, hints: SiteHints) -> Optional[str]:
         # digits lifted out of the middle of a longer run such as an org number.
         for match in _PHONE_ON_PAGE_RE.finditer(flattened):
             if re.sub(r"\D", "", match.group(1)) in hints.phones:
-                return flattened[max(0, match.start() - 40) : match.end() + 40].strip()
+                return flattened[max(0, match.start() - 24) : match.end() + 24].strip()
     if hints.street and hints.postcode:
         street = " ".join(hints.street.split())
         at = flattened.lower().find(street.lower())
