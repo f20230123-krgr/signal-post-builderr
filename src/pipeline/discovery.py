@@ -53,7 +53,7 @@ from src.orchestrator.budget import BudgetGovernor
 from src.storage.cache import ResponseCache
 from src.pipeline.extract import structured_facts, text_fallback_facts
 from src.pipeline.careers import page_heading
-from src.pipeline.keyless_sites import SiteHints, page_confirms_contact, page_shows_location
+from src.pipeline.keyless_sites import SiteHints, contact_span, page_confirms_contact, page_shows_location
 from src.pipeline.site_evidence import org_number_span
 from src.pipeline.verify import NAME_MATCH_THRESHOLD, ConfirmedFact, name_similarity
 
@@ -998,6 +998,8 @@ def verify_discovered_site(
     # (its org number, else the best-matching name, else its title), keep the
     # page's hash, and record the address the request actually landed on.
     span = org_number_span(response.text, org_number) if org_number_confirmed and org_number else None
+    if span is None and confirmed_by_contact:
+        span = contact_span(response.text, hints)  # the phone or address the registry holds
     if span is None and name_candidates:
         span = max(name_candidates, key=lambda c: max(name_similarity(n, c) for n in identity_names))
     if span is None:

@@ -203,3 +203,27 @@ def test_a_name_guess_is_accepted_on_name_plus_registered_location_but_not_on_na
     assert run(page, hints) is not None
     assert run(page.replace("0183 Oslo", "Austin, Texas"), hints) is None  # same name, wrong country
     assert run(page, None) is None
+
+
+def test_a_site_proven_by_the_registered_phone_quotes_that_phone_not_template_text():
+    """vme.no was accepted on the registered phone but quoted "Your Site Title (Copy)"."""
+    from src.pipeline.keyless_sites import contact_span
+
+    page = "<html><head><title>Your Site Title (Copy)</title></head><body><p>Kontakt oss: tlf 23 22 66 66 eller epost</p></body></html>"
+    hints = SiteHints(phones=["23226666"])
+
+    fact = _verify(page, hints, name="ANOTHER WORLD ENTERTAINMENT NORWAY AS", url="https://vme.no/")
+
+    assert fact is not None
+    assert "23 22 66 66" in fact.evidence_span and "Your Site Title" not in fact.evidence_span
+    assert contact_span("<p>no number here</p>", hints) is None
+
+
+def test_a_site_proven_by_the_registered_address_quotes_the_address():
+    from src.pipeline.keyless_sites import contact_span
+
+    hints = SiteHints(street="Dronningens gate 16", postcode="0152")
+
+    span = contact_span("<footer>Another World, Dronningens gate 16, 0152 Oslo</footer>", hints)
+
+    assert span is not None and "Dronningens gate 16" in span

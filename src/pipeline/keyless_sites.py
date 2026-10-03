@@ -182,24 +182,28 @@ def keyless_candidates(
     return out
 
 
-def page_confirms_contact(text: str, hints: SiteHints) -> bool:
-    """True when the page shows the phone number or the street address (with its
-    postcode) the company registered. Either is specific to this company; a bare
-    postcode or a short number is not enough."""
-    flattened = re.sub(r"<[^>]+>", " ", text)
+def contact_span(text: str, hints: SiteHints) -> Optional[str]:
+    """The text on the page that shows the phone number or the street address (with
+    its postcode) the company registered, quoted as the page writes it; None when
+    the page shows neither. Either is specific to this company; a bare postcode or
+    a short number is not enough."""
+    flattened = " ".join(re.sub(r"<[^>]+>", " ", text).split())
     if hints.phones:
         # Whole eight-digit numbers only (optionally +47 and spaced), never eight
         # digits lifted out of the middle of a longer run such as an org number.
-        on_page = {
-            re.sub(r"\D", "", m.group(1)) for m in _PHONE_ON_PAGE_RE.finditer(flattened)
-        }
-        if on_page & set(hints.phones):
-            return True
+        for match in _PHONE_ON_PAGE_RE.finditer(flattened):
+            if re.sub(r"\D", "", match.group(1)) in hints.phones:
+                return flattened[max(0, match.start() - 40) : match.end() + 40].strip()
     if hints.street and hints.postcode:
-        lowered = " ".join(flattened.lower().split())
-        street = " ".join(hints.street.lower().split())
-        return street in lowered and hints.postcode in lowered
-    return False
+        street = " ".join(hints.street.split())
+        at = flattened.lower().find(street.lower())
+        if at >= 0 and hints.postcode in flattened:
+            return flattened[max(0, at - 20) : at + len(street) + 40].strip()
+    return None
+
+
+def page_confirms_contact(text: str, hints: SiteHints) -> bool:
+    return contact_span(text, hints) is not None
 
 
 def page_shows_location(text: str, hints: SiteHints) -> bool:
