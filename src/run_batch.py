@@ -290,7 +290,7 @@ def main() -> None:
 
     # Decision-useful synthesis + a legible desktop/mobile results view --
     # see src/synthesis.py / src/reporting.py.
-    html_report = render_html_report(profiles, generated_at=datetime.now(timezone.utc))
+    html_report = render_html_report(profiles, generated_at=datetime.now(timezone.utc), envelopes=envelopes)
     (args.out / "report.html").write_text(html_report, encoding="utf-8")
 
     print(f"Produced {len(profiles)} profiles for {len(org_numbers)} inputs.")

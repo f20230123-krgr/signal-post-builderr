@@ -1,127 +1,114 @@
 """
-Static HTML results view -- "UX & interaction" (docs/success-criteria.md:
-"profiles are legible/reviewable on desktop and mobile").
+Signalpost Atlas: the results viewer -- "UX & interaction" (the brief asks that
+"a user should be able to find, compare and verify the information on desktop
+and mobile").
 
-No server, no JS framework: one self-contained HTML file per batch, native
-<details>/<summary> for per-company expansion (works with no JavaScript at
-all, including on mobile), and a single CSS media query for the mobile
-breakpoint. This module never invents content -- it only renders what's
-already in a validated CompanyProfile plus src/synthesis.py's templated
-answers, so a legible report can't drift from what was actually verified.
+One self-contained HTML file per batch (src/viewer.html is the template; no
+server, no build step, no network). The page embeds the very envelopes that
+envelopes.jsonl submits, so what a reviewer sees is exactly what was submitted:
+the dated summary, every claim, and the evidence record behind each of them.
+
+This module never invents content. It renders existing envelopes (built from
+validated CompanyProfiles) and a plain-HTML fallback for readers without
+JavaScript, so a legible report can't drift from what was actually verified.
 """
 from __future__ import annotations
 
 import html as html_lib
+import json
+import re
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
-from src.models.profile import Claim, CompanyProfile, EvidenceState
-from src.synthesis import answer_business_questions
+from src.models.profile import CompanyProfile
+from src.pipeline.envelope import to_envelope
 
-_STYLE = """
-:root { color-scheme: light dark; }
-body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 1rem;
-       background: #f7f7f8; color: #1a1a1a; }
-h1 { font-size: 1.25rem; }
-.meta { color: #666; margin-bottom: 1rem; }
-.company { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 0.75rem;
-           padding: 0; overflow: hidden; }
-.company > summary { cursor: pointer; padding: 0.85rem 1rem; font-weight: 600; list-style: none;
-                      display: flex; justify-content: space-between; gap: 1rem; }
-.company > summary::-webkit-details-marker { display: none; }
-.company-body { padding: 0 1rem 1rem 1rem; }
-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0.5rem 0 1rem 0; }
-th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; vertical-align: top; }
-.state-available { color: #0a7a2f; }
-.state-not_available, .state-blocked, .state-failed { color: #999; }
-.state-ambiguous, .state-not_applicable { color: #b8860b; }
-.synthesis dt { font-weight: 600; margin-top: 0.5rem; }
-.synthesis dd { margin: 0.15rem 0 0 0; }
-.synthesis .source { font-size: 0.85em; }
-@media (max-width: 480px) {
-  body { padding: 0.5rem; }
-  table, thead, tbody, th, td, tr { display: block; }
-  th { display: none; }
-  td { border-bottom: none; padding: 0.15rem 0; }
-  td:first-child { font-weight: 600; }
-}
-"""
+_TEMPLATE = Path(__file__).with_name("viewer.html")
+# Plain-HTML fallback shows this many claims per company before pointing at the
+# interactive view; the viewer itself shows everything.
+_FALLBACK_MAX_SOURCES = 6
 
 
-def _esc(value: str) -> str:
-    return html_lib.escape(value)
+def _esc(value: object) -> str:
+    return html_lib.escape(str(value))
 
 
-def _claim_row(label: str, claim: Claim) -> str:
-    value = _esc(claim.value) if claim.value else "&mdash;"
+def _slim(envelope: dict) -> dict:
+    """The part of an envelope the viewer needs, with null values dropped to keep
+    the embedded payload small. Operations/run internals are not shown."""
+    def strip(obj):
+        if isinstance(obj, dict):
+            return {k: strip(v) for k, v in obj.items() if v is not None}
+        if isinstance(obj, list):
+            return [strip(v) for v in obj]
+        return obj
+
+    keep = {k: envelope[k] for k in ("organisation_number", "claims", "evidence", "summary", "changes", "errors") if k in envelope}
+    slim = strip(keep)
+    # The summary's `text` is its sentences joined; the viewer rebuilds it, so
+    # it isn't embedded twice.
+    slim.get("summary", {}).pop("text", None)
+    return slim
+
+
+def _json_for_script(data: dict) -> str:
+    """JSON safe to place inside a <script> element: '<' can never open a tag or
+    close the script, and the two JS line separators are escaped."""
     return (
-        f"<tr><th>{_esc(label)}</th>"
-        f'<td class="state-{claim.state.value}">{value} '
-        f'<span class="meta">({_esc(claim.state.value)})</span></td></tr>'
+        json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
     )
 
 
-def _list_claim_rows(label: str, claims: list[Claim]) -> str:
-    if not claims:
-        return f'<tr><th>{_esc(label)}</th><td class="state-not_available">&mdash; <span class="meta">(not_available)</span></td></tr>'
-    values = "; ".join(_esc(c.value) for c in claims if c.value)
-    return f'<tr><th>{_esc(label)}</th><td class="state-available">{values}</td></tr>'
-
-
-def _company_section(profile: CompanyProfile) -> str:
-    legal_name = profile.legal_identity.legal_name
-    title = _esc(legal_name.value) if legal_name.value else f"Org. {_esc(profile.org_number)}"
-
-    rows = "".join(
-        [
-            _claim_row("Legal name", legal_name),
-            _claim_row("Public brand", profile.legal_identity.public_brand),
-            _claim_row("Official website", profile.online_presence.official_site),
-            _claim_row("Latest annual accounts", profile.annual_accounts.latest),
-            _list_claim_rows("Leaders", profile.leadership.leaders),
-            _list_claim_rows("Workplaces", profile.leadership.workplaces),
-            _list_claim_rows("Company profiles", profile.online_presence.company_profiles),
-            _list_claim_rows("Hiring signals", profile.activity.hiring_signals),
-            _list_claim_rows("Dated activity", profile.activity.dated_activity),
-        ]
+def _fallback_section(envelope: dict) -> str:
+    """Plain, JavaScript-free rendering of one company: dated summary, then the
+    sources behind it as real links."""
+    claims = envelope.get("claims", [])
+    name = next((c["value"] for c in claims if c["field"] == "legal_name" and c.get("value")), None)
+    title = _esc(name) if name else f"Org. {_esc(envelope['organisation_number'])}"
+    summary = envelope.get("summary", {})
+    seen: list[str] = []
+    for ev in envelope.get("evidence", []):
+        url = ev.get("source_url", "")
+        if url.startswith(("http://", "https://")) and url not in seen:
+            seen.append(url)
+    links = "".join(f'<li><a href="{_esc(u)}">{_esc(u)}</a></li>' for u in seen[:_FALLBACK_MAX_SOURCES])
+    unavailable = [c["field"] for c in claims if c.get("availability") != "available"]
+    gaps = f"<p>Not available: {_esc(', '.join(unavailable))}.</p>" if unavailable else ""
+    return (
+        f"<section><h2>{title} <small>{_esc(envelope['organisation_number'])}</small></h2>"
+        f"<p>{_esc(summary.get('text', ''))}</p>{gaps}"
+        + (f"<ul>{links}</ul>" if links else "")
+        + "</section>"
     )
 
-    def _synthesis_item(a: dict) -> str:
-        sources = a.get("sources") or []
-        # First source only -- multiple leaders/workplaces/etc. commonly share
-        # one source page, and the answer text itself already lists the values.
-        link = f' <a class="source" href="{_esc(sources[0])}">source</a>' if sources else ""
-        return f"<dt>{_esc(a['question'])}</dt><dd>{_esc(a['answer'])}{link}</dd>"
 
-    synthesis_items = "".join(_synthesis_item(a) for a in answer_business_questions(profile))
+def render_html_report(
+    profiles: list[CompanyProfile],
+    generated_at: datetime,
+    envelopes: Optional[list[dict]] = None,
+) -> str:
+    """One self-contained, responsive viewer covering every profile in `profiles`.
 
-    return f"""
-<details class="company">
-  <summary><span>{title}</span><span class="meta">{_esc(profile.org_number)}</span></summary>
-  <div class="company-body">
-    <table>{rows}</table>
-    <dl class="synthesis">{synthesis_items}</dl>
-  </div>
-</details>
-"""
-
-
-def render_html_report(profiles: list[CompanyProfile], generated_at: datetime) -> str:
-    """One self-contained, responsive HTML page covering every profile in
-    `profiles`. Never fabricates content -- purely renders existing Claims
-    and src/synthesis.py's templated answers."""
-    sections = "".join(_company_section(p) for p in profiles)
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Signalpost batch report</title>
-<style>{_STYLE}</style>
-</head>
-<body>
-<h1>Signalpost batch report</h1>
-<p class="meta">Generated {_esc(generated_at.isoformat())} &middot; {len(profiles)} companies</p>
-{sections}
-</body>
-</html>
-"""
+    `envelopes` lets the caller pass the exact envelopes it submits; when omitted
+    they are built from `profiles`. Never fabricates content."""
+    run_id = generated_at.strftime("%Y-%m-%dT%H-%M-%SZ")
+    envs = envelopes if envelopes is not None else [to_envelope(p, run_id=run_id) for p in profiles]
+    as_of = max((e["summary"]["as_of"] for e in envs if e.get("summary")), default=generated_at.date().isoformat())
+    data = {
+        "generated_at": generated_at.isoformat(),
+        "run_id": run_id,
+        "as_of": as_of,
+        "envelopes": [_slim(e) for e in envs],
+    }
+    fallback = (
+        "<h1>Signalpost Atlas</h1><p>This page needs JavaScript for search, comparison and evidence panels. "
+        f"Plain summaries follow ({len(envs)} companies).</p>" + "".join(_fallback_section(e) for e in envs)
+    )
+    # The data goes in last so nothing inside it can be mistaken for a placeholder.
+    parts = {"{{NOSCRIPT}}": fallback, "{{ATLAS_DATA}}": _json_for_script(data)}
+    # One pass, so text inside a company name or the data can never be taken for a placeholder.
+    return re.sub(r"\{\{(?:NOSCRIPT|ATLAS_DATA)\}\}", lambda m: parts[m.group(0)], _TEMPLATE.read_text(encoding="utf-8"))

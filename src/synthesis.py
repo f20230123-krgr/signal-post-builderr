@@ -11,7 +11,10 @@ produces an explicit "not available"-shaped answer, never a guess.
 """
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlsplit
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
 
@@ -197,6 +200,242 @@ def _recent_activity_answer(profile: CompanyProfile) -> dict:
         "What is the most recent public activity?", activity[0], EvidenceState.AVAILABLE,
         sources=_sources(profile.activity.dated_activity[0]),
     )
+
+
+_LEGAL_FORMS = {
+    "AS": "limited company (AS)",
+    "ASA": "public limited company (ASA)",
+    "ENK": "sole proprietorship (ENK)",
+    "NUF": "Norwegian-registered foreign entity (NUF)",
+    "SA": "cooperative (SA)",
+    "BRL": "housing cooperative (BRL)",
+    "ANS": "general partnership (ANS)",
+    "DA": "shared-liability partnership (DA)",
+    "STI": "foundation (STI)",
+}
+_ROLES = {
+    "daglig leder": "managing director",
+    "styrets leder": "chair of the board",
+    "styremedlem": "board member",
+    "nestleder": "deputy chair",
+    "varamedlem": "deputy board member",
+}
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_PLATFORMS = {
+    "linkedin.com": "LinkedIn", "facebook.com": "Facebook", "instagram.com": "Instagram",
+    "x.com": "X", "twitter.com": "X", "youtube.com": "YouTube", "tiktok.com": "TikTok",
+}
+_MAX_LEADERS = 3
+_MAX_WORKPLACES = 2
+
+
+@dataclass
+class SummarySentence:
+    text: str
+    fields: list[str]
+    claims: list[Claim] = field(default_factory=list)
+
+
+@dataclass
+class Summary:
+    """One short, dated narrative about a company, built only from its verified
+    claims: what it is, how it is doing, who runs it, what changed, and what is
+    still unknown. Each sentence names the claim fields it rests on and keeps
+    the Claim objects so the envelope can attach their evidence ids."""
+
+    as_of: str
+    sentences: list[SummarySentence]
+    unknowns: list[str]
+    changes: list[str]
+
+    @property
+    def text(self) -> str:
+        return " ".join(s.text for s in self.sentences)
+
+
+def _day(claim: Claim) -> Optional[str]:
+    if claim.effective_date:
+        return claim.effective_date[:10]
+    return claim.retrieved_at.date().isoformat() if claim.retrieved_at else None
+
+
+def _host(url: str) -> str:
+    netloc = urlsplit(url).netloc.lower()
+    return netloc[4:] if netloc.startswith("www.") else netloc
+
+
+def _role_text(leader_value: str) -> str:
+    """'Roger Tveide (Daglig leder)' -> 'Roger Tveide (managing director)'."""
+    if leader_value.endswith(")") and " (" in leader_value:
+        name, role = leader_value[:-1].rsplit(" (", 1)
+        return f"{name} ({_ROLES.get(role.strip().lower(), role.strip())})"
+    return leader_value
+
+
+def _latest_dated(claims: list[Claim]) -> Optional[tuple[Claim, str]]:
+    """The claim whose own text carries the most recent date, with that date."""
+    best: Optional[tuple[Claim, str]] = None
+    for claim in claims:
+        if claim.state != EvidenceState.AVAILABLE or not claim.value:
+            continue
+        match = _DATE_RE.findall(claim.value)
+        if match and (best is None or max(match) > best[1]):
+            best = (claim, max(match))
+    return best
+
+
+def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    li = profile.legal_identity
+    name = _value_or_none(li.legal_name)
+    if name is None:
+        return None
+    form = _optional_value(li.legal_form)
+    industry = _optional_value(li.industry)
+    founded = _optional_value(li.founded_date)
+    status = _optional_value(li.operating_status)
+    employees = _optional_value(li.employee_count)
+
+    text = f"{name} (org. no. {profile.org_number}) is a {_LEGAL_FORMS.get(form, form)}" if form else (
+        f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity"
+    )
+    if industry:
+        text += f" in the industry {industry}"
+    if founded:
+        text += f", founded {founded}"
+    text += "."
+    if status:
+        text += f" Registry status: {status}."
+    if employees:
+        text += f" {employees} registered employees."
+    claims = [c for c in (li.legal_name, li.legal_form, li.industry, li.founded_date, li.operating_status, li.employee_count) if c is not None]
+    return SummarySentence(text, ["legal_name", "legal_form", "industry", "founded_date", "operating_status", "employee_count"], claims)
+
+
+def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    claim = profile.annual_accounts.latest
+    value = _value_or_none(claim)
+    if value is None:
+        return None
+    when = f" ({claim.reporting_period}" + (f", period ending {claim.effective_date[:10]}" if claim.effective_date else "") + ")" if claim.reporting_period else ""
+    text = f"Latest filed accounts{when}: {value}."
+    history = [c for c in profile.annual_accounts.history if c.state == EvidenceState.AVAILABLE]
+    if history:
+        text += f" {len(history)} earlier filing{'s' if len(history) != 1 else ''} on record."
+    return SummarySentence(text, ["annual_accounts_latest", "annual_accounts_history"], [claim] + history[:1])
+
+
+def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    leaders = [c for c in profile.leadership.leaders if c.state == EvidenceState.AVAILABLE and c.value]
+    if not leaders:
+        return None
+    # One person often holds several roles (managing director and board
+    # member): merge them rather than repeating the name.
+    people: dict[str, list[str]] = {}
+    people_claims: dict[str, list[Claim]] = {}
+    for claim in leaders:
+        text = _role_text(claim.value)
+        name, _, role = text.partition(" (")
+        people.setdefault(name, []).append(role[:-1] if role else "")
+        people_claims.setdefault(name, []).append(claim)
+    names = list(people)
+    shown = names[:_MAX_LEADERS]
+    text = "Run by " + ", ".join(
+        f"{n} ({', '.join(r for r in people[n] if r)})" if any(people[n]) else n for n in shown
+    )
+    if len(names) > len(shown):
+        text += f" and {len(names) - len(shown)} more registered role holders"
+    return SummarySentence(text + ".", ["leader"], [c for n in shown for c in people_claims[n]])
+
+
+def _workplaces_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    places = [c for c in profile.leadership.workplaces if c.state == EvidenceState.AVAILABLE and c.value]
+    if not places:
+        return None
+    shown = places[:_MAX_WORKPLACES]
+    lead_in = f"{len(places)} registered workplaces, e.g. " if len(places) > 1 else "1 registered workplace: "
+    text = lead_in + "; ".join(c.value for c in shown) + "."
+    return SummarySentence(text, ["workplace"], shown)
+
+
+def _web_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    site = profile.online_presence.official_site
+    profiles = [c for c in profile.online_presence.company_profiles if c.state == EvidenceState.AVAILABLE and c.value]
+    parts: list[str] = []
+    claims: list[Claim] = []
+    if _value_or_none(site):
+        parts.append(f"official website {_host(site.value)}")
+        claims.append(site)
+    platforms: list[str] = []
+    for claim in profiles:
+        host = _host(claim.value)
+        label = next((name for domain, name in _PLATFORMS.items() if host == domain or host.endswith("." + domain)), host)
+        if label not in platforms:
+            platforms.append(label)
+    if platforms:
+        parts.append("company profiles on " + ", ".join(platforms[:4]))
+        claims.extend(profiles[:4])
+    if not parts:
+        return None
+    return SummarySentence("Online: " + "; ".join(parts) + ".", ["official_website", "company_profile"], claims)
+
+
+def _hiring_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    signals = [c for c in profile.activity.hiring_signals if c.state == EvidenceState.AVAILABLE and c.value]
+    if not signals:
+        return None
+    first = signals[0]
+    when = f" (seen {_day(first)})" if _day(first) else ""
+    more = f" and {len(signals) - 1} more" if len(signals) > 1 else ""
+    return SummarySentence(f"Hiring: {first.value}{more}{when}.", ["hiring_signal"], [first])
+
+
+def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    latest = _latest_dated(profile.activity.dated_activity)
+    if latest is None:
+        return None
+    claim, date = latest
+    return SummarySentence(f"Most recent dated activity ({date}): {claim.value}.", ["dated_activity"], [claim])
+
+
+def build_summary(profile: CompanyProfile) -> Summary:
+    """The short dated narrative for `profile`. Same discipline as the Q&A in
+    answer_business_questions: nothing is stated that a verified Claim doesn't
+    support, and every gap is named under `unknowns` instead of guessed."""
+    as_of = profile.run_timestamp.date().isoformat()
+    builders = (
+        _identity_sentence, _accounts_sentence, _leadership_sentence, _workplaces_sentence,
+        _web_sentence, _hiring_sentence, _activity_sentence,
+    )
+    sentences = [s for s in (build(profile) for build in builders) if s is not None]
+
+    unknowns: list[str] = []
+    if _value_or_none(profile.online_presence.official_site) is None:
+        unknowns.append("official website")
+    if not profile.online_presence.company_profiles:
+        unknowns.append("company-owned social profiles")
+    if _value_or_none(profile.annual_accounts.latest) is None:
+        unknowns.append("annual accounts")
+    if not profile.leadership.leaders:
+        unknowns.append("leadership")
+    if not profile.activity.hiring_signals:
+        unknowns.append("hiring signals")
+
+    meta = profile.refresh_metadata
+    if meta.is_first_run:
+        changes: list[str] = []
+        sentences.append(SummarySentence(f"First snapshot on {as_of}; there is no earlier run to compare against.", []))
+    elif meta.material_changes:
+        changes = list(meta.material_changes)
+        sentences.append(SummarySentence("Changed since the last run: " + "; ".join(changes) + ".", []))
+    else:
+        changes = []
+        sentences.append(SummarySentence("No material changes since the last run.", []))
+    if unknowns:
+        sentences.append(SummarySentence("Not found: " + ", ".join(unknowns) + ".", []))
+
+    if sentences:
+        sentences[0].text = f"As of {as_of}: {sentences[0].text}"
+    return Summary(as_of=as_of, sentences=sentences, unknowns=unknowns, changes=changes)
 
 
 def answer_business_questions(profile: CompanyProfile) -> list[dict]:

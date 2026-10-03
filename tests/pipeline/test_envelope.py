@@ -221,14 +221,10 @@ def test_operations_defaults_when_not_provided():
     assert envelope["operations"] == {"requests": 0, "runtime_ms": 0, "third_party_cost_usd": 0.0}
 
 
-def test_envelope_embeds_the_synthesis_answers():
-    """Real gap found investigating a "decision-useful synthesis" score of
-    0/10 despite src/synthesis.py being built and tested: its answers were
-    only ever consumed by src/reporting.py's separate report.html, which
-    never leaves the machine that generated it -- the actual submitted
-    artifact is envelopes.jsonl, and to_envelope() never included them.
-    Synthesis answers must be embedded directly in the envelope so the
-    evaluator (which only ever sees the submitted JSONL) can see them."""
+def test_envelope_embeds_one_dated_summary_not_a_question_list():
+    """The submitted artifact is envelopes.jsonl, so the synthesis has to be in
+    it. Official feedback asked for "a shorter dated summary instead of a
+    list", so the envelope carries one narrative, not the Q&A list."""
     profile = make_profile(
         org_number="923609016",
         legal_name=available_claim("EQUINOR ASA"),
@@ -237,6 +233,24 @@ def test_envelope_embeds_the_synthesis_answers():
 
     envelope = to_envelope(profile, run_id="run-1")
 
-    from src.synthesis import answer_business_questions
+    assert "answers" not in envelope
+    summary = envelope["summary"]
+    assert summary["as_of"] == profile.run_timestamp.date().isoformat()
+    assert summary["text"].startswith(f"As of {summary['as_of']}: EQUINOR ASA")
+    assert "equinor.com" in summary["text"]
 
-    assert envelope["answers"] == answer_business_questions(profile)
+
+def test_each_summary_sentence_points_at_the_evidence_it_rests_on():
+    profile = make_profile(
+        org_number="923609016",
+        legal_name=available_claim("EQUINOR ASA", source="https://data.brreg.no/enhet/923609016"),
+        official_site=available_claim("https://www.equinor.com", source="https://www.equinor.com/"),
+    )
+
+    envelope = to_envelope(profile, run_id="run-1")
+
+    evidence_by_id = {e["id"]: e for e in envelope["evidence"]}
+    cited = {i for s in envelope["summary"]["sentences"] for i in s["evidence_ids"]}
+    assert cited and cited <= set(evidence_by_id)
+    identity = envelope["summary"]["sentences"][0]
+    assert any(evidence_by_id[i]["source_url"] == "https://data.brreg.no/enhet/923609016" for i in identity["evidence_ids"])

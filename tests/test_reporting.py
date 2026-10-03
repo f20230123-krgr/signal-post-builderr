@@ -43,12 +43,12 @@ def test_report_shows_not_available_honestly_never_blank_or_fabricated():
     assert "not available" in html.lower() or "not_available" in html.lower()
 
 
-def test_report_includes_synthesis_answers():
+def test_report_includes_the_dated_summary():
     profile = make_profile(legal_name=available_claim("EQUINOR ASA"))
 
     html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
 
-    assert "What is the company" in html and "legal name and brand?" in html
+    assert "As of " in html and "EQUINOR ASA (org. no." in html
 
 
 def test_report_handles_empty_profile_list_without_crashing():
@@ -65,10 +65,11 @@ def test_report_escapes_html_special_characters_in_claim_values():
     assert "&lt;script&gt;" in html
 
 
-def test_a_synthesis_answer_with_a_source_links_to_it_for_verification():
+def test_a_sourced_summary_links_to_its_source_for_verification():
     """Usability bar: "a user should be able to find, compare and verify
-    company information on desktop and mobile." A sourced answer must carry
-    a clickable link to that source, not just prose."""
+    company information on desktop and mobile." A sourced fact must carry
+    a clickable link to that source, not just prose (here: the no-JavaScript
+    fallback; the interactive viewer opens the same link in its evidence panel)."""
     profile = make_profile(
         legal_name=available_claim("EQUINOR ASA", source="https://data.brreg.no/enhetsregisteret/api/enheter/923609016"),
     )
@@ -78,9 +79,47 @@ def test_a_synthesis_answer_with_a_source_links_to_it_for_verification():
     assert 'href="https://data.brreg.no/enhetsregisteret/api/enheter/923609016"' in html
 
 
-def test_a_synthesis_answer_with_no_source_shows_no_broken_link():
+def test_a_company_with_no_source_shows_no_broken_link():
     profile = make_profile()  # everything NOT_AVAILABLE, no sources
 
     html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     assert 'href=""' not in html
+
+
+def test_the_viewer_embeds_the_submitted_envelopes_verbatim():
+    """The page is a viewer of what is submitted, not a second rendering of it."""
+    import json
+    import re
+
+    from src.pipeline.envelope import to_envelope
+
+    profile = make_profile(org_number="923609016", legal_name=available_claim("EQUINOR ASA"))
+    envelope = to_envelope(profile, run_id="r")
+
+    html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc), envelopes=[envelope])
+
+    payload = re.search(r'<script type="application/json" id="atlas-data">(.*?)</script>', html, re.S).group(1)
+    data = json.loads(payload)
+    assert data["envelopes"][0]["organisation_number"] == "923609016"
+    embedded = data["envelopes"][0]["summary"]
+    assert " ".join(x["text"] for x in embedded["sentences"]) == envelope["summary"]["text"]
+    assert embedded["sentences"] == envelope["summary"]["sentences"]
+    assert data["envelopes"][0]["claims"] == [
+        {k: v for k, v in c.items() if v is not None} for c in envelope["claims"]
+    ]
+
+
+def test_embedded_data_cannot_close_the_script_element():
+    profile = make_profile(legal_name=available_claim("</script><b>x</b> AS"))
+
+    html = render_html_report([profile], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert html.count("</script>") == 2  # the data block and the app script only
+
+
+def test_the_viewer_offers_find_compare_and_verify():
+    html = render_html_report([make_profile()], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    for needle in ('id="q"', 'id="filters"', 'id="cmpGo"', 'id="drawer"', "Evidence", 'role="group"', "prefers-color-scheme"):
+        assert needle in html

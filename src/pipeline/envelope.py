@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
-from src.synthesis import answer_business_questions
+from src.synthesis import build_summary
 
 _ERROR_STATES = {EvidenceState.FAILED, EvidenceState.BLOCKED}
 
@@ -93,6 +93,7 @@ def to_envelope(
 
     evidence_ids_by_key: dict[tuple[str, Optional[str], Optional[str]], str] = {}
     evidence_list: list[dict] = []
+    evidence_id_by_claim: dict[int, str] = {}
     claims: list[dict] = []
     errors: list[dict] = []
 
@@ -123,6 +124,7 @@ def to_envelope(
                     }
                 )
             evidence_ids = [evidence_id]
+            evidence_id_by_claim[id(claim)] = evidence_id
 
         claims.append(
             {
@@ -142,6 +144,7 @@ def to_envelope(
         if claim.state in _ERROR_STATES:
             errors.append({"field": field_name, "state": claim.state.value})
 
+    summary = build_summary(profile)
     return {
         "organisation_number": profile.org_number,
         "run": {
@@ -155,10 +158,27 @@ def to_envelope(
         "changes": list(profile.refresh_metadata.material_changes),
         "errors": errors,
         "operations": operations,
-        # Real gap found chasing a "decision-useful synthesis" score of 0/10:
-        # src/synthesis.py's templated business-question answers were only
-        # ever consumed by src/reporting.py's separate report.html, which
-        # never leaves the machine that generated it. envelopes.jsonl is the
-        # actual submitted artifact, so the answers must live here too.
-        "answers": answer_business_questions(profile),
+        # Decision-useful synthesis: ONE short dated narrative per company
+        # (not a Q&A list -- official feedback asked for "a shorter dated
+        # summary instead of a list"). Each sentence names the claim fields it
+        # rests on and the evidence ids that support it; gaps are named under
+        # "unknowns" rather than guessed. envelopes.jsonl is the submitted
+        # artifact, so the summary has to live here, not only in the report.
+        "summary": {
+            "as_of": summary.as_of,
+            "text": summary.text,
+            "sentences": [
+                {
+                    "text": s.text,
+                    "fields": s.fields,
+                    "evidence_ids": sorted(
+                        {evidence_id_by_claim[id(c)] for c in s.claims if id(c) in evidence_id_by_claim},
+                        key=lambda e: int(e.split("-")[1]),
+                    ),
+                }
+                for s in summary.sentences
+            ],
+            "changes": summary.changes,
+            "unknowns": summary.unknowns,
+        },
     }

@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Signalpost Atlas</title>
+<style>
+:root {
+  --bg: #edf1f3; --panel: #ffffff; --panel-2: #f5f8f9; --ink: #0e222d; --muted: #566a75; --line: #d3dce1;
+  --accent: #0a6a89; --accent-soft: #dcecf2; --accent-ink: #ffffff;
+  --ok: #176b43; --ok-soft: #dff1e7; --warn: #9a5a07; --warn-soft: #fbecd2; --bad: #a93a30; --bad-soft: #f8e0dd;
+  --reg: #1d5fa8; --own: #1f8a5b; --ext: #c47a12; --mark: #fff0b8; --shadow: 0 1px 2px rgba(14,34,45,.06), 0 6px 18px rgba(14,34,45,.06);
+  --radius: 10px;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b171e; --panel: #12232d; --panel-2: #0f1e27; --ink: #e5eef2; --muted: #92a8b3; --line: #243a46;
+    --accent: #4db3d4; --accent-soft: #123747; --accent-ink: #06222c;
+    --ok: #52c58c; --ok-soft: #123626; --warn: #e3a54c; --warn-soft: #3a2a0e; --bad: #f08a80; --bad-soft: #3d1b18;
+    --reg: #6fa8ec; --own: #4fc491; --ext: #e6a143; --mark: #5c4b12; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b171e; --panel: #12232d; --panel-2: #0f1e27; --ink: #e5eef2; --muted: #92a8b3; --line: #243a46;
+  --accent: #4db3d4; --accent-soft: #123747; --accent-ink: #06222c;
+  --ok: #52c58c; --ok-soft: #123626; --warn: #e3a54c; --warn-soft: #3a2a0e; --bad: #f08a80; --bad-soft: #3d1b18;
+  --reg: #6fa8ec; --own: #4fc491; --ext: #e6a143; --mark: #5c4b12; --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); -webkit-text-size-adjust: 100%; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.skip { position: absolute; left: -999px; top: 8px; background: var(--accent); color: var(--accent-ink); padding: 8px 12px; border-radius: 6px; z-index: 50; }
+.skip:focus { left: 8px; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: .86em; }
+
+/* top bar */
+.top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand h1 { margin: 0; font-size: 1.05rem; letter-spacing: .01em; white-space: nowrap; }
+.brand h1 b { color: var(--accent); }
+.brand .asof { color: var(--muted); font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top .sp { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; line-height: 1.3; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--accent); white-space: nowrap; }
+
+/* layout */
+.app { display: grid; grid-template-columns: minmax(320px, 400px) 1fr; height: calc(100vh - 57px); height: calc(100dvh - 57px); }
+.list-pane { display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel-2); min-height: 0; }
+.tools { padding: 12px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.search { position: relative; }
+.search input { width: 100%; padding: 9px 12px 9px 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font: .72rem var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 11px; font-size: .84rem; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.row-tools { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--muted); }
+.row-tools select { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 6px; }
+.row-tools .sp { flex: 1; }
+.list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; }
+.row { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.row.sel { background: var(--accent-soft); }
+.pick { align-self: center; margin: 0 0 0 12px; width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.item { flex: 1; text-align: left; background: transparent; border: 0; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.item .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .sub { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dots { display: flex; gap: 3px; margin-top: 3px; }
+.dots i { width: 14px; height: 5px; border-radius: 3px; background: var(--line); }
+.dots i.on { background: var(--accent); }
+.more { padding: 12px; text-align: center; }
+.empty { padding: 24px 16px; color: var(--muted); text-align: center; }
+
+main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60px; }
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.card h2 { margin: 0 0 10px; font-size: .78rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+.head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-start; }
+.head .ttl { flex: 1; min-width: 240px; }
+.head h2.co { margin: 0; font-size: clamp(1.25rem, 3vw, 1.7rem); text-transform: none; letter-spacing: 0; color: var(--ink); line-height: 1.2; }
+.head .meta { color: var(--muted); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .88rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: .76rem; font-weight: 600; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.pill.available, .pill.active { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.pill.ambiguous, .pill.not_applicable { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.pill.failed, .pill.blocked, .pill.bankrupt { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+
+.story { display: grid; gap: 2px; max-width: 78ch; }
+.story .sent { display: grid; grid-template-columns: 78px 1fr; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); line-height: 1.55; }
+.story .sent:last-child { border-bottom: 0; }
+.story .topic { color: var(--muted); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; padding-top: 3px; font-weight: 650; }
+.cite { font: .7rem var(--mono); border: 1px solid var(--line); background: var(--panel-2); color: var(--accent); border-radius: 5px; padding: 0 4px; margin-left: 2px; vertical-align: super; line-height: 1.2; }
+.cite:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.gaps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; color: var(--muted); font-size: .88rem; }
+.gaps .pill { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.changes { margin-top: 10px; font-size: .9rem; color: var(--muted); }
+
+.facts h3 { margin: 18px 0 4px; font-size: .95rem; }
+.facts h3:first-of-type { margin-top: 0; }
+.fact { display: grid; grid-template-columns: 150px 1fr auto; gap: 4px 14px; padding: 8px 0 8px 12px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--line); margin-left: 0; align-items: baseline; }
+.fact.src-official_registry { border-left-color: var(--reg); }
+.fact.src-company_owned { border-left-color: var(--own); }
+.fact.src-external { border-left-color: var(--ext); }
+.fact .k { color: var(--muted); font-size: .86rem; }
+.fact .v { overflow-wrap: anywhere; }
+.fact.na .v { color: var(--muted); font-style: italic; }
+.fact .why { border: 1px solid var(--line); background: transparent; border-radius: 6px; font-size: .78rem; padding: 2px 8px; color: var(--accent); }
+.fact .why:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.fact .sub { color: var(--muted); font-size: .82rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .82rem; color: var(--muted); margin-bottom: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; background: var(--c); }
+
+.cov { display: grid; gap: 9px; }
+.cov .r { display: grid; grid-template-columns: 170px 1fr 60px; gap: 10px; align-items: center; font-size: .9rem; }
+.bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.bar b { display: block; height: 100%; background: var(--accent); }
+.bar.low b { background: var(--ext); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .l { color: var(--muted); font-size: .82rem; }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+/* compare */
+.cmp { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 560px; }
+.cmp th, .cmp td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.cmp thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.cmp tbody th { color: var(--muted); font-weight: 500; width: 140px; }
+.cmp td.diff { background: var(--mark); }
+.cmp td.na { color: var(--muted); font-style: italic; }
+.scroll-x { overflow-x: auto; }
+.tray { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--ink); color: var(--bg); border-radius: 999px; padding: 8px 10px 8px 18px; display: none; gap: 12px; align-items: center; box-shadow: 0 8px 28px rgba(0,0,0,.3); z-index: 30; max-width: calc(100vw - 24px); }
+.tray.on { display: flex; }
+.tray .btn { border-color: transparent; }
+
+/* drawer */
+dialog { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
+dialog::backdrop { background: rgba(7,18,24,.5); }
+.drawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(520px, 100vw); margin: 0; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 18px 20px 40px; box-shadow: -10px 0 40px rgba(0,0,0,.25); }
+.drawer h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.drawer .close { float: right; }
+.ev { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 12px; background: var(--panel-2); display: grid; gap: 8px; }
+.ev dl { margin: 0; display: grid; grid-template-columns: 112px 1fr; gap: 4px 10px; font-size: .86rem; }
+.ev dt { color: var(--muted); }
+.ev dd { margin: 0; overflow-wrap: anywhere; }
+.ev blockquote { margin: 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--mark); font: .85rem var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; border-radius: 0 6px 6px 0; }
+.guide { max-width: 640px; margin: 8vh auto; background: var(--panel); border-radius: 14px; padding: 22px 26px; border: 1px solid var(--line); }
+.guide h3 { margin-top: 0; }
+.guide dl { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; }
+.guide dt { font-weight: 600; }
+.guide dd { margin: 0; }
+
+.only-mobile { display: none; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  body[data-view="detail"] .list-pane, body[data-view="compare"] .list-pane, body[data-view="overview"] .list-pane { display: none; }
+  body[data-view="list"] main, body[data-view="home"] main { display: none; }
+  body[data-view="home"] .list-pane, body[data-view="list"] .list-pane { display: flex; }
+  .only-mobile { display: inline-flex; }
+  .fact { grid-template-columns: 1fr auto; }
+  .fact .k { grid-column: 1 / -1; }
+  .cov .r { grid-template-columns: 1fr 60px; }
+  .cov .r .bar { grid-column: 1 / -1; order: 3; }
+  .brand .asof { display: none; }
+  .tray { bottom: 10px; }
+}
+@media (prefers-reduced-motion: no-preference) { .card, .row { transition: background .15s; } }
+@media print { .top, .list-pane, .tray, .actions, .why { display: none !important; } .app { display: block; height: auto; } main { overflow: visible; } }
+</style>
+</head>
+<body data-view="home">
+<a class="skip" href="#main">Skip to company details</a>
+<header class="top">
+  <div class="brand"><h1>Signalpost <b>Atlas</b></h1><span class="asof" id="asof"></span></div>
+  <span class="sp"></span>
+  <button class="btn ghost" id="overviewBtn" type="button">Overview</button>
+  <button class="btn ghost" id="guideBtn" type="button">Guide</button>
+  <button class="btn" id="themeBtn" type="button" aria-label="Switch colour theme">Theme</button>
+</header>
+
+<div class="app">
+  <section class="list-pane" aria-label="Companies">
+    <div class="tools">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Search name, org. number, industry, website" aria-label="Search companies" autocomplete="off">
+        <kbd aria-hidden="true">/</kbd>
+      </div>
+      <div class="chips" id="filters" role="group" aria-label="Filters"></div>
+      <div class="row-tools">
+        <span id="count" aria-live="polite"></span><span class="sp"></span>
+        <label>Sort <select id="sort" aria-label="Sort companies"></select></label>
+        <button class="btn ghost" id="csv" type="button" title="Download the filtered list as CSV">CSV</button>
+      </div>
+    </div>
+    <ul class="list" id="list"></ul>
+  </section>
+  <main id="main" tabindex="-1"></main>
+</div>
+
+<div class="tray" id="tray" role="region" aria-label="Comparison">
+  <span id="trayText"></span>
+  <button class="btn primary" id="cmpGo" type="button">Compare</button>
+  <button class="btn" id="cmpClear" type="button">Clear</button>
+</div>
+
+<dialog id="drawer" aria-label="Evidence"><div class="drawer" id="drawerBody"></div></dialog>
+<dialog id="guide" aria-label="How to read this"><div class="guide" id="guideBody"></div></dialog>
+
+<noscript>{{NOSCRIPT}}</noscript>
+
+<script type="application/json" id="atlas-data">{{ATLAS_DATA}}</script>
+<script>
+"use strict";
+(function () {
+const DATA = JSON.parse(document.getElementById("atlas-data").textContent);
+const $ = (s, r) => (r || document).querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isUrl = s => /^https?:\/\//i.test(s || "");
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; } };
+const fmt = n => new Intl.NumberFormat("en-GB").format(n);
+const money = n => { const a = Math.abs(n), s = n < 0 ? "-" : ""; return a >= 1e9 ? s + (a / 1e9).toFixed(2) + " bn" : a >= 1e6 ? s + (a / 1e6).toFixed(1) + " m" : a >= 1e3 ? s + (a / 1e3).toFixed(0) + " k" : String(n); };
+const DATE_RE = /\d{4}-\d{2}-\d{2}/g;
+
+const CLASS_LABEL = { official_registry: "Official registry", company_owned: "Company-owned site", external: "External source" };
+const STATE_HELP = {
+  available: "Found and verified against a source.",
+  not_available: "We looked and the source has nothing for this company.",
+  ambiguous: "A plausible match exists but identity could not be confirmed, so nothing is published.",
+  blocked: "The source refused or restricted access.",
+  failed: "A temporary error stopped the lookup; the last known value is kept when one exists.",
+  not_applicable: "This field does not apply to this company."
+};
+const LABEL = {
+  legal_name: "Legal name", public_brand: "Public brand", legal_form: "Legal form", industry: "Industry", operating_status: "Registry status",
+  founded_date: "Founded", employee_count: "Employees", annual_accounts_latest: "Latest accounts", annual_accounts_history: "Earlier accounts",
+  leader: "Roles", workplace: "Workplaces", official_website: "Official website", company_profile: "Company profiles",
+  hiring_signal: "Hiring", dated_activity: "Dated activity"
+};
+const SECTIONS = [
+  ["Identity", ["legal_name", "public_brand", "legal_form", "industry", "operating_status", "founded_date", "employee_count"]],
+  ["Annual accounts", ["annual_accounts_latest", "annual_accounts_history"]],
+  ["People and places", ["leader", "workplace"]],
+  ["Web presence", ["official_website", "company_profile"]],
+  ["Hiring and activity", ["hiring_signal", "dated_activity"]]
+];
+const FLAGS = [
+  ["site", "Official website"], ["social", "Company-owned social profiles"], ["hiring", "Hiring signals"],
+  ["leaders", "Leadership"], ["accounts", "Annual accounts"], ["activity", "Dated public activity"], ["workplaces", "Registered workplaces"]
+];
+
+/* ---------- data ---------- */
+function prep(env) {
+  const claims = env.claims || [];
+  const ev = {}; (env.evidence || []).forEach(e => { ev[e.id] = e; });
+  const all = f => claims.map((c, i) => Object.assign({ i }, c)).filter(c => c.field === f);
+  const ok = f => all(f).filter(c => c.availability === "available" && c.value);
+  const one = f => (ok(f)[0] || {}).value;
+  const acc = one("annual_accounts_latest");
+  const rev = acc && /Revenue:\s*(-?[\d,]+)/.exec(acc), res = acc && /Net result:\s*(-?[\d,]+)/.exec(acc);
+  const c = {
+    env, org: env.organisation_number, claims, ev, all, ok, one,
+    name: one("legal_name") || ("Org. " + env.organisation_number),
+    status: one("operating_status"), industry: one("industry"), form: one("legal_form"),
+    employees: one("employee_count") ? Number(one("employee_count")) : null, founded: one("founded_date"),
+    revenue: rev ? Number(rev[1].replace(/,/g, "")) : null, result: res ? Number(res[1].replace(/,/g, "")) : null,
+    site: one("official_website")
+  };
+  c.flags = {
+    site: !!c.site, social: ok("company_profile").length > 0, hiring: ok("hiring_signal").length > 0,
+    leaders: ok("leader").length > 0, accounts: !!acc, activity: ok("dated_activity").length > 0, workplaces: ok("workplace").length > 0
+  };
+  c.score = FLAGS.filter(f => c.flags[f[0]]).length;
+  c.changed = (env.changes || []).length > 0;
+  c.hay = [c.name, c.org, c.industry, c.site && host(c.site), one("public_brand")].filter(Boolean).join(" ").toLowerCase();
+  return c;
+}
+const companies = DATA.envelopes.map(prep);
+const byOrg = Object.fromEntries(companies.map(c => [c.org, c]));
+
+/* ---------- state ---------- */
+const state = { q: "", filters: new Set(), sort: "name", limit: 60, picked: [], open: null, view: "home" };
+const FILTERS = {
+  site: ["Website", c => c.flags.site], social: ["Social", c => c.flags.social], hiring: ["Hiring", c => c.flags.hiring],
+  leaders: ["Leadership", c => c.flags.leaders], accounts: ["Accounts", c => c.flags.accounts],
+  active: ["Active only", c => (c.status || "").toLowerCase() === "active"], changed: ["Changed", c => c.changed]
+};
+const SORTS = {
+  name: ["Name A-Z", (a, b) => a.name.localeCompare(b.name, "nb")],
+  complete: ["Most complete", (a, b) => b.score - a.score || a.name.localeCompare(b.name, "nb")],
+  employees: ["Employees", (a, b) => (b.employees || -1) - (a.employees || -1)],
+  revenue: ["Revenue", (a, b) => (b.revenue == null ? -Infinity : b.revenue) - (a.revenue == null ? -Infinity : a.revenue)]
+};
+
+/* ---------- helpers ---------- */
+function setView(v) { state.view = v; document.body.dataset.view = v; }
+function claimClass(c, claim) { const e = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean)[0]; return e ? e.source_class : ""; }
+function valueHtml(v) {
+  if (isUrl(v)) return '<a href="' + esc(v) + '" target="_blank" rel="noopener noreferrer">' + esc(v) + "</a>";
+  return esc(v);
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function latestDate(s) { const m = (s || "").match(DATE_RE); return m ? m.sort().pop() : ""; }
+
+/* ---------- list ---------- */
+function filtered() {
+  const q = state.q.toLowerCase().trim();
+  const rows = companies.filter(c => (!q || c.hay.includes(q)) && [...state.filters].every(f => FILTERS[f][1](c)));
+  rows.sort(SORTS[state.sort][1]);
+  return rows;
+}
+function renderList() {
+  const rows = filtered();
+  $("#count").textContent = fmt(rows.length) + " of " + fmt(companies.length) + " companies";
+  const shown = rows.slice(0, state.limit);
+  $("#list").innerHTML = shown.length ? shown.map(c =>
+    '<li class="row' + (state.open === c.org ? " sel" : "") + '">' +
+    '<input class="pick" type="checkbox" data-o="' + c.org + '" aria-label="Compare ' + esc(c.name) + '"' + (state.picked.includes(c.org) ? " checked" : "") + ">" +
+    '<button class="item" type="button" data-o="' + c.org + '"' + (state.open === c.org ? ' aria-current="true"' : "") + ">" +
+    '<span class="nm">' + esc(c.name) + "</span>" +
+    '<span class="sub"><span class="mono">' + esc(c.org) + "</span>" + (c.industry ? " &middot; " + esc(c.industry.replace(/^\d+\.\d+\s*/, "")) : "") + "</span>" +
+    '<span class="dots" title="' + c.score + " of " + FLAGS.length + ' information types found">' + FLAGS.map(f => '<i class="' + (c.flags[f[0]] ? "on" : "") + '"></i>').join("") + "</span>" +
+    "</button></li>").join("") +
+    (rows.length > shown.length ? '<li class="more"><button class="btn" id="moreBtn" type="button">Show ' + Math.min(60, rows.length - shown.length) + " more</button></li>" : "")
+    : '<li class="empty">No company matches. Clear a filter or change the search.</li>';
+}
+function renderTools() {
+  $("#filters").innerHTML = Object.keys(FILTERS).map(k => '<button type="button" class="chip" data-f="' + k + '" aria-pressed="' + state.filters.has(k) + '">' + FILTERS[k][0] + "</button>").join("");
+  $("#sort").innerHTML = Object.keys(SORTS).map(k => '<option value="' + k + '"' + (state.sort === k ? " selected" : "") + ">" + SORTS[k][0] + "</option>").join("");
+}
+function renderTray() {
+  const n = state.picked.length;
+  $("#tray").classList.toggle("on", n > 0);
+  $("#trayText").textContent = n + " selected" + (n < 2 ? " (pick at least 2)" : "");
+  $("#cmpGo").disabled = n < 2;
+}
+
+/* ---------- home ---------- */
+function renderHome() {
+  const n = companies.length, cnt = k => companies.filter(c => c.flags[k]).length;
+  const evCount = companies.reduce((s, c) => s + Object.keys(c.ev).length, 0);
+  const claimCount = companies.reduce((s, c) => s + c.claims.filter(x => x.availability === "available").length, 0);
+  const rows = FLAGS.map(f => ({ label: f[1], p: n ? cnt(f[0]) / n : 0, k: cnt(f[0]) })).sort((a, b) => b.p - a.p);
+  const weakest = rows[rows.length - 1];
+  $("#main").innerHTML = '<div class="wrap"><button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
+    '<div class="card"><h2>This run</h2><div class="kpis">' +
+    '<div class="kpi"><div class="n">' + fmt(n) + '</div><div class="l">companies, one envelope each</div></div>' +
+    '<div class="kpi"><div class="n">' + fmt(claimCount) + '</div><div class="l">verified claims</div></div>' +
+    '<div class="kpi"><div class="n">' + fmt(evCount) + '</div><div class="l">evidence records</div></div>' +
+    '<div class="kpi"><div class="n">' + esc(DATA.as_of) + '</div><div class="l">data as of</div></div></div></div>' +
+    '<div class="card"><h2>What we found, by information type</h2><div class="cov">' +
+    rows.map(r => '<div class="r"><span>' + esc(r.label) + '</span><span class="bar' + (r.p < .3 ? " low" : "") + '"><b style="width:' + (r.p * 100).toFixed(1) + '%"></b></span><span class="num">' + (r.p * 100).toFixed(1) + "%</span></div>").join("") +
+    '</div><p class="changes">Weakest area: <b>' + esc(weakest.label.toLowerCase()) + "</b> (" + fmt(weakest.k) + " of " + fmt(n) + '). A missing value is shown as "not found", never as zero.</p></div>' +
+    '<div class="card"><h2>Find, compare, verify</h2><ol class="steps">' +
+    "<li><b>Find</b> a company: search by name, organisation number, industry or website, or filter by what we found.</li>" +
+    "<li><b>Compare</b> up to four companies side by side: tick the boxes in the list, then press Compare.</li>" +
+    "<li><b>Verify</b> any fact: press <i>Evidence</i> (or a numbered citation in the summary) to see the source link, retrieval time, reporting period, content hash and the exact quoted text.</li></ol></div></div>";
+}
+
+/* ---------- company ---------- */
+function citeButtons(c, ids) {
+  const have = (ids || []).filter(i => c.ev[i]), shown = have.slice(0, 3);
+  const btn = i => '<button type="button" class="cite" data-ev="' + esc(i) + '" aria-label="Open evidence ' + esc(i.replace("ev-", "")) + '">' + esc(i.replace("ev-", "")) + "</button>";
+  const rest = have.length - shown.length;
+  return shown.map(btn).join("") + (rest > 0 ? '<button type="button" class="cite" data-ev="' + esc(have[3]) + '" title="' + rest + ' more evidence records, listed under Every fact below">+' + rest + "</button>" : "");
+}
+function factRow(c, f, claim) {
+  const cls = claimClass(c, claim);
+  const val = claim.value;
+  let extra = "";
+  if (claim.reporting_period) extra += '<div class="sub">Period ' + esc(claim.reporting_period) + (claim.effective_at ? ", to " + esc(claim.effective_at) : "") + "</div>";
+  else if (claim.effective_at) extra += '<div class="sub">Effective ' + esc(claim.effective_at) + "</div>";
+  return '<div class="fact src-' + esc(cls) + '"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">' + valueHtml(val) + extra + "</div>" +
+    '<button type="button" class="why" data-ci="' + claim.i + '">Evidence</button></div>';
+}
+function naRow(c, f) {
+  const st = (c.all(f)[0] || {}).availability || "not_available";
+  return '<div class="fact na"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">Not found <span class="pill ' + esc(st) + '" title="' + esc(STATE_HELP[st] || "") + '">' + esc(st.replace("_", " ")) + "</span></div><span></span></div>";
+}
+function section(c, title, fields) {
+  let html = "<h3>" + esc(title) + "</h3>";
+  fields.forEach(f => {
+    let list = c.ok(f);
+    if (f === "dated_activity") list = list.slice().sort((a, b) => latestDate(b.value).localeCompare(latestDate(a.value)));
+    if (!list.length) { html += naRow(c, f); return; }
+    const head = list.slice(0, 8).map(x => factRow(c, f, x)).join("");
+    html += head;
+    if (list.length > 8) html += "<details><summary>Show " + (list.length - 8) + " more</summary>" + list.slice(8).map(x => factRow(c, f, x)).join("") + "</details>";
+  });
+  return html;
+}
+const TOPIC = {
+  legal_name: "Company", annual_accounts_latest: "Accounts", leader: "People", workplace: "Places",
+  official_website: "Online", hiring_signal: "Hiring", dated_activity: "Latest"
+};
+function topicOf(x, i, n) {
+  const hit = (x.fields || []).find(f => TOPIC[f]);
+  if (hit) return TOPIC[hit];
+  return /^First snapshot|^No material|^Changed since/.test(x.text) ? "Changes" : "Gaps";
+}
+function renderCompany(c) {
+  const s = c.env.summary || { sentences: [], unknowns: [], changes: [] };
+  const story = (s.sentences || []).map((x, i, a) =>
+    '<div class="sent"><span class="topic">' + esc(topicOf(x, i, a.length)) + "</span><span>" + esc(x.text.replace(/^As of \d{4}-\d{2}-\d{2}: /, "")) + citeButtons(c, x.evidence_ids) + "</span></div>").join("");
+  const gaps = (s.unknowns || []).length ? '<div class="gaps">Not found:' + s.unknowns.map(u => '<span class="pill">' + esc(u) + "</span>").join("") + "</div>" : "";
+  const st = (c.status || "").toLowerCase();
+  $("#main").innerHTML = '<div class="wrap">' +
+    '<div class="card"><div class="head"><div class="ttl">' +
+    '<button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
+    '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\"><span class=\"mono\">org. " + esc(c.org) + "</span>" +
+    (c.form ? "<span>" + esc(c.form) + "</span>" : "") + (c.status ? '<span class="pill ' + esc(st) + '">' + esc(c.status) + "</span>" : "") +
+    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") + "</div></div>" +
+    '<div class="actions"><button class="btn" id="pickBtn" type="button">' + (state.picked.includes(c.org) ? "Remove from compare" : "Add to compare") + "</button>" +
+    '<button class="btn" id="jsonBtn" type="button">Envelope JSON</button><button class="btn" id="linkBtn" type="button">Copy link</button></div></div></div>' +
+    '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + gaps +
+    ((s.changes || []).length ? '<div class="changes">Changes since the last run: ' + esc(s.changes.join("; ")) + "</div>" : "") + "</div>" +
+    '<div class="card facts"><h2>Every fact, with its source</h2><div class="legend">' +
+    '<span style="--c:var(--reg)">Official registry</span><span style="--c:var(--own)">Company-owned</span><span style="--c:var(--ext)">External</span></div>' +
+    SECTIONS.map(sec => section(c, sec[0], sec[1])).join("") + "</div></div>";
+  $("#main").scrollTop = 0;
+}
+
+/* ---------- compare ---------- */
+function renderCompare() {
+  const cs = state.picked.map(o => byOrg[o]).filter(Boolean);
+  const rowsDef = [
+    ["Registry status", c => c.status], ["Legal form", c => c.form], ["Industry", c => c.industry], ["Founded", c => c.founded],
+    ["Employees", c => c.employees != null ? fmt(c.employees) : null],
+    ["Revenue (NOK)", c => c.revenue != null ? money(c.revenue) : null], ["Net result (NOK)", c => c.result != null ? money(c.result) : null],
+    ["Accounts period", c => (c.ok("annual_accounts_latest")[0] || {}).reporting_period],
+    ["Leadership", c => c.ok("leader").slice(0, 3).map(x => x.value).join("; ")],
+    ["Workplaces", c => c.ok("workplace").length ? String(c.ok("workplace").length) : null],
+    ["Website", c => c.site && host(c.site)], ["Social profiles", c => c.ok("company_profile").length ? c.ok("company_profile").map(x => host(x.value)).join(", ") : null],
+    ["Hiring", c => c.ok("hiring_signal").length ? c.ok("hiring_signal")[0].value : null],
+    ["Latest activity", c => { const a = c.ok("dated_activity").map(x => latestDate(x.value)).sort().pop(); return a || null; }],
+    ["Information types found", c => c.score + " of " + FLAGS.length], ["Evidence records", c => String(Object.keys(c.ev).length)]
+  ];
+  const head = "<thead><tr><th></th>" + cs.map(c => '<th scope="col"><button class="btn ghost" data-o="' + c.org + '" type="button">' + esc(c.name) + '</button><div class="mono">' + esc(c.org) + "</div></th>").join("") + "</tr></thead>";
+  const body = "<tbody>" + rowsDef.map(r => {
+    const vals = cs.map(c => r[1](c));
+    const distinct = new Set(vals.map(v => v == null || v === "" ? "" : String(v)));
+    const differs = distinct.size > 1;
+    return "<tr><th scope=\"row\">" + esc(r[0]) + "</th>" + vals.map(v => (v == null || v === "") ? '<td class="na">Not found</td>' : '<td class="' + (differs ? "diff" : "") + '">' + esc(v) + "</td>").join("") + "</tr>";
+  }).join("") + "</tbody>";
+  $("#main").innerHTML = '<div class="wrap"><div class="card"><div class="head"><div class="ttl"><button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
+    '<h2 class="co">Comparing ' + cs.length + ' companies</h2><div class="meta">Highlighted cells differ between companies. Select a company name to open its evidence.</div></div>' +
+    '<div class="actions"><button class="btn" id="cmpCsv" type="button">Download CSV</button></div></div></div>' +
+    '<div class="card scroll-x"><table class="cmp">' + head + body + "</table></div></div>";
+  $("#cmpCsv").onclick = () => {
+    const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    download("signalpost-compare.csv", ["Field"].concat(cs.map(c => c.name)).map(q).join(",") + "\n" + rowsDef.map(r => [r[0]].concat(cs.map(c => r[1](c))).map(q).join(",")).join("\n"), "text/csv");
+  };
+  $("#main").scrollTop = 0;
+}
+
+/* ---------- evidence drawer ---------- */
+function evidenceHtml(e) {
+  const src = isUrl(e.source_url) ? '<a href="' + esc(e.source_url) + '" target="_blank" rel="noopener noreferrer">' + esc(e.source_url) + "</a>" :
+    esc(e.source_url) + " (Builderr's frozen registry snapshot, shipped with the run)";
+  return '<div class="ev"><dl><dt>Source</dt><dd>' + src + "</dd><dt>Source type</dt><dd>" + esc(CLASS_LABEL[e.source_class] || e.source_class || "") + "</dd>" +
+    "<dt>Retrieved</dt><dd>" + esc(e.retrieved_at || "unknown") + "</dd>" +
+    (e.reporting_period ? "<dt>Reporting period</dt><dd>" + esc(e.reporting_period) + "</dd>" : "") +
+    (e.effective_at ? "<dt>Effective</dt><dd>" + esc(e.effective_at) + "</dd>" : "") +
+    (e.linked_from ? "<dt>Reached via</dt><dd>" + valueHtml(e.linked_from) + "</dd>" : "") +
+    '<dt>Content SHA-256</dt><dd class="mono">' + esc(e.content_sha256 || "n/a") + "</dd></dl>" +
+    (e.claim_span ? "<div><div class=\"sub\">Supporting text</div><blockquote>" + esc(e.claim_span) + "</blockquote></div>" : "") + "</div>";
+}
+function openDrawer(html) {
+  const d = $("#drawer");
+  $("#drawerBody").innerHTML = '<button class="btn close" type="button" id="drawerClose">Close</button>' + html;
+  if (!d.open) d.showModal();
+  $("#drawerClose").focus();
+}
+function openClaim(c, ci) {
+  const claim = c.claims[ci], st = claim.availability || "available";
+  const evs = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean);
+  openDrawer("<h3>" + esc(LABEL[claim.field] || claim.field) + '</h3><p>' + valueHtml(claim.value || "Not found") + '</p><p><span class="pill ' + esc(st) + '">' + esc(st.replace("_", " ")) + "</span> " +
+    (claim.confidence != null ? '<span class="sub">identity confidence ' + Math.round(claim.confidence * 100) + "%</span>" : "") + '</p><p class="sub">' + esc(STATE_HELP[st] || "") + "</p>" +
+    (evs.length ? evs.map(evidenceHtml).join("") : '<p class="sub">No source recorded: nothing is published without one.</p>'));
+}
+function openEv(c, id) {
+  const e = c.ev[id]; if (!e) return;
+  const used = c.claims.filter(x => (x.evidence_ids || []).includes(id)).slice(0, 6);
+  openDrawer("<h3>Evidence " + esc(id.replace("ev-", "")) + "</h3>" + evidenceHtml(e) +
+    (used.length ? '<p class="sub">Supports: ' + used.map(x => esc(LABEL[x.field] || x.field)).filter((v, i, a) => a.indexOf(v) === i).join(", ") + "</p>" : ""));
+}
+
+/* ---------- guide ---------- */
+function openGuide() {
+  $("#guideBody").innerHTML = "<h3>How to read this page</h3><p>Every sentence and fact comes from a recorded source. Nothing is estimated, and a missing value is shown as <i>not found</i>, never as zero.</p>" +
+    '<dl><dt>Left bar colour</dt><dd><span style="color:var(--reg)">Blue</span> official registry, <span style="color:var(--own)">green</span> the company\'s own site, <span style="color:var(--ext)">amber</span> external source.</dd>' +
+    "<dt>Numbered citations</dt><dd>Open the evidence behind a sentence: link, retrieval time, content hash and quoted text.</dd>" +
+    Object.keys(STATE_HELP).map(k => "<dt>" + esc(k.replace("_", " ")) + "</dt><dd>" + esc(STATE_HELP[k]) + "</dd>").join("") +
+    '</dl><p><b>Shortcuts:</b> <span class="mono">/</span> search, <span class="mono">Esc</span> close.</p><button class="btn primary" type="button" id="guideClose">Got it</button>';
+  $("#guide").showModal(); $("#guideClose").focus();
+}
+
+/* ---------- routing ---------- */
+function route() {
+  const h = decodeURIComponent(location.hash.replace(/^#/, ""));
+  const m = /^c=(\d{9})$/.exec(h), cm = /^cmp=([\d,]+)$/.exec(h);
+  if (m && byOrg[m[1]]) {
+    state.open = m[1]; setView("detail"); renderCompany(byOrg[m[1]]);
+  } else if (cm) {
+    state.picked = cm[1].split(",").filter(o => byOrg[o]).slice(0, 4); state.open = null;
+    if (state.picked.length) { setView("compare"); renderCompare(); } else { setView("home"); renderHome(); }
+    renderTray();
+  } else {
+    state.open = null; setView(h === "overview" ? (window.innerWidth <= 900 ? "overview" : "home") : window.innerWidth <= 900 ? "list" : "home"); renderHome();
+  }
+  renderList();
+}
+function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
+
+/* ---------- events ---------- */
+document.addEventListener("click", e => {
+  const t = e.target.closest("button, a, input");
+  if (!t) return;
+  if (t.classList.contains("item")) { go("#c=" + t.dataset.o); }
+  else if (t.id === "moreBtn") { state.limit += 60; renderList(); }
+  else if (t.dataset.f) { state.filters.has(t.dataset.f) ? state.filters.delete(t.dataset.f) : state.filters.add(t.dataset.f); state.limit = 60; renderTools(); renderList(); }
+  else if (t.dataset.ci != null && t.classList.contains("why")) { openClaim(byOrg[state.open], Number(t.dataset.ci)); }
+  else if (t.classList.contains("cite")) { openEv(byOrg[state.open], t.dataset.ev); }
+  else if (t.id === "drawerClose") { $("#drawer").close(); }
+  else if (t.id === "guideBtn") { openGuide(); }
+  else if (t.id === "overviewBtn") { go("#overview"); }
+  else if (t.id === "guideClose") { $("#guide").close(); }
+  else if (t.id === "backBtn") { go("#"); }
+  else if (t.id === "pickBtn") { const top = $("#main").scrollTop; togglePick(state.open); renderCompany(byOrg[state.open]); $("#main").scrollTop = top; renderList(); $("#pickBtn").focus(); }
+  else if (t.id === "jsonBtn") { download(state.open + ".envelope.json", JSON.stringify(byOrg[state.open].env, null, 2), "application/json"); }
+  else if (t.id === "linkBtn") { try { navigator.clipboard.writeText(location.href); t.textContent = "Link copied"; } catch (x) { t.textContent = "Copy from the address bar"; } }
+  else if (t.id === "cmpGo") { go("#cmp=" + state.picked.join(",")); }
+  else if (t.id === "cmpClear") { state.picked = []; renderTray(); renderList(); if (state.view === "compare") go("#"); }
+  else if (t.id === "csv") { exportCsv(); }
+  else if (t.id === "themeBtn") { cycleTheme(); }
+  else if (t.dataset.o && t.closest(".cmp")) { go("#c=" + t.dataset.o); }
+});
+document.addEventListener("change", e => {
+  if (e.target.classList.contains("pick")) { if (togglePick(e.target.dataset.o, e.target.checked) === false) e.target.checked = false; }
+  else if (e.target.id === "sort") { state.sort = e.target.value; renderList(); }
+});
+let timer; $("#q").addEventListener("input", e => { clearTimeout(timer); timer = setTimeout(() => { state.q = e.target.value; state.limit = 60; renderList(); }, 80); });
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); }
+});
+$("#drawer").addEventListener("click", e => { if (e.target.id === "drawer") $("#drawer").close(); });
+$("#guide").addEventListener("click", e => { if (e.target.id === "guide") $("#guide").close(); });
+window.addEventListener("hashchange", route);
+
+function togglePick(org, force) {
+  const has = state.picked.includes(org), want = force == null ? !has : force;
+  if (want && !has) {
+    if (state.picked.length >= 4) { $("#trayText").textContent = "Compare up to four companies at a time"; return false; }
+    state.picked.push(org);
+  }
+  if (!want && has) state.picked = state.picked.filter(o => o !== org);
+  renderTray();
+  return true;
+}
+function exportCsv() {
+  const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  const head = ["org_number", "name", "status", "industry", "employees", "revenue_nok", "net_result_nok", "website"].concat(FLAGS.map(f => f[0])).concat(["found_of_" + FLAGS.length]);
+  const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score]));
+  download("signalpost-companies.csv", [head].concat(rows).map(r => r.map(q).join(",")).join("\n"), "text/csv");
+}
+function cycleTheme() {
+  const cur = document.documentElement.dataset.theme || "auto", next = cur === "auto" ? "dark" : cur === "dark" ? "light" : "auto";
+  if (next === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
+  $("#themeBtn").textContent = "Theme: " + next;
+  try { localStorage.setItem("atlas-theme", next); } catch (e) { /* storage may be blocked */ }
+}
+try { const t = localStorage.getItem("atlas-theme"); if (t === "dark" || t === "light") { document.documentElement.dataset.theme = t; $("#themeBtn").textContent = "Theme: " + t; } } catch (e) { /* ignore */ }
+
+$("#asof").textContent = "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
+renderTools(); renderTray(); route();
+})();
+</script>
+</body>
+</html>

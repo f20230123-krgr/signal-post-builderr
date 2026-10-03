@@ -187,3 +187,75 @@ def test_an_unavailable_answer_cites_no_sources():
 
     for a in answers:
         assert a["sources"] == []
+
+
+# --- build_summary: the short dated narrative ------------------------------
+
+def _rich_profile():
+    from src.models.profile import Claim
+
+    profile = make_profile(
+        org_number="923609016",
+        legal_name=available_claim("EQUINOR ASA"),
+        official_site=available_claim("https://www.equinor.com/", source="https://www.equinor.com/"),
+        leaders=[
+            available_claim("Anders Opedal (Daglig leder)"),
+            available_claim("Jon Erik Reinhardsen (Styrets leder)"),
+        ],
+        annual_latest=available_claim("Revenue: 1,000 NOK; Net result: 90 NOK", reporting_period="FY2025", effective_date="2025-12-31"),
+        workplaces=[available_claim("EQUINOR ENERGY (STAVANGER, 50 ansatte)")],
+        hiring_signals=[available_claim("Careers page lists open roles")],
+        is_first_run=False,
+        material_changes=["employee_count: '20000' -> '21000'"],
+    )
+    profile.legal_identity.legal_form = available_claim("ASA")
+    profile.legal_identity.industry = available_claim("06.100 Utvinning av raaolje")
+    profile.legal_identity.operating_status = available_claim("Active")
+    profile.activity.dated_activity = [
+        available_claim("Registry record updated (Endring) on 2025-07-08 - Bronnoysundregistrene"),
+        available_claim("Registry record updated (Endring) on 2026-03-23 - Bronnoysundregistrene"),
+    ]
+    return profile
+
+
+def test_summary_is_one_short_dated_narrative_with_the_key_facts():
+    from src.synthesis import build_summary
+
+    summary = build_summary(_rich_profile())
+
+    assert summary.text.startswith(f"As of {summary.as_of}: EQUINOR ASA (org. no. 923609016) is a public limited company (ASA)")
+    assert "06.100 Utvinning av raaolje" in summary.text
+    assert "FY2025, period ending 2025-12-31" in summary.text
+    assert "Anders Opedal (managing director)" in summary.text
+    assert "Jon Erik Reinhardsen (chair of the board)" in summary.text
+    assert "official website equinor.com" in summary.text
+    assert "Hiring: Careers page lists open roles" in summary.text
+    assert "employee_count: '20000' -> '21000'" in summary.text
+    assert len(summary.text.split()) < 160
+
+
+def test_summary_reports_the_latest_dated_activity_not_the_first_listed():
+    from src.synthesis import build_summary
+
+    assert "Most recent dated activity (2026-03-23)" in build_summary(_rich_profile()).text
+
+
+def test_summary_names_what_is_unknown_and_invents_nothing_for_an_empty_profile():
+    from src.synthesis import build_summary
+
+    summary = build_summary(make_profile(org_number="923609016", legal_name=available_claim("ACME AS")))
+
+    assert summary.unknowns == [
+        "official website", "company-owned social profiles", "annual accounts", "leadership", "hiring signals",
+    ]
+    assert "Not found: official website" in summary.text
+    assert "http" not in summary.text
+    assert "First snapshot" in summary.text
+
+
+def test_summary_has_no_sentences_about_missing_facts():
+    from src.synthesis import build_summary
+
+    text = build_summary(make_profile(org_number="923609016")).text
+
+    assert "Hiring:" not in text and "Latest filed accounts" not in text and "Run by" not in text
