@@ -314,3 +314,17 @@ def test_the_summary_says_careers_page_for_a_bare_page_and_hiring_for_roles_or_a
 
     assert "Careers: Careers page: https://s.no/karriere" in build_summary(bare).text
     assert "Hiring: Elektriker - NAV" in build_summary(nav).text
+
+
+def test_a_listing_at_the_root_of_a_careers_subdomain_counts_roles_under_its_own_address():
+    """career.ors-consulting.com/ lists ads at /jobs/<id>-<slug>: they live under the
+    page's own address and are exactly the roles."""
+    html = _page(
+        '<a href="/jobs/7116722-senior-konsulent">Senior Konsulent Consulting · Esbjerg</a>'
+        '<a href="/jobs/6909218-senior-consultant">Senior Consultant Consulting · Utrecht</a>',
+        title="Careers - ORS",
+    )
+
+    [fact] = careers_page_facts(html, "https://career.example.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
+
+    assert "lists 2 open roles" in fact.value

@@ -183,8 +183,8 @@ def role_links(
 
     Only links that stay on the page's own site, or go to a known applicant-
     tracking platform, count: a careers page that links out to a general job
-    board is not listing this company's roles. Links into the page's own
-    sub-pages (a job ad's "Terms of use" or "Privacy" footer) never count."""
+    board is not listing this company's roles. Footer and legal links ("Terms
+    of use", "Privacy") that sit on every page never count."""
     page_key = page_url.split("#")[0].rstrip("/")
     page_base = _base_domain(_domain(page_url))
     seen_titles: set[str] = set()
@@ -192,7 +192,7 @@ def role_links(
     roles: list[tuple[str, str]] = []
     for url, text in _anchors(html, page_url):
         key = url.split("#")[0].rstrip("/")
-        if key == page_key or key in seen_urls or key.startswith(page_key + "/"):
+        if key == page_key or key in seen_urls:
             continue
         domain = _domain(url)
         if _base_domain(domain) != page_base and not (ats_domains and _on_any(domain, ats_domains)):
