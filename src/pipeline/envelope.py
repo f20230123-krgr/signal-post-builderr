@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
+from src.pipeline.registry_extras import ACCOUNT_METRIC_FIELDS
 from src.synthesis import build_summary
 
 _ERROR_STATES = {EvidenceState.FAILED, EvidenceState.BLOCKED}
@@ -61,6 +62,9 @@ def _claim_entries(profile: CompanyProfile) -> list[tuple[str, Claim]]:
         if claim is not None
     ]
     entries += [("annual_accounts_history", c) for c in profile.annual_accounts.history]
+    # Discrete figures per filed year, newest first, in a fixed field order.
+    for name in ACCOUNT_METRIC_FIELDS:
+        entries += [(name, c) for c in profile.annual_accounts.metrics.get(name, [])]
     entries += [("leader", c) for c in profile.leadership.leaders]
     entries += [("workplace", c) for c in profile.leadership.workplaces]
     entries += [("company_profile", c) for c in profile.online_presence.company_profiles]

@@ -151,6 +151,113 @@ def _reporting_period(entry: dict) -> Optional[str]:
     return f"FY{til_dato.split('-')[0]}"
 
 
+# The discrete figures Builderr's reference schema carries per filed year, as
+# (claim field, path into one Regnskapsregisteret filing). A figure the filing
+# doesn't state is omitted -- never published as zero.
+ACCOUNT_METRICS = [
+    ("revenue", ("resultatregnskapResultat", "driftsresultat", "driftsinntekter", "sumDriftsinntekter")),
+    ("operating_result", ("resultatregnskapResultat", "driftsresultat", "driftsresultat")),
+    ("profit_before_tax", ("resultatregnskapResultat", "ordinaertResultatFoerSkattekostnad")),
+    ("annual_result", ("resultatregnskapResultat", "aarsresultat")),
+    ("total_assets", ("eiendeler", "sumEiendeler")),
+    ("total_equity", ("egenkapitalGjeld", "egenkapital", "sumEgenkapital")),
+    ("total_debt", ("egenkapitalGjeld", "gjeldOversikt", "sumGjeld")),
+]
+ACCOUNT_METRIC_FIELDS = [name for name, _ in ACCOUNT_METRICS] + ["annual_report_pdf"]
+# Filed years that get the full set of figures and a link to the filed accounts.
+MAX_FILINGS_WITH_METRICS = 2
+ACCOUNTS_PDF_URL = "https://data.brreg.no/regnskapsregisteret/regnskap/aarsregnskap/kopi/{org}/{year}"
+
+
+def _dig(entry: dict, path: tuple[str, ...]) -> Optional[float]:
+    node: object = entry
+    for key in path:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return float(node) if isinstance(node, (int, float)) and not isinstance(node, bool) else None
+
+
+def _entry_slices(text: str) -> list[str]:
+    """The raw text of each top-level object of a JSON array, in order, so a
+    figure's supporting excerpt is quoted from the filing it belongs to (the same
+    key appears once per filed year)."""
+    decoder = json.JSONDecoder()
+    slices: list[str] = []
+    index = text.find("[") + 1
+    while index > 0 and index < len(text):
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            _, end = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        slices.append(text[index:end])
+        index = end
+    return slices
+
+
+def _metric_span(raw_entry: Optional[str], key: str) -> Optional[str]:
+    """`"sumDriftsinntekter":107174000000.0` exactly as the filing writes it."""
+    if not raw_entry:
+        return None
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*(?:-?[\d.eE+]+|"[^"]*")', raw_entry)
+    return match.group(0) if match else None
+
+
+def _metric_facts(
+    entries: list[dict], raw_slices: list[str], org: str, url: str, content_hash: str, now: datetime
+) -> list[ConfirmedFact]:
+    """Revenue, operating result, result before tax, annual result, assets, equity
+    and debt, plus a link to the filed accounts, for the newest filings. One filing
+    per period (the company's own accounts before a group's); each figure carries
+    its period, the period's end date and the filing's own text as its span."""
+    indexed = sorted(
+        enumerate(entries), key=lambda ie: (ie[1].get("regnskapsperiode") or {}).get("tilDato") or "", reverse=True
+    )
+    chosen: list[tuple[int, dict]] = []
+    seen_periods: set[str] = set()
+    for i, entry in indexed:
+        period = (entry.get("regnskapsperiode") or {}).get("tilDato")
+        if not period or period in seen_periods:
+            continue
+        # Prefer the company's own accounts over the group's for the same period.
+        own = [(j, e) for j, e in indexed if (e.get("regnskapsperiode") or {}).get("tilDato") == period
+               and e.get("regnskapstype") != "KONSERN"]
+        chosen.append(own[0] if own else (i, entry))
+        seen_periods.add(period)
+        if len(chosen) >= MAX_FILINGS_WITH_METRICS:
+            break
+
+    facts: list[ConfirmedFact] = []
+    for i, entry in chosen:
+        period_end = entry["regnskapsperiode"]["tilDato"]
+        period = _reporting_period(entry)
+        currency = entry.get("valuta") or ""
+        raw = raw_slices[i] if i < len(raw_slices) else None
+        for field_name, path in ACCOUNT_METRICS:
+            amount = _dig(entry, path)
+            if amount is None:
+                continue
+            facts.append(ConfirmedFact(
+                field_name, f"{amount:,.0f} {currency}".strip(), url, 100.0, now,
+                reporting_period=period, effective_date=period_end,
+                content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+                evidence_span=_metric_span(raw, path[-1]),
+            ))
+        journal = entry.get("journalnr")
+        if journal:
+            facts.append(ConfirmedFact(
+                "annual_report_pdf", ACCOUNTS_PDF_URL.format(org=org, year=period_end[:4]), url, 100.0, now,
+                reporting_period=period, effective_date=period_end,
+                content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+                evidence_span=_metric_span(raw, "journalnr") or f'"journalnr":"{journal}"',
+            ))
+    return facts
+
+
 def _accounts_facts(
     entity: ResolvedEntity, client: httpx.Client, sleep: Callable[[float], None], now: datetime
 ) -> tuple[list[ConfirmedFact], EvidenceState]:
@@ -176,9 +283,13 @@ def _accounts_facts(
         return [], EvidenceState.NOT_AVAILABLE
 
     content_hash = _content_hash(response)
+    raw_slices = _entry_slices(response.text)
+    metric_facts = _metric_facts(
+        [e for e in entries if isinstance(e, dict)], raw_slices, entity.org_number, url, content_hash, now
+    ) if len(raw_slices) == len(entries) else []
     entries = sorted(entries, key=lambda e: (e.get("regnskapsperiode") or {}).get("tilDato") or "", reverse=True)
 
-    facts = []
+    facts = list(metric_facts)
     for i, entry in enumerate(entries):
         value = _format_accounts_value(entry)
         if not value:
@@ -188,6 +299,7 @@ def _accounts_facts(
             ConfirmedFact(
                 field_name, value, url, 100.0, now,
                 reporting_period=_reporting_period(entry),
+                effective_date=(entry.get("regnskapsperiode") or {}).get("tilDato"),
                 content_hash=content_hash, extraction_method="registry", source_class="official_registry",
             )
         )

@@ -101,6 +101,11 @@ class LegalIdentity(BaseModel):
 class AnnualAccounts(BaseModel):
     latest: Claim
     history: list[Claim] = []
+    # The discrete figures of the newest filings, keyed by claim field (revenue,
+    # operating_result, profit_before_tax, annual_result, total_assets,
+    # total_equity, total_debt) plus annual_report_pdf, each claim carrying its
+    # reporting_period and effective_date. See registry_extras.ACCOUNT_METRICS.
+    metrics: dict[str, list[Claim]] = {}
 
 
 class Leadership(BaseModel):

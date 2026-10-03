@@ -34,6 +34,7 @@ from src.models.profile import (
     RefreshMetadata,
 )
 from src.pipeline.careers import CAREERS_VALUE_PREFIX
+from src.pipeline.registry_extras import ACCOUNT_METRIC_FIELDS
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact
 from src.storage.snapshots import diff_material_changes
@@ -257,7 +258,12 @@ def assemble(
         operating_status=_optional_identity_claim("operating_status"),
         founded_date=_optional_identity_claim("founded_date"),
     )
-    annual_accounts = AnnualAccounts(latest=annual_latest_claim, history=annual_history_claims)
+    account_metrics = {
+        name: claims
+        for name in ACCOUNT_METRIC_FIELDS
+        if (claims := _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, name)]))
+    }
+    annual_accounts = AnnualAccounts(latest=annual_latest_claim, history=annual_history_claims, metrics=account_metrics)
     leadership = Leadership(leaders=leader_claims, workplaces=workplace_claims)
     online_presence = OnlinePresence(official_site=official_site_claim, company_profiles=company_profile_claims)
     activity = Activity(hiring_signals=hiring_claims, dated_activity=dated_activity_claims)
@@ -265,6 +271,7 @@ def assemble(
     evidence_log = (
         [legal_name_claim, public_brand_claim, annual_latest_claim, official_site_claim]
         + annual_history_claims
+        + [c for claims in account_metrics.values() for c in claims]
         + leader_claims
         + workplace_claims
         + company_profile_claims
