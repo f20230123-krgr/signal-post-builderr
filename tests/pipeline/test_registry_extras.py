@@ -666,3 +666,16 @@ def test_the_name_span_is_found_when_the_registry_lists_the_family_name_first():
     leader = next(f for f in facts if f.field_name == "leader")
 
     assert leader.evidence_span == '"etternavn":"Opedal","fornavn":"Anders"' and leader.evidence_span in body
+
+
+def test_a_workplace_is_published_with_its_full_registered_address():
+    from src.pipeline.registry_extras import _workplace_value
+
+    full = {"navn": "ACME OSLO", "antallAnsatte": 12,
+            "beliggenhetsadresse": {"adresse": ["Hammergata 20"], "postnummer": "3264", "poststed": "LARVIK", "kommune": "LARVIK"}}
+    municipality_only = {"navn": "ACME", "beliggenhetsadresse": {"kommune": "BERGEN"}, "antallAnsatte": 3}
+
+    assert _workplace_value(full) == "ACME OSLO, Hammergata 20, 3264 LARVIK (12 ansatte)"
+    assert _workplace_value(municipality_only) == "ACME (BERGEN, 3 ansatte)"
+    assert _workplace_value({"navn": "ACME"}) == "ACME"
+    assert _workplace_value({"beliggenhetsadresse": {"kommune": "X"}}) is None

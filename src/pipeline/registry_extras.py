@@ -336,8 +336,16 @@ def _workplace_value(entry: dict) -> Optional[str]:
     location = entry.get("beliggenhetsadresse") or entry.get("postadresse") or {}
     kommune = location.get("kommune")
     employees = entry.get("antallAnsatte")
-    detail_parts = [p for p in [kommune, f"{employees} ansatte" if employees is not None else None] if p]
-    return f"{name} ({', '.join(detail_parts)})" if detail_parts else name
+    # The full address when the registry has one ("Hammergata 20, 3264 LARVIK"),
+    # else the municipality alone, as before.
+    lines = location.get("adresse")
+    street = ", ".join(str(l).strip() for l in lines if str(l).strip()) if isinstance(lines, list) else ""
+    postcode, town = location.get("postnummer"), location.get("poststed")
+    place = " ".join(str(p).strip() for p in (postcode, town) if p)
+    address = ", ".join(p for p in (street, place) if p)
+    detail_parts = [p for p in [None if address else kommune, f"{employees} ansatte" if employees is not None else None] if p]
+    head = f"{name}, {address}" if address else name
+    return f"{head} ({', '.join(detail_parts)})" if detail_parts else head
 
 
 def _workplace_facts(
