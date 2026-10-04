@@ -39,6 +39,7 @@ from src.orchestrator.budget import BudgetLimits
 from src.orchestrator.runner import DeadProviderAbort, run_in_chunks
 from src.pipeline.discovery import PROVIDER_COST_PER_SEARCH_USD, ProviderHealth, check_provider_keys
 from src.pipeline.envelope import to_envelope
+from src.pipeline.render import set_active_renderer, shared_renderer
 from src.pipeline.net import new_client, wire_request_breakdown, wire_request_count
 from src.pipeline.universe import ensure_universe, load_universe
 from src.reporting import render_html_report
@@ -198,12 +199,29 @@ def main() -> None:
         "When reached, the paid provider is switched off and the run continues on the free "
         "ones. Off by default (the per-batch $10 limit always applies).",
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Never start the optional headless browser (static HTML only). By default the "
+        "browser is used for pages that fail a static completeness check, if Playwright and "
+        "Chromium are installed; otherwise the run is static-only.",
+    )
     args = parser.parse_args()
 
     # Before anything is created or written, so a stop leaves no output behind.
     provider_health, _ = startup_key_check(
         args.stop_if_key_dead, spend_cap_usd=args.max_search_spend
     )
+
+    renderer = None
+    if not args.no_browser:
+        renderer = shared_renderer()
+        if renderer.start():
+            set_active_renderer(renderer)
+            print("Browser rendering: on for pages that fail the static completeness check.")
+        else:
+            renderer = None
+            print("Browser rendering: not available (Playwright/Chromium not installed); static HTML only.")
 
     key_status = search_key_status(provider_health.disabled)
     notice = search_keys_notice(key_status)
@@ -315,6 +333,9 @@ def main() -> None:
         "degraded_providers": aggregate.get("degraded_providers", {}),
         # Which optional search keys the run actually had (see search_key_status).
         "search_keys": key_status,
+        # Whether the optional browser fallback ran, and what it cost (its requests are
+        # inside outbound_requests_measured).
+        "browser_rendering": renderer.report() if renderer is not None else {"available": False},
         # NAV hiring-signal index for this run: list pages read (hard-capped),
         # requests spent, active ads indexed, and whether the page cap cut off
         # the newest ads.

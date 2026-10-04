@@ -27,7 +27,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -40,6 +40,9 @@ from src.pipeline.net import UnsafeOutboundUrl, new_client
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.urls import normalize_url
 from src.storage.cache import ResponseCache
+
+if TYPE_CHECKING:
+    from src.pipeline.render import BrowserRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +150,9 @@ class FetchedPage:
     # abax.com/en-gb), when it differs from `url` and the page was fetched live
     # rather than read from the cache. The site's own address as it resolves.
     final_url: Optional[str] = None
+    # True when `raw_html` is the DOM after a headless browser ran the page's scripts
+    # (see src/pipeline/render.py) rather than the raw HTTP response.
+    rendered: bool = False
 
 
 def _domain(url: str) -> str:
@@ -369,6 +375,61 @@ def _discover_feed_urls(html: str, page_url: str) -> list[str]:
     return urls
 
 
+# A render is only started while at least this many requests remain in the batch budget,
+# so rendering can never be what exhausts it.
+RENDER_HEADROOM_REQUESTS = 400
+
+_FRAMEWORK_MARKER_RE = re.compile(
+    r"""__NEXT_DATA__|id=["']__nuxt["']|id=["']root["']|id=["']app["']|ng-version|data-reactroot|"""
+    r"""window\.__INITIAL_STATE__|<app-root|data-server-rendered|id=["']___gatsby["']""",
+    re.IGNORECASE,
+)
+_SCRIPT_TAG_RE = re.compile(r"<script", re.IGNORECASE)
+
+
+def looks_script_built(html: str) -> bool:
+    """True when the page's content is probably drawn by scripts: little text for the amount
+    of markup and script, or a front-end framework's mount point."""
+    visible = len(_text_only(html))
+    scripts = len(_SCRIPT_TAG_RE.findall(html))
+    if _FRAMEWORK_MARKER_RE.search(html) and visible < 8_000:
+        return True
+    if scripts >= 3 and visible < 600:
+        return True
+    return scripts >= 8 and visible / max(len(html), 1) < 0.04
+
+
+def _text_only(html: str) -> str:
+    return _WHITESPACE_RE.sub(" ", _TAG_RE.sub(" ", _SCRIPT_STYLE_RE.sub(" ", html))).strip()
+
+
+def needs_render(
+    html: str, url: str, official_site: Optional[str], ats_domains: set[str], linked_from: Optional[str]
+) -> bool:
+    """The deterministic completeness check that decides whether a page is worth a browser:
+
+      * the company's homepage, when it is script-built AND static HTML shows neither a
+        careers link nor a social profile (nothing a visitor would use to find them);
+      * a careers page, when it is script-built and its static HTML lists no job ads.
+
+    Every other page is read statically."""
+    from src.pipeline.careers import careers_page_facts, find_careers_links, is_careers_url, role_links
+    from src.pipeline.social import social_profile_link
+
+    if not official_site:
+        return False
+    official_domain = _domain(official_site)
+    if linked_from is None and urlsplit(url).path in ("", "/") and _domain(url).endswith(official_domain):
+        if not looks_script_built(html):
+            return False
+        has_careers = bool(find_careers_links(html, url, official_domain, ats_domains))
+        has_social = any(social_profile_link(link) for link in _extract_outbound_links(html, url))
+        return not has_careers and not has_social
+    if is_careers_url(url, ats_domains) and looks_script_built(html):
+        return len(role_links(html, url, ats_domains)) == 0
+    return False
+
+
 def crawl(
     entity: ResolvedEntity,
     budget: BudgetGovernor,
@@ -382,6 +443,7 @@ def crawl(
     follow_news: bool = False,
     cache: Optional[ResponseCache] = None,
     render_js: Optional[Callable[[str], str]] = None,
+    renderer: Optional["BrowserRenderer"] = None,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     date_bucket: Optional[str] = None,
@@ -524,10 +586,33 @@ def crawl(
             if cache is not None and cached_html is None:
                 cache.put(url, date_bucket, html)
 
+            # Static first; a browser only when the static page fails a completeness check
+            # (see needs_render), only while the request budget has headroom, and the result
+            # is cached like any other fetch.
+            rendered = False
+            if (
+                renderer is not None
+                and renderer.available
+                and needs_render(html, url, entity.official_site_candidate, ats_domains or set(), linked_from)
+                and budget.requests_remaining() >= RENDER_HEADROOM_REQUESTS
+                and not budget.should_degrade()
+            ):
+                dom = cache.get(url + "#rendered", date_bucket) if cache is not None else None
+                if dom is None:
+                    result = renderer.render(url)
+                    if result is not None and result.html:
+                        dom = result.html
+                        if cache is not None:
+                            cache.put(url + "#rendered", date_bucket, dom)
+                        if result.final_url != url and not final_url:
+                            final_url = result.final_url
+                if dom is not None:
+                    html, rendered = dom, True
+
             pages.append(
                 FetchedPage(
                     url=url, raw_html=html, fetched_at=now(), fetch_state=EvidenceState.AVAILABLE,
-                    linked_from=linked_from, final_url=final_url,
+                    linked_from=linked_from, final_url=final_url, rendered=rendered,
                 )
             )
 

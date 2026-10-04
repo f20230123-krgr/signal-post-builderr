@@ -70,6 +70,10 @@ class BudgetGovernor:
             return self._requests_used
         return max(self._requests_used, self._wire_counter() - self._wire_baseline)
 
+    def requests_remaining(self) -> int:
+        """Requests left before the limit (margin included), counting the real wire total."""
+        return max(0, self.limits.max_requests - self.limits.request_safety_margin - self._effective_requests())
+
     def can_spend_request(self) -> bool:
         if self._time_exhausted():
             return False

@@ -34,6 +34,7 @@ from src.orchestrator.budget import BudgetGovernor, BudgetLimits
 from src.pipeline.assemble import assemble
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
 from src.pipeline.keyless_sites import keyless_candidates
+from src.pipeline.render import active_renderer
 from src.pipeline.site_evidence import official_site_evidence
 from src.pipeline.discovery import (
     ProviderHealth,
@@ -289,6 +290,7 @@ def _default_process_one(
             ats_domains=DEFAULT_ATS_DOMAINS,
             follow_careers=True,
             follow_news=True,
+            renderer=active_renderer(),
             cache=cache,
             now=now,
         )

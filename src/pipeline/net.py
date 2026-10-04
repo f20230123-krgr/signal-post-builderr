@@ -33,6 +33,7 @@ import httpx
 # several fetches) -- a tenth of a batch's limit. Five hops covers every real
 # http -> https -> www -> canonical chain.
 MAX_REDIRECTS = 5
+USER_AGENT = "SignalpostAgent/1.0 (+https://github.com/f20230123-krgr/signal-post-builderr)"
 
 _wire_lock = threading.Lock()
 _wire_requests = 0
@@ -67,6 +68,15 @@ def _count_request(request: httpx.Request) -> None:
     with _wire_lock:
         _wire_requests += 1
         _wire_by_host[request.url.host] += 1
+
+
+def add_external_request(host: str) -> None:
+    """Count a request made by something other than an httpx client (the optional browser
+    renderer): Builderr counts every outbound request, whoever sends it."""
+    global _wire_requests
+    with _wire_lock:
+        _wire_requests += 1
+        _wire_by_host[host] += 1
 
 
 def _count_response(response: httpx.Response) -> None:
@@ -167,6 +177,12 @@ def new_client(policy: Optional[OutboundPolicy] = None, **kwargs) -> httpx.Clien
         active.check(str(request.url))
 
     kwargs.setdefault("max_redirects", MAX_REDIRECTS)
+    # Say who is asking. httpx's default agent ("python-httpx/x") is refused outright by many
+    # sites' firewalls, which turned reachable company sites into 403s; an identifiable crawler
+    # name with a contact URL is the polite and, in practice, the more welcome way to ask.
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers.setdefault("User-Agent", USER_AGENT)
+    kwargs["headers"] = headers
     hooks = kwargs.pop("event_hooks", None) or {}
     request_hooks = [guard, _count_request, *hooks.get("request", [])]
     response_hooks = [_count_response, *hooks.get("response", [])]
