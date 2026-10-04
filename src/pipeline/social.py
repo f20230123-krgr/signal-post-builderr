@@ -26,7 +26,8 @@ _RESERVED = {
     "facebook.com": {
         "sharer", "sharer.php", "share", "share.php", "dialog", "plugins", "tr", "events", "groups", "watch", "hashtag",
         "photo", "photos", "photo.php", "permalink.php", "story.php", "login", "login.php", "policies", "help", "home",
-        "marketplace", "gaming", "stories", "reel", "reels", "video", "videos", "public", "people", "l.php", "flx", "ads",
+        "marketplace", "gaming", "stories", "reel", "reels", "video", "videos", "public", "l.php", "flx", "ads",
+        "privacy", "terms", "cookies", "legal", "settings", "business", "about", "recover", "checkpoint", "r.php",
     },
     "instagram.com": {"p", "reel", "reels", "explore", "stories", "tv", "accounts", "direct", "about", "legal", "web"},
     "twitter.com": {"intent", "share", "home", "search", "hashtag", "i", "explore", "login", "settings", "privacy", "tos", "widgets.js"},
@@ -69,6 +70,8 @@ def canonical_social_profile_url(url: str) -> Optional[str]:
             return f"https://www.facebook.com/profile.php?id={ident.group(1)}" if ident else None
         if first == "pages" and len(segments) >= 3:  # /pages/<name>/<id>
             return f"https://www.facebook.com/pages/{segments[1]}/{segments[2]}"
+        if first == "people" and len(segments) >= 3 and segments[2].isdigit():  # /people/<name>/<id>
+            return f"https://www.facebook.com/people/{segments[1]}/{segments[2]}"
         if first == "p" and len(segments) >= 2:  # Facebook's page URL form /p/<name>-<id>
             return f"https://www.facebook.com/p/{segments[1]}"
         if first in _RESERVED["facebook.com"] or not _HANDLE_RE.match(segments[0]):
@@ -114,4 +117,11 @@ def social_profile_link(url: str) -> Optional[tuple[str, str]]:
     link = f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path}"
     if "profile.php" in parts.path:
         link = key  # the account id lives in the query string
+    elif "linkedin.com" in parts.netloc.lower():
+        # The company page as the site writes it, never one of its tabs (/about, /posts,
+        # /mycompany, /admin/...): the first two path segments, and a trailing slash only
+        # if the original had one after the name (or went on to a tab).
+        raw = [seg for seg in parts.path.split("/") if seg]
+        slash = "/" if len(raw) > 2 or parts.path.endswith("/") else ""
+        link = f"{parts.scheme.lower()}://{parts.netloc.lower()}/{raw[0]}/{raw[1]}{slash}"
     return link, key

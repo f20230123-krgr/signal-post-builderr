@@ -100,3 +100,21 @@ def test_sameas_in_json_ld_is_filtered_the_same_way():
 def test_a_malformed_link_is_not_a_profile_and_not_a_crash():
     assert canonical_social_profile_url("https://[::1/linkedin.com/company/x") is None
     assert social_profile_facts('<a href="http://[bad">x</a><a href="https://www.facebook.com/acme">f</a>', "https://acme.no", NOW)[0].value == "https://www.facebook.com/acme"
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://www.linkedin.com/company/ragasco-as/mycompany/", "https://www.linkedin.com/company/ragasco-as/"),
+    ("https://www.linkedin.com/company/rsv-gruppen/posts/", "https://www.linkedin.com/company/rsv-gruppen/"),
+    ("https://www.linkedin.com/company/845627/admin/feed/posts/", "https://www.linkedin.com/company/845627/"),
+    ("https://no.linkedin.com/company/entra-asa", "https://no.linkedin.com/company/entra-asa"),
+])
+def test_a_linkedin_company_is_published_as_the_company_page_never_one_of_its_tabs(url, expected):
+    assert social_profile_link(url)[0] == expected
+
+
+def test_a_facebook_policy_page_is_not_a_page_and_the_people_form_is():
+    assert canonical_social_profile_url("https://mbasic.facebook.com/privacy/policies/cookies/printable/") is None
+    assert canonical_social_profile_url("https://www.facebook.com/terms") is None
+    assert canonical_social_profile_url("https://facebook.com/people/hammaren-barnehage/100053974317354") == (
+        "https://www.facebook.com/people/hammaren-barnehage/100053974317354"
+    )
