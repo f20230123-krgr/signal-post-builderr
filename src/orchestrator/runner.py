@@ -313,7 +313,10 @@ def _default_process_one(
             crawl_entity,
             budget,
             client=client,
-            company_owned_paths=DEFAULT_COMPANY_OWNED_PATHS,
+            # Contact/about pages are followed from the links the site shows
+            # (follow_info), not requested as four guessed paths on every site.
+            company_owned_paths=[],
+            follow_info=True,
             use_sitemap=True,
             ats_domains=DEFAULT_ATS_DOMAINS,
             follow_careers=True,

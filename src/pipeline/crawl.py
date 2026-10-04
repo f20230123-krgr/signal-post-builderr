@@ -34,7 +34,7 @@ import httpx
 
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor
-from src.pipeline.careers import find_careers_links
+from src.pipeline.careers import MAX_INFO_LINKS, find_careers_links, find_info_links
 from src.pipeline.news import MAX_NEWS_PAGES, find_news_links, is_wordpress, wp_posts_url
 from src.pipeline.net import UnsafeOutboundUrl, new_client
 from src.pipeline.resolve import ResolvedEntity
@@ -461,6 +461,7 @@ def crawl(
     ats_domains: Optional[set[str]] = None,
     follow_careers: bool = False,
     follow_news: bool = False,
+    follow_info: bool = False,
     cache: Optional[ResponseCache] = None,
     render_js: Optional[Callable[[str], str]] = None,
     renderer: Optional["BrowserRenderer"] = None,
@@ -480,7 +481,8 @@ def crawl(
     outbound links found on official-domain pages to those specific external
     domains only (see module docstring). `follow_careers`, if True, also
     follows up to MAX_CAREERS_PAGES careers/jobs links found on the entity's own
-    pages (see src/pipeline/careers.py), and `follow_news` up to MAX_NEWS_PAGES
+    pages (see src/pipeline/careers.py), `follow_info` up to MAX_INFO_LINKS contact/about
+    pages, and `follow_news` up to MAX_NEWS_PAGES
     news/press links (see src/pipeline/news.py). `cache`, if given, makes a repeat
     fetch of the same (url, date_bucket) free against the request budget.
     All opt-in (default None/False) so existing single-URL callers/tests are
@@ -534,6 +536,7 @@ def crawl(
         failures: dict[str, int] = {}
         rebase: dict[str, str] = {}
         careers_followed = 0
+        info_followed = 0
         news_followed = 0
         ats_followed = 0
         queued_links: set[str] = set()
@@ -659,6 +662,20 @@ def crawl(
                     else:
                         # A subdomain or an ATS host: reached by a link chain.
                         queue.append((link, url))
+            if linked_from is None and follow_info and urlsplit(url).path in ("", "/"):
+                # The contact/about page the site itself links to (not four guessed paths):
+                # where the legal name and organisation number are stated.
+                official_domain = _domain(entity.official_site_candidate)
+                for link in find_info_links(html, url, official_domain):
+                    if info_followed >= MAX_INFO_LINKS:
+                        break
+                    normalized_link = normalize_url(link)
+                    if normalized_link in seen_normalized or normalized_link in queued_links:
+                        continue
+                    info_followed += 1
+                    queued_links.add(normalized_link)
+                    seen_normalized.add(normalized_link)
+                    queue.append((link, None if _domain(link) == official_domain else url))
             if linked_from is None and follow_news and urlsplit(url).path in ("", "/") and is_wordpress(html):
                 wp_url = wp_posts_url(final_url or url)
                 wp_key = normalize_url(wp_url)

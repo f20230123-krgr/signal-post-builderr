@@ -391,3 +391,25 @@ def test_when_a_big_sitemap_is_trimmed_careers_and_news_pages_survive_the_cut():
 
     assert len(found) == MAX_SITEMAP_URLS
     assert found[0] == "https://example.com/karriere/ledige-stillinger" and found[1] == "https://example.com/news/latest"
+
+
+def test_contact_and_about_pages_are_found_from_the_sites_own_links_contact_first():
+    from src.pipeline.careers import find_info_links
+
+    html = '<a href="/om-oss">Om oss</a><a href="/hjem">Hjem</a><a href="/kontakt-oss">Kontakt oss</a><a href="https://other.no/kontakt">Kontakt</a>'
+
+    assert find_info_links(html, "https://www.example.no/", "example.no") == ["https://www.example.no/kontakt-oss", "https://www.example.no/om-oss"]
+
+
+def test_the_crawl_follows_the_sites_contact_link_instead_of_guessing_paths():
+    requested = []
+    routes = {"https://example.com/": '<a href="/kontakt">Kontakt</a>', "https://example.com/kontakt": "<p>Org.nr 923 609 016</p>"}
+
+    def handler(request):
+        requested.append(str(request.url))
+        text = routes.get(str(request.url))
+        return httpx.Response(200, text=text) if text else httpx.Response(404)
+
+    crawl(_entity("https://example.com/"), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)), follow_info=True)
+
+    assert requested == ["https://example.com/", "https://example.com/kontakt"]

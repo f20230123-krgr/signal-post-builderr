@@ -195,6 +195,38 @@ def _base_domain(domain: str) -> str:
     return ".".join(domain.split(".")[-2:])
 
 
+_INFO_TEXT_RE = re.compile(
+    r"^(?:kontakt(?:\s+oss)?|contact(?:\s+us)?|om\s+oss|about(?:\s+us)?|om\s+\S+(?:\s+\S+)?|about\s+\S+(?:\s+\S+)?|selskapet|the\s+company)$",
+    re.IGNORECASE,
+)
+_INFO_PATH_RE = re.compile(r"/(kontakt(?:-oss)?|contact(?:-us)?|om-oss|about(?:-us)?|selskapet)(?:/|$)", re.IGNORECASE)
+MAX_INFO_LINKS = 2
+
+
+def find_info_links(html: str, page_url: str, official_domain: str, limit: int = MAX_INFO_LINKS) -> list[str]:
+    """Contact / about pages this page links to (same site), best first. These are where a
+    company states its organisation number and address: the evidence for its website claim.
+    Read from the page's own links instead of requesting four guessed paths on every site."""
+    scored: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+    for order, (url, text) in enumerate(_anchors(html, page_url)):
+        if not _same_site(_domain(url), official_domain):
+            continue
+        path = urlsplit(url).path
+        by_path = bool(_INFO_PATH_RE.search(path)) and len([s for s in path.split("/") if s]) <= 2
+        by_text = 0 < len(text) <= 30 and bool(_INFO_TEXT_RE.match(text))
+        if not (by_path or by_text) or path.lower().endswith((".pdf", ".jpg", ".png", ".zip", ".xml")):
+            continue
+        key = url.split("#")[0].rstrip("/")
+        if key in seen or key == page_url.rstrip("/"):
+            continue
+        seen.add(key)
+        # A contact page before an about page: it is where the legal name and number sit.
+        rank = 0 if re.search(r"kontakt|contact", path + " " + text, re.IGNORECASE) else 1
+        scored.append((rank, order, url))
+    return [u for _, _, u in sorted(scored)[:limit]]
+
+
 def role_links(
     html: str, page_url: str, ats_domains: Optional[set[str]] = None
 ) -> list[tuple[str, str]]:
