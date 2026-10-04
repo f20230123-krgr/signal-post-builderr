@@ -35,6 +35,14 @@ def _normalized(value: Optional[str]) -> Optional[str]:
     return _WHITESPACE_RE.sub(" ", value).strip()
 
 
+def _workplace_names(claims: list) -> set:
+    """The establishment name of each workplace claim, before any address or detail."""
+    names = set()
+    for value in _claim_values(claims):
+        names.add(re.split(r",| \(", value, maxsplit=1)[0].strip())
+    return names
+
+
 def _claim_values(claims: list) -> set:
     return {_normalized(c.value) for c in claims if _normalized(c.value) is not None}
 
@@ -60,7 +68,10 @@ def diff_material_changes(
 
     old_site = _normalized(previous.online_presence.official_site.value)
     new_site = _normalized(new.online_presence.official_site.value)
-    if old_site != new_site:
+    # A site that was found before and is not found now is "we did not find it this time"
+    # (a different run environment, no search provider), not a verified change to the
+    # company, so only a site that is present in both runs and differs counts.
+    if old_site and new_site and old_site != new_site:
         changes.append(f"official_site: {old_site!r} -> {new_site!r}")
 
     old_latest = _normalized(previous.annual_accounts.latest.value)
@@ -82,8 +93,11 @@ def diff_material_changes(
     if old_leaders != new_leaders:
         changes.append(f"leadership.leaders: {sorted(old_leaders)} -> {sorted(new_leaders)}")
 
-    old_workplaces = _claim_values(previous.leadership.workplaces)
-    new_workplaces = _claim_values(new.leadership.workplaces)
+    # Compared by establishment name: the same site written with its street address instead
+    # of just its municipality ("ACME (BERGEN)" -> "ACME, Storgata 1, 5003 BERGEN") is a
+    # richer record of the same workplace, not a new workplace.
+    old_workplaces = _workplace_names(previous.leadership.workplaces)
+    new_workplaces = _workplace_names(new.leadership.workplaces)
     if old_workplaces != new_workplaces:
         changes.append(
             f"leadership.workplaces: {sorted(old_workplaces)} -> {sorted(new_workplaces)}"

@@ -226,8 +226,6 @@ _PLATFORMS = {
     "linkedin.com": "LinkedIn", "facebook.com": "Facebook", "instagram.com": "Instagram",
     "x.com": "X", "twitter.com": "X", "youtube.com": "YouTube", "tiktok.com": "TikTok",
 }
-_MAX_LEADERS = 3
-_MAX_WORKPLACES = 2
 
 
 @dataclass
@@ -248,6 +246,7 @@ class Summary:
     sentences: list[SummarySentence]
     unknowns: list[str]
     changes: list[str]
+    headline: str = ""
 
     @property
     def text(self) -> str:
@@ -285,6 +284,36 @@ def _latest_dated(claims: list[Claim]) -> Optional[tuple[Claim, str]]:
     return best
 
 
+def _short_amount(value: str) -> str:
+    """'197,053,257 NOK' -> '197.1 m NOK'. The summary rounds for readability; the claim it
+    cites keeps the exact figure."""
+    parsed = _amount(value)
+    if not parsed:
+        return value
+    n, currency = parsed
+    a = abs(n)
+    if a >= 1_000_000_000:
+        text = f"{n / 1e9:.2f} bn"
+    elif a >= 1_000_000:
+        text = f"{n / 1e6:.1f} m"
+    elif a >= 10_000:
+        text = f"{n / 1e3:.0f} k"
+    else:
+        text = f"{n:,}"
+    return f"{text} {currency}".strip()
+
+
+_INDUSTRY_CODE_RE = re.compile(r"^\d{2}\.\d{2,3}\s+")
+_MAX_INDUSTRY_LEN = 70
+
+
+def _industry_text(industry: str) -> str:
+    text = _INDUSTRY_CODE_RE.sub("", industry).strip()
+    if len(text) > _MAX_INDUSTRY_LEN:
+        text = text[: _MAX_INDUSTRY_LEN].rsplit(" ", 1)[0].rstrip(",;") + " ..."
+    return text[:1].lower() + text[1:] if text else text
+
+
 def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     li = profile.legal_identity
     name = _value_or_none(li.legal_name)
@@ -305,22 +334,24 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     else:
         text = f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity"
     if industry:
-        text += f" in the industry {industry}"
+        text += f" in {_industry_text(industry)}"
     if founded:
-        text += f", founded {founded}"
-    text += "."
-    if status:
-        text += f" Registry status: {status}."
+        text += f", founded {founded[:4]}"
+    extras = [f"registry status {status}"] if status else []
     if employees:
-        text += f" {employees} registered employees."
+        extras.append(f"{employees} employees")
+    if extras:
+        text += "; " + ", ".join(extras)
     claims = [c for c in (li.legal_name, li.legal_form, li.industry, li.founded_date, li.operating_status, li.employee_count) if c is not None]
-    return SummarySentence(text, ["legal_name", "legal_form", "industry", "founded_date", "operating_status", "employee_count"], claims)
+    return SummarySentence(text + ".", ["legal_name", "legal_form", "industry", "founded_date", "operating_status", "employee_count"], claims)
 
 
 _METRIC_WORDS = [
     ("revenue", "revenue"), ("operating_result", "operating result"), ("annual_result", "net result"),
     ("total_assets", "total assets"), ("total_equity", "equity"), ("total_debt", "debt"),
 ]
+# The figures the summary names: enough to say how big the company is and how it is doing.
+_SUMMARY_METRICS = ("revenue", "annual_result", "total_equity")
 _AMOUNT_RE = re.compile(r"^(-?[\d,]+)\s*([A-Z]{3})?$")
 
 
@@ -338,42 +369,10 @@ def _metric_by_period(profile: CompanyProfile, name: str) -> dict[str, Claim]:
     }
 
 
-def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    """The latest filing's figures, from the discrete claims when there are any
-    (each with its own period), else from the combined latest-accounts claim."""
-    revenue_periods = {
-        period for name, _ in _METRIC_WORDS for period in _metric_by_period(profile, name)
-    }
-    if revenue_periods:
-        period = max(revenue_periods)
-        claims, parts = [], []
-        for name, word in _METRIC_WORDS:
-            claim = _metric_by_period(profile, name).get(period)
-            if claim:
-                claims.append(claim)
-                parts.append(f"{word} {claim.value}")
-        end = f", period ending {claims[0].effective_date[:10]}" if claims[0].effective_date else ""
-        return SummarySentence(
-            f"Latest filed accounts ({period}{end}): " + ", ".join(parts) + ".",
-            [name for name, _ in _METRIC_WORDS], claims,
-        )
-
-    claim = profile.annual_accounts.latest
-    value = _value_or_none(claim)
-    if value is None:
-        return None
-    when = f" ({claim.reporting_period}" + (f", period ending {claim.effective_date[:10]}" if claim.effective_date else "") + ")" if claim.reporting_period else ""
-    text = f"Latest filed accounts{when}: {value}."
-    history = [c for c in profile.annual_accounts.history if c.state == EvidenceState.AVAILABLE]
-    if history:
-        text += f" {len(history)} earlier filing{'s' if len(history) != 1 else ''} on record."
-    return SummarySentence(text, ["annual_accounts_latest", "annual_accounts_history"], [claim] + history[:1])
-
-
-def _trend_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    """How the company is doing: the change in revenue between its two newest
-    filings, computed from the two sourced figures and quoted with both. Only when
-    both are in the same currency and the earlier one is not zero."""
+def _revenue_change(profile: CompanyProfile) -> Optional[tuple[str, str, float, Claim, Claim]]:
+    """(newest period, previous period, % change, newest claim, previous claim) for revenue
+    between the two newest filings; only when both are in the same currency and the earlier
+    one is not zero."""
     revenue = _metric_by_period(profile, "revenue")
     if len(revenue) < 2:
         return None
@@ -381,21 +380,47 @@ def _trend_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     a, b = _amount(revenue[newest].value), _amount(revenue[previous].value)
     if not a or not b or a[1] != b[1] or b[0] == 0:
         return None
-    change = (a[0] - b[0]) / abs(b[0]) * 100
-    direction = "up" if change > 0.05 else "down" if change < -0.05 else "flat"
-    text = (
-        f"Revenue {direction} {abs(change):.1f}% from {previous} to {newest} "
-        f"({revenue[previous].value} to {revenue[newest].value})"
-        if direction != "flat" else f"Revenue flat between {previous} and {newest} ({revenue[newest].value})"
-    )
-    result = _metric_by_period(profile, "annual_result")
-    claims = [revenue[newest], revenue[previous]]
-    if newest in result and previous in result:
-        r_new, r_old = _amount(result[newest].value), _amount(result[previous].value)
-        if r_new and r_old and r_new[1] == r_old[1]:
-            text += f"; net result {result[previous].value} to {result[newest].value}"
-            claims += [result[newest], result[previous]]
-    return SummarySentence(text + ".", ["revenue", "annual_result"], claims)
+    return newest, previous, (a[0] - b[0]) / abs(b[0]) * 100, revenue[newest], revenue[previous]
+
+
+def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    """How big and how profitable, for the latest filed year, with the revenue change
+    on the year before: computed from two sourced figures, quoted for both."""
+    periods = {period for name, _ in _METRIC_WORDS for period in _metric_by_period(profile, name)}
+    if periods:
+        period = max(periods)
+        claims: list[Claim] = []
+        parts: list[str] = []
+        change = _revenue_change(profile)
+        for name in _SUMMARY_METRICS:
+            claim = _metric_by_period(profile, name).get(period)
+            if not claim:
+                continue
+            word = dict(_METRIC_WORDS)[name]
+            part = f"{word} {_short_amount(claim.value)}"
+            claims.append(claim)
+            if name == "revenue" and change and change[0] == period:
+                direction = "up" if change[2] > 0.05 else "down" if change[2] < -0.05 else "flat"
+                part += f" (flat on {change[1]})" if direction == "flat" else f" ({direction} {abs(change[2]):.1f}% on {change[1]})"
+                claims.append(change[4])
+            parts.append(part)
+        if not parts:  # the year has figures, but none of the ones the summary names
+            return None
+        end = claims[0].effective_date[:10] if claims[0].effective_date else None
+        return SummarySentence(
+            f"{period}{f' (to {end})' if end else ''}: " + ", ".join(parts) + ".",
+            list(_SUMMARY_METRICS), claims,
+        )
+
+    claim = profile.annual_accounts.latest
+    value = _value_or_none(claim)
+    if value is None:
+        return None
+    when = f" ({claim.reporting_period}" + (f", to {claim.effective_date[:10]}" if claim.effective_date else "") + ")" if claim.reporting_period else ""
+    return SummarySentence(f"Latest filed accounts{when}: {value}.", ["annual_accounts_latest"], [claim])
+
+
+_MAX_LEADERS = 2
 
 
 def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
@@ -413,32 +438,51 @@ def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         people_claims.setdefault(name, []).append(claim)
     names = list(people)
     shown = names[:_MAX_LEADERS]
-    text = "Run by " + ", ".join(
-        f"{n} ({', '.join(r for r in people[n] if r)})" if any(people[n]) else n for n in shown
-    )
+    phrases = [f"{n} ({', '.join(r for r in people[n] if r)})" if any(people[n]) else n for n in shown]
+    text = "Led by " + " and ".join(phrases)
     if len(names) > len(shown):
-        text += f" and {len(names) - len(shown)} more registered role holders"
+        text += f", with {len(names) - len(shown)} more registered role holders"
     return SummarySentence(text + ".", ["leader"], [c for n in shown for c in people_claims[n]])
 
 
+_POSTCODE_TOWN_RE = re.compile(r"\b\d{4}\s+([A-ZÆØÅa-zæøå][\w .'-]*?)(?:\s*\(|,|$)")
+_PAREN_TOWN_RE = re.compile(r"\(([A-ZÆØÅ][\wÆØÅæøå .'-]*?)(?:,|\))")
+
+
+def _town(workplace: str) -> Optional[str]:
+    """'ACME, Hammergata 20, 3264 LARVIK (12 ansatte)' -> 'Larvik'; 'ACME (BERGEN, 3 ansatte)' -> 'Bergen'."""
+    match = _POSTCODE_TOWN_RE.search(workplace) or _PAREN_TOWN_RE.search(workplace)
+    return match.group(1).strip().title() if match else None
+
+
 def _workplaces_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    """Only when there is more than one site: a single registered address adds nothing."""
     places = [c for c in profile.leadership.workplaces if c.state == EvidenceState.AVAILABLE and c.value]
-    if not places:
+    if len(places) < 2:
         return None
-    shown = places[:_MAX_WORKPLACES]
-    lead_in = f"{len(places)} registered workplaces, e.g. " if len(places) > 1 else "1 registered workplace: "
-    text = lead_in + "; ".join(c.value for c in shown) + "."
-    return SummarySentence(text, ["workplace"], shown)
+    towns: list[str] = []
+    for claim in places:
+        town = _town(claim.value)
+        if town and town not in towns:
+            towns.append(town)
+    where = f", including {', '.join(towns[:3])}" if towns else ""
+    return SummarySentence(f"{len(places)} registered sites{where}.", ["workplace"], places[:3])
 
 
-def _web_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    site = profile.online_presence.official_site
-    profiles = [c for c in profile.online_presence.company_profiles if c.state == EvidenceState.AVAILABLE and c.value]
+def _online_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    """Website, profiles, hiring and the newest news in one line; every part says only what
+    its claim says (a bare careers page is "careers page", never "is hiring")."""
     parts: list[str] = []
+    fields: list[str] = []
     claims: list[Claim] = []
+
+    site = profile.online_presence.official_site
     if _value_or_none(site):
-        parts.append(f"official website {_host(site.value)}")
+        parts.append(_host(site.value))
+        fields.append("official_website")
         claims.append(site)
+
+    profiles = [c for c in profile.online_presence.company_profiles if c.state == EvidenceState.AVAILABLE and c.value]
     platforms: list[str] = []
     for claim in profiles:
         host = _host(claim.value)
@@ -446,55 +490,101 @@ def _web_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         if label not in platforms:
             platforms.append(label)
     if platforms:
-        parts.append("company profiles on " + ", ".join(platforms[:4]))
-        claims.extend(profiles[:4])
+        parts.append(", ".join(platforms[:4]) + " profile" + ("s" if len(platforms) > 1 else ""))
+        fields.append("company_profile")
+        claims.extend(profiles[:2])
+
+    signals = [c for c in profile.activity.hiring_signals if c.state == EvidenceState.AVAILABLE and c.value]
+    if signals:
+        def is_page(claim: Claim) -> bool:
+            return claim.value.startswith(CAREERS_VALUE_PREFIX) and " open roles" not in claim.value
+
+        first = sorted(signals, key=is_page)[0]  # role-level evidence first
+        if " open roles" in first.value:
+            count = re.search(r"lists (\d+) open roles", first.value)
+            parts.append(f"careers page lists {count.group(1)} open roles" if count else "careers page lists open roles")
+        elif first.value.startswith(CAREERS_VALUE_PREFIX):
+            parts.append("careers page")
+        else:
+            title = re.sub(r"\s*\(published.*$| - NAV$", "", first.value).strip()
+            parts.append(f"hiring: {title}")
+        fields.append("hiring_signal")
+        claims.append(first)
+
+    news = _latest_news(profile)
+    if news is not None:
+        claim, date, headline = news
+        parts.append(f"latest news \"{headline}\" ({date})")
+        fields.append("dated_activity")
+        claims.append(claim)
+    elif (latest := _latest_dated(profile.activity.dated_activity)) is not None:
+        claim, date = latest
+        parts.append(f"last registry update {date}")
+        fields.append("dated_activity")
+        claims.append(claim)
+
     if not parts:
         return None
-    return SummarySentence("Online: " + "; ".join(parts) + ".", ["official_website", "company_profile"], claims)
+    return SummarySentence("Online: " + "; ".join(parts) + ".", fields, claims)
 
 
-def _hiring_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    signals = [c for c in profile.activity.hiring_signals if c.state == EvidenceState.AVAILABLE and c.value]
-    if not signals:
-        return None
-    # Role-level evidence ("Careers page lists 3 open roles, e.g. ...") is a
-    # hiring statement; a bare "Careers page: <url>" only says the page exists,
-    # and the summary must not say more than the claim does.
-    def only_a_page(claim: Claim) -> bool:
-        return claim.value.startswith(CAREERS_VALUE_PREFIX) and " open roles" not in claim.value
+def _latest_news(profile: CompanyProfile) -> Optional[tuple[Claim, str, str]]:
+    """The newest dated item from the company's own pages (not a registry change event),
+    as (claim, ISO date, headline)."""
+    best: Optional[tuple[Claim, str, str]] = None
+    for claim in profile.activity.dated_activity:
+        if claim.state != EvidenceState.AVAILABLE or not claim.value or claim.source_class == "official_registry":
+            continue
+        if claim.value.startswith("Registry record"):
+            continue
+        date = (claim.effective_date or "")[:10]
+        if not date:
+            found = _DATE_RE.findall(claim.value)
+            date = max(found) if found else ""
+        if not date:
+            continue
+        headline = re.sub(r"\s*\([^()]*\d{4}[^()]*\)\s*$", "", claim.value).strip()
+        # A headline scraped from a page line can carry its own date ("Arkiv 2026-01-28 ..."):
+        # the date is already stated beside it.
+        headline = re.sub(r"\s+", " ", _DATE_RE.sub(" ", headline)).strip(" -:")
+        headline = (headline[:90].rsplit(" ", 1)[0] + " ...") if len(headline) > 90 else headline
+        if best is None or date > best[1]:
+            best = (claim, date, headline)
+    return best
 
-    ranked = sorted(signals, key=only_a_page)  # role-level evidence first
-    first = ranked[0]
-    when = f" (seen {_day(first)})" if _day(first) else ""
-    more = f" and {len(signals) - 1} more" if len(signals) > 1 else ""
-    # A careers claim already reads as a sentence ("Careers page: <url>" or
-    # "Careers page lists 3 open roles, ..."); only a NAV ad or a job posting needs
-    # the "Hiring:" lead-in.
-    text = first.value if first.value.startswith(CAREERS_VALUE_PREFIX) else f"Hiring: {first.value}"
-    return SummarySentence(f"{text}{more}{when}.", ["hiring_signal"], [first])
+
+_CHANGE_PATTERNS = [
+    (re.compile(r"^hiring_signal added: \[(.*)\]$"), lambda m: "new hiring signal"),
+    (re.compile(r"^hiring_signal removed"), lambda m: "a hiring signal ended"),
+    (re.compile(r"^operating_status: '(.*)' -> '(.*)'$"), lambda m: f"registry status {m.group(1)} -> {m.group(2)}"),
+    (re.compile(r"^employee_count: '(.*)' -> '(.*)'$"), lambda m: f"employees {m.group(1)} -> {m.group(2)}"),
+    (re.compile(r"^legal_name: '(.*)' -> '(.*)'$"), lambda m: f"renamed from {m.group(1)}"),
+    (re.compile(r"^official_site: (?:'.*'|None) -> '(.*)'$"), lambda m: f"website now {_host(m.group(1))}"),
+    (re.compile(r"^official_site: '.*' -> None$"), lambda m: "website no longer found"),
+    (re.compile(r"^annual_accounts\.latest"), lambda m: "a new annual filing"),
+    (re.compile(r"^leadership\.leaders"), lambda m: "the registered role holders changed"),
+    (re.compile(r"^leadership\.workplaces"), lambda m: "the registered sites changed"),
+    (re.compile(r"^(legal_form|industry): '(.*)' -> '(.*)'$"), lambda m: f"{m.group(1).replace('_', ' ')} now {m.group(3)}"),
+]
 
 
-def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    latest = _latest_dated(profile.activity.dated_activity)
-    if latest is None:
-        return None
-    claim, date = latest
-    # "Registry record updated (Endring) on 2026-04-28 - Brønnøysundregistrene"
-    # says nothing more than the date; don't repeat it as if it were news.
-    if claim.value.startswith("Registry record updated"):
-        return SummarySentence(f"Last registry update on {date}.", ["dated_activity"], [claim])
-    return SummarySentence(f"Most recent dated activity ({date}): {claim.value}.", ["dated_activity"], [claim])
+def humanize_change(change: str) -> str:
+    """'employee_count: '20' -> '21'' -> 'employees 20 -> 21'. The raw strings stay in the
+    envelope's `changes` for machines; the summary says it in words."""
+    for pattern, render in _CHANGE_PATTERNS:
+        match = pattern.match(change)
+        if match:
+            return render(match)
+    return change
 
 
 def build_summary(profile: CompanyProfile) -> Summary:
-    """The short dated narrative for `profile`. Same discipline as the Q&A in
-    answer_business_questions: nothing is stated that a verified Claim doesn't
-    support, and every gap is named under `unknowns` instead of guessed."""
+    """A short dated narrative (about 80 words): what the company is, how big and how it is
+    doing, who runs it, where it is online, what changed, and what could not be found.
+    Same discipline as always: nothing is stated that a verified Claim does not support,
+    and every gap is named under `unknowns` instead of guessed."""
     as_of = profile.run_timestamp.date().isoformat()
-    builders = (
-        _identity_sentence, _accounts_sentence, _trend_sentence, _leadership_sentence, _workplaces_sentence,
-        _web_sentence, _hiring_sentence, _activity_sentence,
-    )
+    builders = (_identity_sentence, _accounts_sentence, _leadership_sentence, _workplaces_sentence, _online_sentence)
     sentences = [s for s in (build(profile) for build in builders) if s is not None]
 
     unknowns: list[str] = []
@@ -512,19 +602,41 @@ def build_summary(profile: CompanyProfile) -> Summary:
     meta = profile.refresh_metadata
     if meta.is_first_run:
         changes: list[str] = []
-        sentences.append(SummarySentence(f"First snapshot on {as_of}; there is no earlier run to compare against.", []))
+        sentences.append(SummarySentence("First run, so there is nothing earlier to compare with.", []))
     elif meta.material_changes:
         changes = list(meta.material_changes)
-        sentences.append(SummarySentence("Changed since the last run: " + "; ".join(changes) + ".", []))
+        said = [humanize_change(c) for c in changes[:3]]
+        more = f" (+{len(changes) - 3} more)" if len(changes) > 3 else ""
+        previous = f" on {meta.previous_run_timestamp.date().isoformat()}" if meta.previous_run_timestamp else ""
+        sentences.append(SummarySentence(f"Since the previous run{previous}: " + "; ".join(said) + more + ".", []))
     else:
         changes = []
-        sentences.append(SummarySentence("No material changes since the last run.", []))
+        previous = f" ({meta.previous_run_timestamp.date().isoformat()})" if meta.previous_run_timestamp else ""
+        sentences.append(SummarySentence(f"No material change since the previous run{previous}.", []))
     if unknowns:
         sentences.append(SummarySentence("Not found: " + ", ".join(unknowns) + ".", []))
 
     if sentences:
         sentences[0].text = f"As of {as_of}: {sentences[0].text}"
-    return Summary(as_of=as_of, sentences=sentences, unknowns=unknowns, changes=changes)
+    return Summary(as_of=as_of, sentences=sentences, unknowns=unknowns, changes=changes, headline=_headline(profile))
+
+
+def _headline(profile: CompanyProfile) -> str:
+    """One line for a list or a tooltip: who, what state, and the headline figure."""
+    li = profile.legal_identity
+    name = _value_or_none(li.legal_name) or f"Org. {profile.org_number}"
+    status = _optional_value(li.operating_status)
+    bits = [name + (f": {status.lower()}" if status else "")]
+    revenue = _metric_by_period(profile, "revenue")
+    if revenue:
+        period = max(revenue)
+        change = _revenue_change(profile)
+        text = f"revenue {_short_amount(revenue[period].value)} ({period}"
+        if change and change[0] == period:
+            text += f", {'up' if change[2] > 0.05 else 'down' if change[2] < -0.05 else 'flat'}"
+            text += "" if abs(change[2]) <= 0.05 else f" {abs(change[2]):.0f}%"
+        bits.append(text + ")")
+    return ", ".join(bits)
 
 
 def answer_business_questions(profile: CompanyProfile) -> list[dict]:

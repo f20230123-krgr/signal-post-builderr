@@ -312,9 +312,10 @@ def test_the_summary_states_a_careers_claim_as_it_is_and_leads_a_nav_ad_with_hir
     bare = make_profile(org_number="923609016", hiring_signals=[_claim(f"{CAREERS_VALUE_PREFIX}: https://s.no/karriere")])
     nav = make_profile(org_number="923609016", hiring_signals=[_claim("Elektriker - NAV")])
 
-    assert "Careers page: https://s.no/karriere" in build_summary(bare).text
-    assert "Careers: Careers page" not in build_summary(bare).text
-    assert "Hiring: Elektriker - NAV" in build_summary(nav).text
+    # A bare careers page is stated as a page, never as "hiring"; an ad is stated as hiring.
+    assert "Online: careers page." in build_summary(bare).text
+    assert "hiring:" not in build_summary(bare).text
+    assert "hiring: Elektriker" in build_summary(nav).text
 
 
 def test_a_listing_at_the_root_of_a_careers_subdomain_counts_roles_under_its_own_address():

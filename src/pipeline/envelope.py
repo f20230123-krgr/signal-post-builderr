@@ -170,6 +170,7 @@ def to_envelope(
         # artifact, so the summary has to live here, not only in the report.
         "summary": {
             "as_of": summary.as_of,
+            "headline": summary.headline,
             "text": summary.text,
             "sentences": [
                 {
