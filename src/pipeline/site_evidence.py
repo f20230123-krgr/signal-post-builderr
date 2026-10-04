@@ -98,20 +98,30 @@ def official_site_evidence(
     if not entity.official_site_candidate or not entity.legal_name:
         return None
     official_domain = _domain(entity.official_site_candidate)
-    own = [
+    # Pages we REQUESTED on the registered domain; where they landed may differ.
+    requested = [
         p for p in pages
         if p.fetch_state == EvidenceState.AVAILABLE and p.raw_html and p.linked_from is None
-        and _same_site(p.final_url or p.url, official_domain)
+        and _same_site(p.url, official_domain)
     ]
-    if not own:
+    if not requested:
         return None
 
-    homepage = own[0]
+    homepage = requested[0]
     landed = homepage.final_url or homepage.url
-    if not _same_site(landed, official_domain):
-        return None
+    # A registered address that redirects to another domain (lundbeck.no -> lundbeck.com)
+    # is the same company's site at its new address, and that is the address Builderr's
+    # own crawl records. It is accepted only on the strength of the page we land on: it
+    # must itself show the org number or a name that reads like the company, and only
+    # pages from that landing domain count as evidence.
+    moved = not _same_site(landed, official_domain)
+    landed_domain = _domain(landed)
+    own = [p for p in requested if not moved or _domain(p.final_url or p.url) == landed_domain]
     canonical = _canonical_link(homepage.raw_html)
-    value = canonical if canonical and _same_site(canonical, official_domain) else landed
+    base_domain = landed_domain if moved else official_domain
+    value = canonical if canonical and _same_site(canonical, base_domain) else landed
+    if moved and urlsplit(value).query:
+        value = landed.split("?")[0]
 
     evidence_page, span = None, None
     for page in own:

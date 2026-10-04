@@ -575,8 +575,12 @@ _OLD_BRAND_HTML = '<html><head><script type="application/ld+json">{"@type":"Orga
 
 
 def test_former_name_tier_finds_a_site_still_running_under_the_old_name(monkeypatch):
+    # The repeat rounds (former name, leader, org number) need a real search provider
+    # behind them: without a key the keyless instant-answer lookup is tried once, on the
+    # company name, to save requests. The provider here answers nothing, so the lookup
+    # falls through to the same instant-answer mock that finds the old-brand site.
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
+    monkeypatch.setenv("PARALLEL_API_KEY", "test-key")
     client = httpx.Client(transport=httpx.MockTransport(
         _former_name_handler(name_holders=[], site_html_by_url={"https://oldbrand.example": _OLD_BRAND_HTML})
     ))

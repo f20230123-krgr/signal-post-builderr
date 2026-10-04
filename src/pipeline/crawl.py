@@ -87,7 +87,7 @@ SITEMAP_PRIORITY_KEYWORDS = [
 # a sitemap listing more than 15 priority-keyword pages -- there's room to
 # check more of exactly that same already-vetted, same-domain content
 # without meaningful budget risk.
-MAX_SITEMAP_URLS = 20
+MAX_SITEMAP_URLS = 6
 
 # Official ATS (applicant tracking system) platforms companies commonly link
 # their own careers page to. Only ever fetched when linked FROM the entity's

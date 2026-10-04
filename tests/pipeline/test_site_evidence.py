@@ -96,8 +96,29 @@ def test_a_canonical_link_to_another_domain_is_ignored():
     assert fact.value == "https://example.com/"
 
 
-def test_a_site_that_redirects_to_another_domain_gets_no_site_evidence():
-    assert official_site_evidence([_page("https://example.com/", final_url="https://parent-group.com/")], _entity("https://example.com/")) is None
+def test_a_registered_address_that_moved_to_another_domain_is_published_at_its_new_address_when_the_page_names_the_company():
+    """lundbeck.no redirects to lundbeck.com; Builderr's own crawl records the final address."""
+    fact = official_site_evidence(
+        [_page("https://example.com/", title="Equinor ASA", final_url="https://equinor-group.com/en")], _entity("https://example.com/")
+    )
+
+    assert fact.value == "https://equinor-group.com/en"
+    assert fact.source_url == "https://equinor-group.com/en" and fact.evidence_span == "Equinor ASA"
+
+
+def test_a_moved_site_whose_landing_page_does_not_name_the_company_gets_no_site_evidence():
+    """A parent group's homepage is not proof that the subsidiary's site moved there."""
+    page = _page("https://example.com/", title="Parent Group - Energy", final_url="https://parent-group.com/")
+
+    assert official_site_evidence([page], _entity("https://example.com/")) is None
+
+
+def test_a_moved_site_is_proven_by_the_org_number_on_the_landing_page_even_if_the_name_differs():
+    page = _page("https://example.com/", body="<footer>Parent Group, org.nr 923 609 016</footer>", title="Welcome", final_url="https://parent-group.com/")
+
+    fact = official_site_evidence([page], _entity("https://example.com/"))
+
+    assert fact is not None and "923 609 016" in fact.evidence_span
 
 
 def test_no_fetched_page_no_title_or_a_page_from_a_link_chain_gives_nothing():

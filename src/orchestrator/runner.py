@@ -185,6 +185,10 @@ def _default_process_one(
                     query_name, real_client, budget,
                     exa_api_key=exa_api_key if use_exa else None, parallel_api_key=parallel_api_key,
                     provider_health=provider_health, cache=cache,
+                    # The keyless instant-answer lookup is tried once, on the company name;
+                    # leader, org-number and former-name rounds only make sense with a real
+                    # search provider behind them (each is a request for ~zero yield).
+                    use_duckduckgo=first_round or bool(exa_api_key or parallel_api_key),
                 )
                 if not candidate:
                     return None

@@ -820,6 +820,7 @@ def discover_candidate_site(
     provider_health: Optional[ProviderHealth] = None,
     cache: Optional[ResponseCache] = None,
     date_bucket: Optional[str] = None,
+    use_duckduckgo: bool = True,
 ) -> Optional[str]:
     """One best-effort candidate URL for `legal_name`, tried across the
     provider chain in module-docstring order, or None. Never itself treated
@@ -860,7 +861,10 @@ def discover_candidate_site(
         if candidate:
             return candidate
 
-    return _discover_via_duckduckgo(legal_name, client, budget, sleep)
+    # The free instant-answer fallback only ever knows companies with a Wikipedia
+    # infobox (measured 0 of 15 on ordinary companies), and each call is a request
+    # against the budget; callers turn it off for repeat rounds.
+    return _discover_via_duckduckgo(legal_name, client, budget, sleep) if use_duckduckgo else None
 
 
 def verify_discovered_site(
