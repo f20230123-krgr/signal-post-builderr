@@ -120,3 +120,35 @@ def test_crawl_follows_the_news_link_only_when_asked():
 
     assert [p.url for p in off] == ["https://example.com/"]
     assert [p.url for p in on] == ["https://example.com/", "https://example.com/nyheter"]
+
+
+def test_section_labels_and_date_strings_are_not_headlines():
+    """Found on 100 notable companies: 'Press room', 'Share and analyst information',
+    '2026-10-12 &ndash; 2026-10-14' were published as news items."""
+    html = (
+        "<ul><li><time datetime='2026-09-29'></time><h3>Press room</h3></li>"
+        "<li><time datetime='2025-10-15'></time><h3>Share and analyst information</h3></li>"
+        "<li><span>2026-09-23</span><h3>2026-10-12 &ndash; 2026-10-14</h3></li>"
+        "<li><time datetime='2026-09-20'></time><h3>Automated IC programming: preventing errors</h3></li></ul>"
+    )
+
+    assert news_items(html, TODAY) == [("Automated IC programming: preventing errors", "2026-09-20")]
+
+
+def test_an_item_dated_the_day_of_the_crawl_is_not_news():
+    """A careers page 'dated' today (a page-level timestamp) was published as news."""
+    html = "<ul><li><time datetime='2026-10-03'></time><h3>Jobb og karriere i Consto</h3></li></ul>"
+
+    assert news_items(html, TODAY) == []
+
+
+def test_json_ld_article_dates_lose_their_time_of_day_and_become_the_effective_date():
+    from src.pipeline.extract import structured_facts
+
+    html = ('<script type="application/ld+json">{"@type":"NewsArticle","headline":"SvarUT er nå tilgjengelig",'
+            '"datePublished":"2023-04-13T15:12:07.000Z"}</script>')
+
+    fact = next(f for f in structured_facts(html, "https://dips.com/n", NOW) if f.field_name == "dated_activity")
+
+    assert fact.value == "SvarUT er nå tilgjengelig (2023-04-13)"
+    assert fact.effective_date == "2023-04-13" and fact.evidence_span == "SvarUT er nå tilgjengelig"

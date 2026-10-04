@@ -82,8 +82,8 @@ def _page(body, title="Karriere - Example AS"):
 
 def test_a_page_listing_open_roles_is_a_role_level_signal_with_the_title_as_span():
     html = _page(
-        '<a href="/jobs/backend-utvikler">Backend-utvikler</a><a href="/jobs/elektriker">Elektriker</a>'
-        '<a href="/jobs/">Se alle stillinger</a>'
+        '<a href="/stillinger/backend-utvikler">Backend-utvikler</a><a href="/stillinger/elektriker">Elektriker</a>'
+        '<a href="/stillinger/">Se alle stillinger</a>'
     )
 
     [fact] = careers_page_facts(html, "https://www.example.no/karriere", NOW)
@@ -342,3 +342,32 @@ def test_malformed_links_on_a_real_page_are_skipped_not_fatal():
         _entity("https://example.com/"), BudgetGovernor(),
         client=_client({"https://example.com/": html.replace("example.no", "example.com")}), follow_careers=True, follow_news=True,
     )[0].url == "https://example.com/"
+
+
+def test_team_introductions_and_testimonials_under_a_jobs_path_are_not_open_roles():
+    """consto.no/jobb/ listed 'Møt Anna og Lars' and dips.com a person's name and title as
+    'open roles'. A bare /jobb/<slug> is not an ad."""
+    html = _page('<a href="/jobb/mot-anna-og-lars">Møt Anna og Lars</a><a href="/jobb/jon-bratberg">Jon Bratberg Produktsjef</a>')
+
+    assert role_links(html, "https://www.example.no/jobb/") == []
+    [fact] = careers_page_facts(html, "https://www.example.no/jobb/", NOW)
+    assert fact.value == f"{CAREERS_VALUE_PREFIX}: https://www.example.no/jobb/"  # the page, not invented roles
+
+
+def test_a_job_path_with_a_numeric_id_or_an_ad_word_is_an_ad():
+    html = _page(
+        '<a href="/jobs/7116722-senior-konsulent">Senior Konsulent Oslo</a>'
+        '<a href="/ledig-stilling/elektriker-bergen">Elektriker Bergen</a>'
+    )
+
+    assert [t for t, _ in role_links(html, "https://www.example.no/karriere")] == ["Senior Konsulent Oslo", "Elektriker Bergen"]
+
+
+def test_an_ats_dashboard_or_login_page_is_not_a_careers_page():
+    """app.teamtailor.com/companies/<id>/dashboard was published as a careers page."""
+    url = "https://app.teamtailor.com/companies/HbC9EqmTjjI@eu/dashboard"
+
+    assert not is_careers_url(url, DEFAULT_ATS_DOMAINS)
+    assert careers_page_facts(_page("<p>x</p>", title="Teamtailor"), url, NOW, ats_domains=DEFAULT_ATS_DOMAINS) == []
+    assert not is_careers_url("https://acme.recman.no/login", DEFAULT_ATS_DOMAINS)
+    assert is_careers_url("https://acme.recman.no/", DEFAULT_ATS_DOMAINS)

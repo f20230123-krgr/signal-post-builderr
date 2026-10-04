@@ -29,7 +29,7 @@ import trafilatura
 
 from src.pipeline.careers import careers_page_facts, is_careers_url
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
-from src.pipeline.news import news_item_facts
+from src.pipeline.news import is_headline, news_item_facts
 from src.pipeline.social import social_profile_link
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -259,14 +259,18 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
             activity_date = obj.get("startDate")
 
         if activity_date:
+            # "2023-04-13T15:12:07.000Z" -> the day; the time of day is not part of the fact.
+            day = re.match(r"\s*(\d{4}-\d{2}-\d{2})", str(activity_date))
             facts.append(
                 RawFact(
                     "dated_activity",
-                    f"{headline} ({activity_date})",
+                    f"{headline} ({day.group(1) if day else activity_date})",
                     source_url,
                     "structured",
                     extracted_at,
                     context_name=page_context_name,
+                    evidence_span=headline if headline != "activity" else None,
+                    effective_date=day.group(1) if day else None,
                 )
             )
 
@@ -518,7 +522,9 @@ def _activity_facts(
     for line in _visible_lines(html):
         if len(line) > _MAX_FREETEXT_LINE_LENGTH:
             continue
-        if _DATE_RE.search(line):
+        # A line that is only dates and punctuation ("2026-10-12 &ndash; 2026-10-14") or a
+        # bare section label says nothing: the headline next to the date is the fact.
+        if _DATE_RE.search(line) and is_headline(_DATE_RE.sub(" ", line)):
             facts.append(RawFact("dated_activity", line, source_url, "text", extracted_at, context_name=context_name))
     return facts
 

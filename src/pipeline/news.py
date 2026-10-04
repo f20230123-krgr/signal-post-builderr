@@ -120,6 +120,24 @@ def find_news_links(html: str, page_url: str, official_domain: str, limit: int =
     return [u for _, _, u in sorted(scored)[:limit]]
 
 
+_SECTION_LABEL_RE = re.compile(
+    r"^(press\s*room|presserom|press\s+releases?|pressemeldinger?|news(room)?|nyheter|aktuelt|blogg?|"
+    r"share\s+and\s+analyst\s+information|investor\s+relations|read\s+more|les\s+mer|se\s+alle|view\s+all|all\s+news|"
+    r"latest\s+news|siste\s+nytt|financial\s+(calendar|reports?)|reports?|downloads?|events?|arrangementer)$",
+    re.IGNORECASE,
+)
+_ENTITY_RE = re.compile(r"&#?\w+;")
+
+
+def is_headline(title: str) -> bool:
+    """A headline says something: not a section label ("Press room"), and not a string of
+    dates and punctuation ("2026-10-12 &ndash; 2026-10-14")."""
+    if _SECTION_LABEL_RE.match(title.strip()):
+        return False
+    letters = re.sub(r"[^A-Za-zÆØÅæøåÄÖäöÜü]", "", _ENTITY_RE.sub(" ", title))
+    return len(letters) >= 8
+
+
 def _blocks(html: str) -> list[str]:
     """The page cut into article / list-item chunks."""
     cleaned = _SCRIPT_STYLE_RE.sub(" ", html)
@@ -151,6 +169,8 @@ def news_items(html: str, today: Optional[date] = None) -> list[tuple[str, str]]
             iso = parse_date(_text(block), today)
         title = _title(block) if iso else None
         if not iso or not title or title.lower() in seen or parse_date(title):
+            continue
+        if not is_headline(title) or iso == (today or datetime.now().date()).isoformat():
             continue
         seen.add(title.lower())
         items.append((title, iso))

@@ -60,11 +60,22 @@ _CAREERS_PATH_RE = re.compile(
 _CAREERS_HOST_RE = re.compile(r"^(careers?|karriere|jobs?|jobb)\.", re.IGNORECASE)
 # A link to ONE job: a job-ish path segment followed by a further segment, or a
 # numeric/id style detail URL.
+#
+# Deliberately strict. A bare /jobb/<slug> or /careers/<slug> is as likely a team
+# introduction ("Møt Anna og Lars"), a testimonial or a benefits page as a job ad, and
+# publishing those as "open roles" would be a wrong claim. A link counts only when its URL
+# says it is an ad: an ad-ish word (stilling, ledig, vacancy, position, opening, annonse,
+# apply) followed by a segment, a job/career path followed by a numeric id
+# (/jobs/7116722-senior-consultant), or an id parameter.
 _JOB_DETAIL_RE = re.compile(
-    r"/(jobs?|jobb|jobber|stilling|stillinger|position|positions|vacanc\w*|ledig\w*|annonse|apply)"
-    r"/[^/?#]+|[?&](jobid|job_id|id|ad|adid|positionid)=\w+|/\d{5,}",
+    r"/[\w-]*(stilling|position|vacanc|ledig|opening|annonse|apply)[\w-]*/[^/?#]+"
+    r"|/(jobs?|jobb|jobber|careers?|karriere)/\d{4,}[^/?#]*"
+    r"|[?&](jobid|job_id|adid|positionid|id)=\d+|/\d{5,}",
     re.IGNORECASE,
 )
+# Pages of an applicant-tracking system that are the company's back office or a login, not
+# a public vacancies page (a Teamtailor dashboard URL was published as a "careers page").
+_NOT_PUBLIC_RE = re.compile(r"/(dashboard|admin|login|logon|sign[_-]?in|sign[_-]?up|auth|account|settings|embed)(/|$|\?)", re.IGNORECASE)
 _ANCHOR_RE = re.compile(r"<a\b([^>]*)>(.*?)</a>", re.IGNORECASE | re.DOTALL)
 _HREF_ATTR_RE = re.compile(r'\bhref\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -138,6 +149,8 @@ def is_careers_url(url: str, ats_domains: Optional[set[str]] = None) -> bool:
     """True for a URL that looks like a careers/jobs page or sits on an ATS host."""
     parts = urlsplit(url)
     domain = _domain(url)
+    if _NOT_PUBLIC_RE.search(parts.path):
+        return False
     if ats_domains and _on_any(domain, ats_domains):
         return True
     return bool(_CAREERS_HOST_RE.match(domain) or _CAREERS_PATH_RE.search(parts.path + ("?" if parts.query else "")))
