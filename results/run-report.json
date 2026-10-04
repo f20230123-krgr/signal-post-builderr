@@ -1,60 +1,50 @@
 {
-  "run_id": "2026-09-21T17-49-06Z",
+  "run_id": "2026-10-04T06-05-37Z",
   "input_count": 1000,
   "profile_count": 1000,
   "universe_used": true,
   "chunk_size": 100,
   "chunk_count": 10,
-  "requests_used": 12919,
-  "outbound_requests_measured": 12919,
+  "requests_used": 9897,
+  "outbound_requests_measured": 9897,
   "outbound_requests_breakdown": {
-    "total": 12919,
-    "redirect_hops": 659,
-    "server_error_responses": 22,
+    "total": 9897,
+    "redirect_hops": 555,
+    "server_error_responses": 25,
     "by_host": {
-      "data.brreg.no": 5436,
-      "api.parallel.ai": 1798,
-      "api.exa.ai": 945,
-      "api.duckduckgo.com": 202,
-      "bizpages.org": 92,
-      "norwegian-subsea.no": 91,
-      "vibbo.no": 83,
-      "tracxn.com": 61,
-      "www.usbl.no": 41,
-      "www.datalog.co.uk": 38,
-      "forvalt.no": 38,
-      "pam-stilling-feed.nav.no": 32,
-      "backe.no": 32,
-      "www.mpstorkjokken.no": 32,
-      "www.norwegianshipdesign.no": 30
+      "data.brreg.no": 5190,
+      "api.duckduckgo.com": 1455,
+      "pam-stilling-feed.nav.no": 73,
+      "www.usbl.no": 25,
+      "backe.no": 21,
+      "www.mpstorkjokken.no": 21,
+      "www.fruits.co": 20,
+      "www.storebrand.no": 19,
+      "connectxnet.no": 19,
+      "www.tsbank.no": 18,
+      "axer.no": 18,
+      "www.vbbl.no": 17,
+      "www.nifu.no": 17,
+      "norlandiabarnehagene.no": 17,
+      "peab.no": 16
     }
   },
   "request_safety_margin": 60,
-  "spend_used_usd": 6.258,
+  "spend_used_usd": 0.0,
   "spend_limits": {
-    "exa_first_round_only": true,
-    "max_search_spend_usd": 10.0
+    "exa_first_round_only": false,
+    "max_search_spend_usd": null
   },
-  "wall_clock_seconds": 3736.072,
+  "wall_clock_seconds": 5233.855,
   "degraded_providers": {},
+  "search_keys": {
+    "exa": "absent",
+    "parallel": "absent"
+  },
   "nav_job_index": {
-    "pages_fetched": 31,
-    "requests_used": 32,
-    "active_ads_indexed": 6177,
+    "pages_fetched": 62,
+    "requests_used": 63,
+    "active_ads_indexed": 8711,
     "truncated_at_page_cap": false
-  },
-  "chunk_1_rerun": {
-    "reason": "data.brreg.no was briefly unavailable while the first batch of 100 ran (58 profiles came back with failed registry claims); the same 100 organisation numbers were re-run and replace that batch.",
-    "profiles_replaced": 100,
-    "requests_used": 1288,
-    "spend_used_usd": 0.63,
-    "wall_clock_seconds": 316.635,
-    "degraded_providers": {}
-  },
-  "precision_fix_rerun": {
-    "reason": "Independent review after the corpus was generated found the discovered-website acceptance rules too loose: directory/listing pages keyed by org number, confirmed non-company domains (Spotify, LEI/company-data directories, a menu directory, etc.), a football club's site accepted for an unrelated company sharing a short brand word, a relative JSON-LD url published as the website verbatim, and a company's real site carrying a leftover web-agency template url pointing at a different domain. All five are now rejected; the affected companies (about 6% of discovered websites) were re-run with the fixed code.",
-    "profiles_replaced": 67,
-    "requests_used": 1354,
-    "spend_used_usd": 0.539
   }
 }
