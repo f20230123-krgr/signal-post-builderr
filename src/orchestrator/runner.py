@@ -20,6 +20,7 @@ against the October deadline.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 from datetime import datetime, timezone
@@ -36,13 +37,14 @@ from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS,
 from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.render import active_renderer
 from src.pipeline.site_evidence import official_site_evidence
+from src.pipeline.social import identity_tokens, script_social_candidates, social_profile_link
 from src.pipeline.discovery import (
     ProviderHealth,
     discover_candidate_site,
     strip_leader_role_title,
     verify_discovered_site,
 )
-from src.pipeline.extract import extract
+from src.pipeline.extract import RawFact, extract
 from src.pipeline.nav_jobs import NavJobIndex, build_nav_job_index, nav_hiring_signal_facts
 from src.pipeline.net import new_client
 from src.pipeline.registry_extras import (
@@ -94,6 +96,32 @@ def _degraded_profile(org_number: str, now: Callable[[], datetime]) -> CompanyPr
         retrieved_at=now(),
     )
     return assemble(fallback_entity, confirmed_facts=[], previous_snapshot=None, now=now)
+
+
+def _script_social_facts(pages, entity, existing_facts, now) -> list:
+    """Company profiles that a page ships as script data rather than as links (sites that draw
+    their footer with JavaScript). Only those whose account name resembles the company or its
+    domain, and only the ones no anchor already gave -- see src/pipeline/social.py."""
+    if not entity.legal_name or not entity.official_site_candidate:
+        return []
+    tokens = identity_tokens(entity.legal_name, entity.official_site_candidate)
+    have = set()
+    for fact in existing_facts:
+        if fact.field_name == "company_profile":
+            found = social_profile_link(fact.value)
+            if found:
+                have.add(found[1])
+    extra = []
+    for page in pages:
+        if page.fetch_state != EvidenceState.AVAILABLE or page.linked_from is not None or not page.raw_html:
+            continue
+        digest = hashlib.sha256(page.raw_html.encode("utf-8")).hexdigest()
+        for link, key, raw in script_social_candidates(page.raw_html, tokens):
+            if key in have:
+                continue
+            have.add(key)
+            extra.append(RawFact("company_profile", link, page.url, "structured", now(), content_hash=digest, evidence_span=raw))
+    return extra
 
 
 def _default_process_one(
@@ -297,6 +325,7 @@ def _default_process_one(
         for page in pages:
             if page.fetch_state == EvidenceState.AVAILABLE:
                 raw_facts.extend(extract(page, now=now))
+        raw_facts.extend(_script_social_facts(pages, crawl_entity, raw_facts, now))
 
     confirmed_facts = [c for c in (verify(f, crawl_entity) for f in raw_facts) if c is not None]
     if discovered_site_fact:

@@ -118,3 +118,47 @@ def test_a_facebook_policy_page_is_not_a_page_and_the_people_form_is():
     assert canonical_social_profile_url("https://facebook.com/people/hammaren-barnehage/100053974317354") == (
         "https://www.facebook.com/people/hammaren-barnehage/100053974317354"
     )
+
+
+# --- profiles shipped as script data ------------------------------------------------------------
+
+from src.pipeline.social import identity_tokens, resembles_company, script_social_candidates  # noqa: E402
+
+
+def test_identity_tokens_are_the_distinctive_name_words_the_joined_name_and_the_domain_label():
+    assert identity_tokens("AF GRUPPEN ASA", "https://www.afgruppen.no/") == {"afgruppen"}
+    assert identity_tokens("NORDIC DOOR AS", "https://www.nordicdoor.no") >= {"nordicdoor"}
+    assert "kitron" in identity_tokens("KITRON ASA", "https://www.kitron.com")
+    assert identity_tokens("AS", "") == set()
+
+
+def test_an_account_resembles_the_company_when_its_name_contains_or_is_part_of_a_token():
+    tokens = {"afgruppen", "kitron"}
+
+    assert resembles_company("https://www.linkedin.com/company/af-gruppen", tokens)
+    assert resembles_company("https://www.facebook.com/kitron", tokens)
+    assert resembles_company("https://twitter.com/kitron_group", tokens)
+    assert not resembles_company("https://www.linkedin.com/company/some-partner", tokens)
+    assert not resembles_company("https://www.facebook.com/ab", {"ab"})  # too short to mean anything
+
+
+def test_profiles_in_script_data_are_found_with_escaped_slashes_and_quoted_as_found():
+    html = (
+        r'<script>window.__DATA__={"social":{"facebook":"https:\/\/www.facebook.com\/afgruppen",'
+        r'"linkedin":"https:\/\/no.linkedin.com\/company\/af-gruppen\/","partner":"https://www.linkedin.com/company/other-firm"}}</script>'
+    )
+
+    found = script_social_candidates(html, {"afgruppen"})
+
+    assert [f[0] for f in found] == ["https://www.facebook.com/afgruppen", "https://no.linkedin.com/company/af-gruppen/"]
+    assert found[0][2] in html  # the span is the text exactly as the page has it
+
+
+def test_tracking_pixels_share_links_and_a_partners_profile_in_script_data_are_not_company_profiles():
+    html = (
+        '<script>fbq("init"); img="https://www.facebook.com/tr?id=123&ev=PageView";'
+        'share="https://www.facebook.com/sharer/sharer.php?u=x"; p="https://www.instagram.com/p/ABC123/";'
+        'other="https://www.facebook.com/somebodyelse"</script>'
+    )
+
+    assert script_social_candidates(html, {"afgruppen"}) == []

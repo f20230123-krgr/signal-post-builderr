@@ -125,3 +125,66 @@ def social_profile_link(url: str) -> Optional[tuple[str, str]]:
         slash = "/" if len(raw) > 2 or parts.path.endswith("/") else ""
         link = f"{parts.scheme.lower()}://{parts.netloc.lower()}/{raw[0]}/{raw[1]}{slash}"
     return link, key
+
+
+# --- profiles that live in a page's script data rather than in an <a> tag ------------------
+#
+# Sites that draw their footer with JavaScript usually still ship the profile addresses as
+# data in the page ({"facebook":"https:\/\/www.facebook.com\/acme"} inside a framework's
+# state blob). Anchors are trusted because the company chose to link them; a URL found in
+# script text could just as well belong to a partner or a widget, so it is accepted only
+# when its account name resembles the company or its domain.
+
+_SCRIPT_SOCIAL_RE = re.compile(
+    r"""https?:(?:\\?/){2}(?:[\w-]+\.)*(?:linkedin|facebook|instagram|twitter|x|youtube|tiktok)\.com(?:\\?/)(?:[^\s"'<>)\\]|\\/)+""",
+    re.IGNORECASE,
+)
+_GENERIC_NAME_TOKENS = {
+    "holding", "gruppen", "group", "norge", "norway", "invest", "eiendom", "service", "services", "partner", "partners",
+    "company", "limited", "scandinavia", "nordic", "international", "solutions", "systems",
+}
+_LEGAL_FORM_TOKENS = {"as", "asa", "ans", "da", "sa", "enk", "nuf", "ba", "ks", "iks"}
+
+
+def identity_tokens(legal_name: str, site_url: str) -> set[str]:
+    """Lower-case, letters-and-digits-only forms an account name for this company may take:
+    its distinctive name words, the whole name joined, and its domain label."""
+    words = [re.sub(r"[^a-z0-9æøå]", "", w) for w in legal_name.lower().split()]
+    words = [w for w in words if w and w not in _LEGAL_FORM_TOKENS]
+    tokens = {w for w in words if len(w) >= 5 and w not in _GENERIC_NAME_TOKENS}
+    if words:
+        tokens.add("".join(words))
+    host = urlsplit(site_url if "://" in site_url else f"https://{site_url}").netloc.lower().removeprefix("www.")
+    label = host.split(".")[0] if host else ""
+    if len(label) >= 4:
+        tokens.add(re.sub(r"[^a-z0-9æøå]", "", label))
+    return {t for t in tokens if len(t) >= 4}
+
+
+def _account_name(canonical: str) -> str:
+    segments = [s for s in urlsplit(canonical).path.split("/") if s]
+    if not segments:
+        return ""
+    name = segments[1] if segments[0].lower() in ("company", "school", "showcase", "channel", "c", "user", "pages", "p", "people") and len(segments) > 1 else segments[0]
+    return re.sub(r"[^a-z0-9æøå]", "", name.lower().lstrip("@"))
+
+
+def resembles_company(canonical: str, tokens: set[str]) -> bool:
+    name = _account_name(canonical)
+    return len(name) >= 4 and any(t in name or name in t for t in tokens)
+
+
+def script_social_candidates(html: str, tokens: set[str]) -> list[tuple[str, str, str]]:
+    """(link to publish, de-duplication key, the text as found) for each company profile
+    address in the page's raw text whose account name resembles the company."""
+    found: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for match in _SCRIPT_SOCIAL_RE.finditer(html):
+        raw = match.group(0)
+        link = raw.replace("\\/", "/")
+        result = social_profile_link(link)
+        if result is None or result[1] in seen or not resembles_company(result[1], tokens):
+            continue
+        seen.add(result[1])
+        found.append((result[0], result[1], raw))
+    return found
