@@ -42,7 +42,12 @@ _DMY_RE = re.compile(r"(?<!\d)(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})(?!\d)")
 _D_MONTH_Y_RE = re.compile(rf"(?<!\d)(\d{{1,2}})\.?\s+({_MONTH_RE})\.?,?\s+(\d{{4}})(?!\d)", re.IGNORECASE)
 _MONTH_D_Y_RE = re.compile(rf"\b({_MONTH_RE})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})(?!\d)", re.IGNORECASE)
 _TIME_TAG_RE = re.compile(r"<time\b[^>]*\bdatetime\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
-_BLOCK_START_RE = re.compile(r"<(?:article|li)\b", re.IGNORECASE)
+# An item starts at an <article>, an <li>, or a <div> whose class says it is a post / news
+# item / card / teaser: many sites lay their news out as card grids of plain divs.
+_BLOCK_START_RE = re.compile(
+    r"""<(?:article|li)\b|<div\b[^>]*\bclass\s*=\s*["'][^"']*\b(?:news|nyhet\w*|post|article|card|teaser|entry|story|blog)\b[^"']*["']""",
+    re.IGNORECASE,
+)
 _HEADING_RE = re.compile(r"<h[1-4]\b[^>]*>(.*?)</h[1-4]>", re.IGNORECASE | re.DOTALL)
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 
@@ -176,7 +181,88 @@ def news_items(html: str, today: Optional[date] = None) -> list[tuple[str, str]]
         items.append((title, iso))
         if len(items) >= MAX_NEWS_ITEMS_PER_PAGE:
             break
+    if not items:
+        today_iso = (today or datetime.now().date()).isoformat()
+        items = [(t, d) for t, d in _time_tag_items(html, today) if is_headline(t) and d != today_iso][:MAX_NEWS_ITEMS_PER_PAGE]
     return items
+
+
+_NEARBY_HEADING_RE = re.compile(r"<(?:h[1-4]|a)\b[^>]*>(.*?)</(?:h[1-4]|a)>", re.IGNORECASE | re.DOTALL)
+_NEARBY_CHARS = 400
+
+
+def _time_tag_items(html: str, today: Optional[date]) -> list[tuple[str, str]]:
+    """Fallback for layouts with no article/list/card wrapper: each <time datetime> is paired
+    with the nearest headline or link text right after it (or just before it)."""
+    cleaned = _SCRIPT_STYLE_RE.sub(" ", html)
+    items: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for match in _TIME_TAG_RE.finditer(cleaned):
+        iso = parse_date(match.group(1), today)
+        if not iso:
+            continue
+        title = None
+        for window in (cleaned[match.end() : match.end() + _NEARBY_CHARS], cleaned[max(0, match.start() - _NEARBY_CHARS) : match.start()]):
+            titles = [_text(m.group(1)) for m in _NEARBY_HEADING_RE.finditer(window)]
+            title = next((t for t in titles if _MIN_TITLE_LEN <= len(t) <= _MAX_TITLE_LEN and not parse_date(t)), None)
+            if title:
+                break
+        if not title or title.lower() in seen:
+            continue
+        seen.add(title.lower())
+        items.append((title, iso))
+    return items
+
+
+# --- WordPress: a structured post list, one request, no layout to guess ---------------------
+
+_WORDPRESS_RE = re.compile(r"/wp-content/|/wp-includes/|<meta[^>]+generator[^>]+WordPress", re.IGNORECASE)
+WP_POSTS_PATH = "/wp-json/wp/v2/posts?per_page=6&_fields=date,title,link"
+
+
+def is_wordpress(html: str) -> bool:
+    return bool(_WORDPRESS_RE.search(html))
+
+
+def wp_posts_url(page_url: str) -> str:
+    parts = urlsplit(page_url)
+    return f"{parts.scheme}://{parts.netloc}{WP_POSTS_PATH}"
+
+
+def wp_post_facts(
+    body: str, page_url: str, extracted_at: datetime, context_name: Optional[str] = None
+) -> list["RawFact"]:
+    """dated_activity from WordPress's own REST post list ("Title (YYYY-MM-DD)"). The title is
+    quoted as the JSON writes it; HTML entities in it are decoded for the published value."""
+    import json
+    from html import unescape
+
+    from src.pipeline.extract import RawFact  # deferred: see the TYPE_CHECKING note above
+
+    try:
+        posts = json.loads(body)
+    except ValueError:
+        return []
+    if not isinstance(posts, list):
+        return []
+    facts: list[RawFact] = []
+    for post in posts[:MAX_NEWS_ITEMS_PER_PAGE]:
+        if not isinstance(post, dict) or not isinstance(post.get("title"), dict):
+            continue
+        raw_title = post["title"].get("rendered")
+        iso = parse_date(str(post.get("date") or ""), extracted_at.date())
+        if not isinstance(raw_title, str) or not iso:
+            continue
+        title = _text(unescape(raw_title))
+        if not is_headline(title) or iso == extracted_at.date().isoformat():
+            continue
+        facts.append(
+            RawFact(
+                "dated_activity", f"{title} ({iso})", page_url, "structured", extracted_at,
+                context_name=context_name, evidence_span=raw_title, effective_date=iso,
+            )
+        )
+    return facts
 
 
 def news_item_facts(

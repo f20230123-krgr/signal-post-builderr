@@ -35,7 +35,7 @@ import httpx
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor
 from src.pipeline.careers import find_careers_links
-from src.pipeline.news import MAX_NEWS_PAGES, find_news_links
+from src.pipeline.news import MAX_NEWS_PAGES, find_news_links, is_wordpress, wp_posts_url
 from src.pipeline.net import UnsafeOutboundUrl, new_client
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.urls import normalize_url
@@ -659,6 +659,13 @@ def crawl(
                     else:
                         # A subdomain or an ATS host: reached by a link chain.
                         queue.append((link, url))
+            if linked_from is None and follow_news and urlsplit(url).path in ("", "/") and is_wordpress(html):
+                wp_url = wp_posts_url(final_url or url)
+                wp_key = normalize_url(wp_url)
+                if _domain(wp_url) == _domain(entity.official_site_candidate) and wp_key not in seen_normalized and wp_key not in queued_links:
+                    queued_links.add(wp_key)
+                    seen_normalized.add(wp_key)
+                    queue.append((wp_url, None))  # one request: the site's own structured post list
             if linked_from is None and follow_news:
                 official_domain = _domain(entity.official_site_candidate)
                 for link in find_news_links(html, url, official_domain):

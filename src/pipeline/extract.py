@@ -29,7 +29,7 @@ import trafilatura
 
 from src.pipeline.careers import careers_page_facts, is_careers_url
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
-from src.pipeline.news import is_headline, news_item_facts
+from src.pipeline.news import is_headline, news_item_facts, wp_post_facts
 from src.pipeline.social import social_profile_link
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -552,6 +552,15 @@ def extract(
             fact.content_hash = content_hash
             fact.linked_from = page.linked_from
         return feed_facts
+
+    # WordPress's REST post list is JSON, not a page: read it as one.
+    if "/wp-json/wp/v2/posts" in page.url:
+        post_facts = wp_post_facts(page.raw_html, page.url, extracted_at)
+        post_hash = hashlib.sha256(page.raw_html.encode("utf-8")).hexdigest()
+        for fact in post_facts:
+            fact.content_hash = post_hash
+            fact.linked_from = page.linked_from
+        return post_facts
 
     facts = structured_facts(page.raw_html, page.url, extracted_at)
 

@@ -152,3 +152,67 @@ def test_json_ld_article_dates_lose_their_time_of_day_and_become_the_effective_d
 
     assert fact.value == "SvarUT er nå tilgjengelig (2023-04-13)"
     assert fact.effective_date == "2023-04-13" and fact.evidence_span == "SvarUT er nå tilgjengelig"
+
+
+# --- more layouts and sources ----------------------------------------------------------------
+
+
+def test_news_laid_out_as_a_grid_of_plain_card_divs_is_read():
+    html = (
+        '<div class="news-card"><span>12. mai 2026</span><h3>Ny avtale med Equinor</h3></div>'
+        '<div class="post-item"><span>01.04.2026</span><h3>Kvartalsrapport er klar</h3></div>'
+        '<div class="footer-links"><span>2026-01-01</span><h3>Personvern og vilkår</h3></div>'
+    )
+
+    assert news_items(html, TODAY) == [("Ny avtale med Equinor", "2026-05-12"), ("Kvartalsrapport er klar", "2026-04-01")]
+
+
+def test_a_time_tag_with_no_wrapper_is_paired_with_the_headline_next_to_it():
+    html = "<div><time datetime='2026-09-20'>20. sep</time><a href='/n/1'>Vi åpner nytt kontor i Bergen</a></div>"
+
+    assert news_items(html, TODAY) == [("Vi åpner nytt kontor i Bergen", "2026-09-20")]
+
+
+def test_a_wordpress_site_is_recognised_and_its_post_list_address_is_built():
+    from src.pipeline.news import is_wordpress, wp_posts_url
+
+    assert is_wordpress('<link rel="stylesheet" href="/wp-content/themes/x/style.css">')
+    assert is_wordpress('<meta name="generator" content="WordPress 6.5">')
+    assert not is_wordpress("<html><body>plain</body></html>")
+    assert wp_posts_url("https://www.example.no/") == "https://www.example.no/wp-json/wp/v2/posts?per_page=6&_fields=date,title,link"
+
+
+def test_wordpress_posts_become_dated_headlines_quoted_as_the_json_writes_them():
+    from src.pipeline.news import wp_post_facts
+
+    body = (
+        '[{"date":"2026-09-22T10:00:00","title":{"rendered":"Nytt kontor &#8211; Bergen"},"link":"https://x.no/a"},'
+        '{"date":"2026-10-03T09:00:00","title":{"rendered":"Skrevet i dag"},"link":"https://x.no/b"},'
+        '{"date":"2026-08-01T09:00:00","title":{"rendered":"Press room"},"link":"https://x.no/c"}]'
+    )
+
+    facts = wp_post_facts(body, "https://x.no/wp-json/wp/v2/posts", NOW)
+
+    assert [f.value for f in facts] == ["Nytt kontor – Bergen (2026-09-22)"]  # today's item and a section label are dropped
+    assert facts[0].evidence_span == "Nytt kontor &#8211; Bergen" and facts[0].evidence_span in body
+    assert facts[0].effective_date == "2026-09-22"
+    assert wp_post_facts("not json", "u", NOW) == [] and wp_post_facts('{"a": 1}', "u", NOW) == []
+
+
+def test_the_crawl_asks_a_wordpress_homepage_for_its_post_list_and_the_extractor_reads_it():
+    home = '<html><head><link rel="stylesheet" href="/wp-content/x.css"></head><body>hi</body></html>'
+    posts = '[{"date":"2026-09-22T10:00:00","title":{"rendered":"Nytt kontor i Bergen"},"link":"https://example.com/a"}]'
+    routes = {"https://example.com/": home, "https://example.com/wp-json/wp/v2/posts?per_page=6&_fields=date,title,link": posts}
+
+    pages = crawl(_entity("https://example.com/"), BudgetGovernor(), client=_client(routes), follow_news=True)
+    facts = [f for p in pages for f in extract(p, now=lambda: NOW) if f.field_name == "dated_activity"]
+
+    assert any(p.url.endswith("/wp-json/wp/v2/posts?per_page=6&_fields=date,title,link") for p in pages)
+    assert [f.value for f in facts] == ["Nytt kontor i Bergen (2026-09-22)"]
+    assert verify(facts[0], _entity("https://example.com/")) is not None
+
+
+def test_a_site_that_is_not_wordpress_is_never_asked_for_a_post_list():
+    pages = crawl(_entity("https://example.com/"), BudgetGovernor(), client=_client({"https://example.com/": "<html>x</html>"}), follow_news=True)
+
+    assert [p.url for p in pages] == ["https://example.com/"]
