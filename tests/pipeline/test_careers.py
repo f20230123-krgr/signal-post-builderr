@@ -372,3 +372,22 @@ def test_an_ats_dashboard_or_login_page_is_not_a_careers_page():
     assert careers_page_facts(_page("<p>x</p>", title="Teamtailor"), url, NOW, ats_domains=DEFAULT_ATS_DOMAINS) == []
     assert not is_careers_url("https://acme.recman.no/login", DEFAULT_ATS_DOMAINS)
     assert is_careers_url("https://acme.recman.no/", DEFAULT_ATS_DOMAINS)
+
+
+def test_when_a_big_sitemap_is_trimmed_careers_and_news_pages_survive_the_cut():
+    from src.pipeline.crawl import MAX_SITEMAP_URLS, _discover_sitemap_urls
+
+    locs = "".join(f"<url><loc>https://example.com/about/team-{i}</loc></url>" for i in range(20))
+    locs += "<url><loc>https://example.com/news/latest</loc></url><url><loc>https://example.com/karriere/ledige-stillinger</loc></url>"
+    sitemap = f"<urlset>{locs}</urlset>"
+
+    def handler(request):
+        url = str(request.url)
+        if url.endswith("/robots.txt"):
+            return httpx.Response(200, text="User-agent: *\nDisallow:\n")
+        return httpx.Response(200, text=sitemap) if url.endswith("/sitemap.xml") else httpx.Response(404)
+
+    found = _discover_sitemap_urls("https://example.com/", httpx.Client(transport=httpx.MockTransport(handler)), lambda s: None, BudgetGovernor(), None, "2026-10-04")
+
+    assert len(found) == MAX_SITEMAP_URLS
+    assert found[0] == "https://example.com/karriere/ledige-stillinger" and found[1] == "https://example.com/news/latest"

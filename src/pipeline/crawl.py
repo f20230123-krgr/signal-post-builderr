@@ -83,6 +83,9 @@ SITEMAP_PRIORITY_KEYWORDS = [
     "about", "om-oss", "contact", "kontakt", "team", "leadership", "ledelse",
     "location", "career", "jobs", "job", "news", "press", "investor",
     "aktuelt", "nyheter",
+    # Norwegian careers pages: the list had only the English words, so a sitemap entry such
+    # as /karriere/ledige-stillinger never qualified.
+    "karriere", "jobb", "ledige", "stilling", "rekruttering",
 ]
 # Raised from 15: real batches consistently use well under half the 2,000-
 # request/100-company budget (~1,000-1,100 typical), and this cap only ever
@@ -339,7 +342,24 @@ def _discover_sitemap_urls(
             continue
         if _is_priority_sitemap_url(loc):
             discovered.append(loc)
+    # The cap keeps a big site from eating the request budget, so which pages survive it
+    # matters: careers and news pages first (the two families a site's own pages answer
+    # best), everything else after, each group in sitemap order.
+    discovered.sort(key=_sitemap_priority)
     return discovered[:MAX_SITEMAP_URLS]
+
+
+_CAREERS_SITEMAP_WORDS = ("career", "karriere", "jobs", "jobb", "ledig", "stilling", "vacanc")
+_NEWS_SITEMAP_WORDS = ("news", "nyheter", "aktuelt", "press", "blog", "artikler")
+
+
+def _sitemap_priority(url: str) -> int:
+    path = urlsplit(url).path.lower()
+    if any(w in path for w in _CAREERS_SITEMAP_WORDS):
+        return 0
+    if any(w in path for w in _NEWS_SITEMAP_WORDS):
+        return 1
+    return 2
 
 
 def _extract_outbound_links(html: str, page_url: str) -> list[str]:
