@@ -43,6 +43,8 @@ a { color: var(--accent); }
 .brand h1 b { color: var(--accent); }
 .brand .asof { color: var(--muted); font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top .sp { flex: 1; }
+.sitelinks { display: contents; }
+.sitelinks a { text-decoration: none; }
 .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; line-height: 1.3; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -182,6 +184,7 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
   .cov .r { grid-template-columns: 1fr 60px; }
   .cov .r .bar { grid-column: 1 / -1; order: 3; }
   .brand .asof { display: none; }
+  .sitelinks { display: none; }
   .tray { bottom: 10px; }
 }
 @media (max-width: 560px) {
@@ -201,6 +204,7 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
 <header class="top">
   <div class="brand"><h1>Signalpost <b>Atlas</b></h1><span class="asof" id="asof"></span></div>
   <span class="sp"></span>
+  <span id="siteLinks" class="sitelinks"></span>
   <button class="btn ghost" id="overviewBtn" type="button">Overview</button>
   <button class="btn ghost" id="guideBtn" type="button">Guide</button>
   <button class="btn" id="themeBtn" type="button" aria-label="Switch colour theme">Theme</button>
@@ -239,6 +243,13 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
 
 <script>
 /* Registered first so that a failure anywhere below shows up on the page instead of leaving it blank. */
+window.addEventListener("unhandledrejection", function (ev) {
+  var m = document.getElementById("main");
+  if (m && !m.dataset.ready) {
+    m.innerHTML = '<div class="wrap"><div class="card"><h2>The viewer could not start</h2><p></p></div></div>';
+    m.querySelector("p").textContent = String(ev.reason && ev.reason.message ? ev.reason.message : ev.reason);
+  }
+});
 window.addEventListener("error", function (ev) {
   var m = document.getElementById("main");
   if (m && !m.dataset.ready) {
@@ -250,8 +261,21 @@ window.addEventListener("error", function (ev) {
 <script type="application/json" id="atlas-data">{{ATLAS_DATA}}</script>
 <script>
 "use strict";
-(function () {
-const DATA = JSON.parse(document.getElementById("atlas-data").textContent);
+(async function () {
+// The data is either embedded in this file (offline copy: report.html) or, on the hosted
+// site, a separate data file that the browser downloads compressed.
+const embedded = document.getElementById("atlas-data");
+let DATA;
+if (embedded && embedded.textContent.trim().length > 2) {
+  DATA = JSON.parse(embedded.textContent);
+} else {
+  const url = (document.documentElement.dataset.src || "data.json");
+  const main = document.getElementById("main");
+  main.querySelector("p").textContent = "Downloading the company data (once, then it is cached by your browser)...";
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Could not load " + url + " (HTTP " + response.status + ")");
+  DATA = await response.json();
+}
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isUrl = s => /^https?:\/\//i.test(s || "");
@@ -684,7 +708,8 @@ function setTheme(theme) {
 function cycleTheme() { setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); }
 try { if (localStorage.getItem("atlas-theme") === "light") setTheme("light"); } catch (e) { /* ignore */ }
 
-$("#asof").textContent = "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
+$("#asof").textContent = (DATA.title ? DATA.title + " · " : "") + "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
+$("#siteLinks").innerHTML = (DATA.links || []).map(l => '<a class="btn ghost" href="' + esc(l.href) + '">' + esc(l.label) + "</a>").join("");
 renderTools(); renderTray(); route();
 $("#main").dataset.ready = "1";
 })();

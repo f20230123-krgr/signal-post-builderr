@@ -134,3 +134,29 @@ def test_the_viewer_opens_in_dark_mode_by_default_and_light_is_an_explicit_choic
     assert "--bg: #0b171e" in html[base:light]  # the bare :root is the dark palette
     assert "prefers-color-scheme" not in html  # no automatic switch to light
     assert 'data-theme="light"' in html
+
+
+def test_the_hosted_site_is_a_small_page_plus_a_separate_data_file(tmp_path):
+    import json
+
+    from src.pipeline.envelope import to_envelope
+    from src.reporting import write_site
+
+    profiles = [make_profile(org_number=f"92360901{i}", legal_name=available_claim(f"ACME {i} AS")) for i in range(5)]
+    envelopes = [to_envelope(p, run_id="r") for p in profiles]
+
+    stats = write_site(tmp_path, envelopes, datetime(2026, 1, 1, tzinfo=timezone.utc), fallback_limit=2)
+
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    data = json.loads((tmp_path / "data.json").read_text(encoding="utf-8"))
+    assert stats["companies"] == 5 and len(data["envelopes"]) == 5
+    assert 'id="atlas-data"></script>' in html  # nothing embedded: the page fetches data.json
+    assert "ACME 0 AS" in html and "ACME 3 AS" not in html  # the no-JavaScript fallback is capped
+    assert "Showing the first 2 of 5" in html
+    assert stats["index_bytes"] < stats["data_bytes"] or stats["index_bytes"] < 200_000
+
+
+def test_the_single_file_report_still_embeds_everything_for_offline_use():
+    html = render_html_report([make_profile(legal_name=available_claim("ACME AS"))], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert '"organisation_number"' in html.split('id="atlas-data">')[1].split("</script>")[0]
