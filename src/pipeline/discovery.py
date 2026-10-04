@@ -1008,12 +1008,13 @@ def verify_discovered_site(
         span = max(name_candidates, key=lambda c: max(name_similarity(n, c) for n in identity_names))
     if span is None:
         span = page_heading(response.text)
-    # Where the request landed, unless that is another site or a URL carrying a
-    # query string (a login or error redirect is not the company's address).
+    # Where the request landed -- the page the identity check above was run on, so a
+    # redirect to the company's real domain (studix.no -> studix.com) is recorded at that
+    # address, as Builderr's own crawl does -- unless that URL carries a query string or
+    # fragment (a login or error redirect is not the company's address).
     landed = str(response.url)
-    landed_parts, sent_parts = urlsplit(landed), urlsplit(url)
-    same_site = landed_parts.netloc.lower().removeprefix("www.") == sent_parts.netloc.lower().removeprefix("www.")
-    value = landed if same_site and not landed_parts.query and not landed_parts.fragment else url
+    landed_parts = urlsplit(landed)
+    value = landed if not landed_parts.query and not landed_parts.fragment else url
 
     return ConfirmedFact(
         field_name="official_site",

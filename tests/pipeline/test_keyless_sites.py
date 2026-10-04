@@ -227,3 +227,19 @@ def test_a_site_proven_by_the_registered_address_quotes_the_address():
     span = contact_span("<footer>Another World, Dronningens gate 16, 0152 Oslo</footer>", hints)
 
     assert span is not None and "Dronningens gate 16" in span
+
+
+def test_a_verified_candidate_that_redirects_to_the_companys_real_domain_is_recorded_there():
+    """studix.no redirects to studix.com: the verified page lives there, and that is the
+    address Builderr's own crawl records."""
+    page = "<html><head><title>Studix AS</title></head><body>Org.nr: 923 456 789</body></html>"
+
+    def handler(request):
+        if request.url.host == "studix.no":
+            return httpx.Response(301, headers={"location": "https://studix.com/"})
+        return httpx.Response(200, text=page)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    fact = verify_discovered_site("https://studix.no", "STUDIX AS", client, BudgetGovernor(), org_number="923456789")
+
+    assert fact.value == "https://studix.com/" and fact.source_url == "https://studix.com/"
