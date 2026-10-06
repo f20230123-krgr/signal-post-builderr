@@ -548,6 +548,11 @@ function topicOf(x, i, n) {
   if (hit) return TOPIC[hit];
   return /^First run|^No material|^Since the previous run/.test(x.text) ? "Changes" : "Gaps";
 }
+// The headline minus the registry status, which the header already shows as a pill.
+function headlineFacts(c) {
+  const rest = c.status && c.headline.toLowerCase().indexOf(c.status.toLowerCase()) === 0 ? c.headline.slice(c.status.length).replace(/^,\s*/, "") : c.headline;
+  return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : "";
+}
 function renderCompany(c) {
   const s = c.env.summary || { sentences: [], unknowns: [], changes: [] };
   const story = (s.sentences || []).map((x, i, a) =>
@@ -560,7 +565,7 @@ function renderCompany(c) {
     '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\"><span class=\"mono\">org. " + esc(c.org) + "</span>" +
     (c.form ? "<span>" + esc(c.form) + "</span>" : "") + (c.status ? '<span class="pill ' + esc(st) + '">' + esc(c.status) + "</span>" : "") +
     (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") + "</div>" +
-    (c.headline ? '<p class="headline">' + esc(c.headline.charAt(0).toUpperCase() + c.headline.slice(1)) + "</p>" : "") + "</div>" +
+    (headlineFacts(c) ? '<p class="headline">' + esc(headlineFacts(c)) + "</p>" : "") + "</div>" +
     '<div class="actions"><button class="btn" id="pickBtn" type="button">' + (state.picked.includes(c.org) ? "Remove from compare" : "Add to compare") + "</button>" +
     '<button class="btn" id="jsonBtn" type="button">Envelope JSON</button><button class="btn" id="linkBtn" type="button">Copy link</button></div></div></div>' +
     '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + gaps +
