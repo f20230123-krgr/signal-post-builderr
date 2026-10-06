@@ -19,10 +19,14 @@ read it before making any change.
 pip install -r requirements.txt
 python -m pytest tests/                                # all green, no live network
 curl -LO https://builderr.ai/signalpost-company-universe-2025.jsonl.gz  # optional: fetched automatically if missing
-export EXA_API_KEY=... PARALLEL_API_KEY=...            # OPTIONAL: more website coverage -- see "API keys and cost"
-python -m src.run_batch --input batch.jsonl --out results/
+python -m src.run_batch --input batch.jsonl --out results/   # THE one command: no keys, no browser, $0
 python -m src.scoring.self_check --fixtures fixtures/   # coverage/recall/precision vs our targets
 ```
+
+The run needs no API key, no model and no browser. Two things are optional and off unless
+you ask for them: a headless browser for pages whose content is drawn by script (`--browser`,
+needs `pip install playwright==1.55.0 && python -m playwright install chromium`), and search
+keys (`EXA_API_KEY`, `PARALLEL_API_KEY`), used only if set -- see "Cost and optional keys".
 
 `batch.jsonl` is one Norwegian organization number per line, e.g.:
 
@@ -59,10 +63,10 @@ a gap is named under `unknowns`, never guessed or turned into zero.
  "changes": [], "unknowns": ["hiring signals"]}
 ```
 
-**Keys are optional.** Without `EXA_API_KEY` / `PARALLEL_API_KEY` the run uses
-the registry, company-owned sites and free sources only, prints one
-informational line saying so, and carries on; it never prompts or waits for
-input. With keys present they are used on top, for more website discovery.
+**No keys.** Builderr's official runs use the credential-free public-source path and never
+participant-owned keys, so the agent is built and measured for exactly that: the registry,
+company-owned sites and free public sources. Without keys it prints one informational line
+and carries on; it never prompts or waits for input.
 
 If `signalpost-company-universe-2025.jsonl.gz` is present in the working
 directory (or passed via `--universe`), identity resolution for any covered
@@ -204,6 +208,30 @@ work is keyless first:
   Instagram posts, share links or videos; tracking parameters stripped; one claim per profile.
 - **Roles and workplaces.** Roles carry the registry's last-changed date and the holder's name
   as written; workplaces carry their full registered address.
+- **Websites from the live registry record.** The live Brønnøysund record's `hjemmeside`
+  is read for every company (the universe file lists a website for far fewer). Against
+  Builderr's own 100-company reference sample, the keyless run matches 77 of the 97
+  registered domains, with 6 more being the same company under another domain.
+- **Crawling the site's own links.** Contact and about pages, careers and news are reached
+  through links the site itself publishes (and its sitemap, careers and news first), never
+  by guessing paths; WordPress sites' own post list gives dated news; social profiles a
+  site ships as script data are accepted only when the account name resembles the company.
+  Requests carry an identifiable crawler name with a link to this repository.
+
+After the official feedback of 2026-10-06 (websites 4.0%, hiring 0.0%; "explain the
+financial trend instead of listing values; show the period behind ... claims"):
+
+- **The financial trend in words.** The summary says how revenue moved on the previous
+  filing, whether the company made a profit or a loss and its share of revenue, whether that
+  is a turnaround or a swing into loss, and which way equity moved. Every figure and
+  percentage is computed only from the two cited filings, and a test checks each one.
+- **Dates on every figure.** The head count carries the date the registry recorded it, news
+  items their publication date, accounts their period and period end; an upcoming event is
+  never called the latest news.
+- **One record per fact.** One claim per social profile however the site spells the link,
+  one per careers page across language copies; a single job ad is published as the role
+  (title and posting date) and never labelled a careers page; HTML entities in job titles
+  read as plain text while the span keeps the page's own text.
 
 On the self-check harness's fixture sample (10 companies: 4 hand-verified
 with websites, plus 6 with no website on file to represent the ~89% majority
@@ -213,52 +241,37 @@ company recall 100%, external precision 100%.
 Use `/self-score` to re-run the harness and quote fresh numbers, and
 `/guard-check` before any PR to confirm no standard has regressed.
 
-## API keys and cost
+## Cost and optional keys
 
-The agent reads its API keys **only** from environment variables. No key is
-stored in this repository. Supply your own:
+**Expected cost per official run: $0.** No model, no paid API and no key is used.
+Builderr's official runs use the credential-free public-source path, and this agent is
+built and measured for exactly that: the Brønnøysund registry, NAV's public job-vacancy
+feed (its access token is published by NAV and fetched at run time) and each company's
+own website.
 
-| Variable | Used for | Needed? |
-|---|---|---|
-| `EXA_API_KEY` | Finding the official website of companies with none on file in the registry (paid, [$7 per 1,000 searches](https://exa.ai/pricing)) | Recommended: largest effect on website coverage |
-| `PARALLEL_API_KEY` | The same website search, as a fallback (free tier) | Recommended |
+**Measured on 2026-10-06** (default command, no keys, no browser, universe file present;
+two sets of 100 companies drawn at random from the universe, never seen by the agent
+before; real outbound requests, redirect hops and retries included):
 
-Everything else is free and needs no key: the Brønnøysund registry, NAV's
-public job-vacancy feed (its access token is published by NAV and fetched at
-run time), and each company's own website.
+| Run | Companies | Real requests | Wall clock | Errors |
+|---|---|---|---|---|
+| Random set A, default (10 at a time) | 100 / 100 | 934 | 290 s | 0 |
+| Random set B, `--concurrency 20` | 100 / 100 | 907 | 260 s | 0 |
+| Builderr's 100-company reference sample (larger sites) | 100 / 100 | 1,563 | 360 s | 0 |
 
-**Without keys**, the run still completes and every profile is valid, but a
-website is only found for companies that registered one (~11% of the
-universe), and every field that depends on the website is thinner.
+So a 1,500-company official run takes roughly 75 minutes at the default, and every
+100-company chunk stays far under its 2,000-request and 45-minute limits. The agent starts
+skipping optional extras at 1,800 requests and stops fetching at 1,940, so a heavy chunk
+degrades instead of overshooting. Raising `--concurrency` buys little (the slowest sites
+set the pace) and adds load on the registry, so the default stays at 10.
 
-**Real outbound requests per 100-company batch, measured** (redirect hops and
-retries included, as Builderr counts them; 100 unseen companies drawn at random
-on 2026-09-21, universe file present, 10 concurrent workers):
-
-| Command | Real requests | Time | Exa spend |
-|---|---|---|---|
-| Default (Exa on every search round) | **1,467** | 345 s | $1.76 |
-| `--exa-first-round-only` | 1,187 | 310 s | $0.62 |
-| No Exa key, no universe file (clean checkout) | 1,122 | 273 s | $0 |
-
-All are well under the 2,000 limit and the 45-minute limit. The agent starts
-skipping optional extras at 1,800 and stops fetching at 1,940, so a heavy batch
-degrades instead of overshooting. Numbers vary a little with the companies drawn.
-
-**Expected cost per 100-company batch (default command): about $1.80 measured, up to about $2.40**
-of Exa searches, well under the $10-per-batch limit. Each company without a
-registered website gets up to four search rounds (company name, CEO name, org
-number, former name), stopping as soon as a verified website is found, so the
-real figure is usually lower. For reference, the submitted corpus below, with
-Exa limited to the first round, measured **$0.56 per 100 companies**. The exact
-figure for any run is written to `run-report.json` as `spend_used_usd`.
-The 2,000-request, 45-minute and $10-per-batch limits are enforced in code on
-every run.
-
-**If a key runs out of credits mid-run**, the provider is switched off for the
-rest of the run, the run continues on the remaining providers, and the
-problem is printed at the start and end of the run and recorded in
-`run-report.json` under `degraded_providers`.
+**Optional search keys.** If `EXA_API_KEY` or `PARALLEL_API_KEY` is set, it is used after
+the keyless candidates to find a website for companies whose registry record has none;
+every candidate still has to pass the same identity check. They are never needed, and an
+official run does not have them. A dead or exhausted key is detected at startup and
+mid-run, switched off for the rest of the run, and reported in `run-report.json` under
+`degraded_providers`; `--exa-first-round-only` and `--max-search-spend USD` limit your own
+spend when you do use one.
 
 ### Requests, secrets, caches and outbound URLs
 
@@ -272,7 +285,7 @@ when it stops cannot push the run over. `run-report.json` records
 `requests_used` (real count, startup requests included) and
 `outbound_requests_measured` (an independent count of everything sent).
 
-**Secrets.** API keys are read from the environment variables in the table above
+**Secrets.** The optional keys are read from the environment variables named above
 and nowhere else. They are never written to `run-report.json`, envelopes,
 snapshots, caches or logs, and no key is stored in this repository.
 
@@ -293,49 +306,24 @@ is not sent and not counted, and only costs that one fetch. Known limit: the
 name is resolved once for the check and again by the HTTP client, so a hostile
 DNS server could in principle answer differently the second time.
 
-### Limiting your own spend (optional, off by default)
+### The 1,000-company corpus in `results/`
 
-- `--exa-first-round-only` uses Exa only for the company-name search; the
-  fallback rounds use the free providers. Roughly one paid search per company.
-- `--max-search-spend USD` puts a hard cap on paid search spend across the
-  whole run. When reached, Exa is switched off and the run continues.
-
-The default one-command run uses **neither**.
-
-### How the submitted profile corpus was generated
-
-To limit the author's own spend, the submitted 1,000-company corpus was
-generated with:
-
-```
-python -m src.run_batch --input entry-companies.jsonl --out results/ --chunk-size 100 --exa-first-round-only --max-search-spend 10
-```
-
-That uses Exa for the company-name search only, so the corpus has somewhat
-lower website coverage than the default command produces. Measured result:
-
-| | |
-|---|---|
-| Profiles | 1,000 / 1,000 |
-| Search spend | $7.43 in total ($6.26 for the run, $0.63 to re-run one batch after a registry outage, $0.54 to re-run 67 companies after a website-precision fix; the $10 cap was never reached) |
-| Requests | 12,919 for the run, plus 1,288 and 1,354 for the two re-run passes below. Real requests, redirects and retries included |
-| Runtime | ~5 minutes per 100 companies of active processing |
-| Provider failures | none. `run-report.json` records two re-run passes: `chunk_1_rerun` (data.brreg.no was briefly unavailable during the first 100 companies) and `precision_fix_rerun` (independent review after generation found the website-acceptance rules too loose -- directory pages keyed by org number, a handful of confirmed non-company domains, a name-match that let an unrelated brand through, a relative JSON-LD url published verbatim, and a real site carrying a leftover web-agency template url; all now rejected, and the ~7% of discovered websites this affected were re-run) |
-| Available claims | 15,209. For all 1,000 companies: legal name, industry, legal form, operating status, dated activity and workplaces. Annual accounts 997, founding date 989, leaders 2,572 across 989 companies, official website 256, company profiles 103, public brand 103, employee count 146 (only where the registry holds one), hiring signals 0 (this corpus was generated with a 14-day NAV window and a slow feed; the window is now 30 days, see `LIMITATIONS.md`) |
-
-The corpus was generated on 2026-09-21/22 by the code in the commit submitted with it (real
-request counting, the outbound URL guard and the request trims described above), with one
-exception: the NAV job-feed window was widened from 14 to 30 days afterwards (see
-`LIMITATIONS.md`), so this corpus was built with the 14-day window.
-
-The default one-command run uses Exa on every search round and has no
-run-wide spend cap.
+Builderr scores the agent on companies it supplies at run time, not on precomputed
+profiles, so `results/` is a demonstration of scale, not a submission requirement. It was
+generated keyless on 2026-10-04 with `python -m src.run_batch --input entry-companies.jsonl
+--out results/`: 1,000 / 1,000 profiles, 9,897 real requests across 10 chunks, $0. It
+predates the summary and precision changes of 2026-10-06; the hosted smoke test below is
+regenerated with the submitted code.
 
 ## Submitting
 
-Per `starter-briefs/signalpost.md`: email `submit@builderr.ai` with the
-**repository URL and exact commit hash** (not an archive -- five versions in total, the first plus up to four revisions, are
-allowed before the deadline, each a new commit hash), completed-profile
-count (>=1,000), the organisation-number manifest (`manifest.txt`), the
-one-command run instruction above, models/APIs/licences used, and expected
-cost per 100-company batch.
+Per Builderr's current submission template: email `submit@builderr.ai` with the agent name,
+repository URL, exact commit hash, a 100-company smoke-test result or report URL, the one
+command (`python -m src.run_batch --input batch.jsonl --out results/`), models / APIs /
+licences (`LIMITATIONS.md`: no model; free public sources; no keys), expected cost per
+official run ($0) and a contact for results.
+
+The hosted viewer is built from finished runs with
+`python -m src.build_site --corpus results --smoke <smoke-run-dir> --out site` and served
+from the `gh-pages` branch: the smoke test at the root (with its raw envelopes, run report
+and manifest to download) and the full corpus under `corpus/`.

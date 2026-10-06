@@ -26,8 +26,8 @@ evidence"), and the simplest way to honor that is not to use one at all yet.
 | `data.brreg.no` record fields `epostadresse`, `telefon`, `mobil`, `forretningsadresse` | Keyless website discovery: the registered e-mail's own-company domain is a candidate; the registered phone and street address corroborate a candidate | Free, public | None |
 | DNS lookups (`getaddrinfo`) of a few name-derived domains per company without a registered website | Keyless website discovery: a guessed domain is fetched only if its name resolves, and is accepted only on proof (org number, registered phone or address, or registered postcode and town with the name) | Free | None |
 | NAV job ad's `employer.homepage` (read from the ad already fetched for hiring signals; only when the ad names the company's own org number) | A website candidate, verified like any other | Free | None |
-| Exa Search API (`api.exa.ai/search`) | Candidate website discovery for companies with none on file -- candidate generation only, independently re-verified via the same name-match gate before acceptance (never trusted as evidence itself). Tried first in the discovery chain. | Free tier: 20,000 requests/month, no card required | `EXA_API_KEY` env var |
-| Parallel Search API (`api.parallel.ai/v1/search`) | Same candidate-generation role as Exa, tried second (only if Exa is unconfigured or returns nothing) | Free tier: ~5,000 requests/month, no card required | `PARALLEL_API_KEY` env var |
+| Exa Search API (`api.exa.ai/search`) -- **optional, not used in official runs** | Candidate website discovery for companies with none on file -- candidate generation only, independently re-verified via the same identity gate before acceptance (never trusted as evidence itself). Used only if the variable is set. | Paid per search | `EXA_API_KEY` env var |
+| Parallel Search API (`api.parallel.ai/v1/search`) -- **optional, not used in official runs** | Same candidate-generation role as Exa, tried second | Paid per search | `PARALLEL_API_KEY` env var |
 | NAV job-vacancy feed (`pam-stilling-feed.nav.no`) | Hiring signals: NAV's official national job board, published as a feed for outside developers with a public token. An ad is published only when its own employer org number equals the company's; only the job title and dates are published, never contact details. | Free, public token | None |
 | DuckDuckGo Instant Answer API (`api.duckduckgo.com`) | Same candidate-generation role, last-resort fallback if neither key above is configured | Free, no key | None |
 
@@ -35,9 +35,8 @@ Per `EVALUATION_HARNESS.md`: *"server-side secrets supplied through
 documented environment variables only"* -- `EXA_API_KEY` / `PARALLEL_API_KEY`
 are the two documented variables above; neither is committed to the repo or
 hardcoded anywhere (`src/pipeline/discovery.py` reads them via `os.environ`
-only). Both providers' free tiers comfortably cover a full daily
-100-company batch (~89 lookups/day) at **$0** -- see "Known limitations"
-below for the measured per-provider hit-rate difference this made.
+only). Neither is needed: Builderr's official runs supply no keys, and every
+field is produced without them.
 
 ## Source-rights assumptions
 
@@ -55,11 +54,6 @@ connector:
   indicating active bot-blocking). LinkedIn/Meta/Glassdoor/Indeed are never
   scraped directly — the only LinkedIn data captured is a `sameAs` link the
   company's own official site already self-published.
-- **Not yet implemented**: NAV's job board (`arbeidsplassen.nav.no`) has an
-  open `robots.txt` and would be a reasonable next connector, but its search
-  results are loaded client-side via JavaScript and the actual API contract
-  couldn't be reverse-engineered without a browser from this development
-  environment.
 
 ## Direct dependencies and licences
 
@@ -71,6 +65,7 @@ connector:
 | trafilatura | Apache-2.0 |
 | rapidfuzz | MIT |
 | pytest, pytest-asyncio | MIT / Apache-2.0 |
+| playwright (optional, only with `--browser`; not in the official install) | Apache-2.0 |
 
 All permissive; no copyleft (GPL-style) obligations.
 
@@ -101,10 +96,12 @@ All permissive; no copyleft (GPL-style) obligations.
   implemented — `verify.py`'s domain-provenance + name-match gate prevents
   wrong-company publication, but doesn't yet distinguish "this is the parent
   company's page" from "this is the exact subsidiary."
-- **Playwright JS-rendering fallback** is optional and not installed by
-  default. A page requiring JS rendering that isn't caught as an obvious
-  "shell" degrades to its static content rather than failing outright, but
-  true JS-rendered content isn't captured without installing it.
+- **The headless-browser fallback is opt-in (`--browser`) and not part of the
+  official install.** The one-command run reads static HTML only, so it never
+  depends on a browser being present. Content a site draws only with script
+  (some footers, job lists) is therefore missed in that run; profile links a site
+  ships as script data are still read from the static page (see
+  `src/pipeline/social.py`).
 - **Self-check fixture sample is 10 companies**, at the low end of the
   recommended 10-30. Four have hand-verified websites; six were added with no
   website on file, to represent the ~89% majority case. Those six carry
@@ -212,3 +209,24 @@ All permissive; no copyleft (GPL-style) obligations.
 - **The registry website is now evidenced by the site, not the registry snapshot.** When the
   site can be fetched and a page names the company (org number, or a name that reads like it),
   the claim's source is that page; otherwise the registry claim stands unchanged.
+
+## Known limits added 2026-10-06
+
+- **Official runs use no keys.** Builderr confirmed (2026-10-06) that official runs use the
+  credential-free public-source path and never participant-owned keys. The agent is measured
+  that way; the optional Exa/Parallel code runs only when its variable is set and is not
+  needed for any field. Models: none. Expected cost per official run: $0.
+- **The financial trend is computed, never inferred.** The summary's percentages (revenue
+  change, net result as a share of revenue) and words (grew, fell, turnaround, swing into loss)
+  come only from the two newest filings' cited figures, in the same currency; with one filing,
+  or figures in different currencies, the summary states the figures without a trend.
+- **A head count is dated by the registry** (the date Brønnøysund last registered it). The
+  universe file's head count has no date and is stated without one.
+- **Run time grows with what is visited.** Each company's own careers, news, contact and about
+  pages are read (at most a few each), so a 100-company chunk takes longer than when only the
+  homepage was read; 10 companies are researched at a time by default (`--concurrency`), and
+  each 100-company chunk keeps its own 2,000-request and 45-minute limits.
+- **The 1,000-company `results/` corpus was generated on 2026-10-04**, before the later
+  precision and summary changes; Builderr scores the agent on its own companies, not on
+  precomputed profiles, and the hosted smoke test is regenerated with the submitted code.
+

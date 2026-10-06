@@ -108,7 +108,7 @@ def render_html_report(
 
 def _viewer_data(
     envs: list[dict], generated_at: datetime, run_id: str, search_keys: Optional[dict[str, str]],
-    title: Optional[str] = None, links: Optional[list[dict]] = None,
+    title: Optional[str] = None, links: Optional[list[dict]] = None, downloads: Optional[list[dict]] = None,
 ) -> dict:
     as_of = max((e["summary"]["as_of"] for e in envs if e.get("summary")), default=generated_at.date().isoformat())
     return {
@@ -119,6 +119,9 @@ def _viewer_data(
         # Shown in the header: what this run is, and where the other runs live.
         "title": title,
         "links": links or [],
+        # The raw files this page was built from, served beside it, so a reviewer can
+        # download exactly what the agent emitted.
+        "downloads": downloads or [],
         "envelopes": [_slim(e) for e in envs],
     }
 
@@ -141,6 +144,7 @@ def write_site(
     fallback_limit: int = 25,
     title: Optional[str] = None,
     links: Optional[list[dict]] = None,
+    downloads: Optional[list[dict]] = None,
 ) -> dict[str, int]:
     """The hosted form of the viewer: `index.html` (the page) and `data.json` (the
     envelopes it shows), written side by side. A static host such as GitHub Pages
@@ -150,7 +154,7 @@ def write_site(
     first `fallback_limit` companies, to keep the page itself small."""
     out_dir.mkdir(parents=True, exist_ok=True)
     run_id = run_id or generated_at.strftime("%Y-%m-%dT%H-%M-%SZ")
-    data = _viewer_data(envelopes, generated_at, run_id, search_keys, title, links)
+    data = _viewer_data(envelopes, generated_at, run_id, search_keys, title, links, downloads)
     template = _TEMPLATE.read_text(encoding="utf-8")
     parts = {"{{NOSCRIPT}}": _fallback_html(envelopes, fallback_limit), "{{ATLAS_DATA}}": ""}
     html = re.sub(r"\{\{(?:NOSCRIPT|ATLAS_DATA)\}\}", lambda m: parts[m.group(0)], template)

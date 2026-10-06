@@ -160,3 +160,30 @@ def test_the_single_file_report_still_embeds_everything_for_offline_use():
     html = render_html_report([make_profile(legal_name=available_claim("ACME AS"))], generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     assert '"organisation_number"' in html.split('id="atlas-data">')[1].split("</script>")[0]
+
+
+def test_the_hosted_smoke_test_links_its_raw_output_for_download(tmp_path):
+    """A reviewer can download exactly what the agent emitted: envelopes, run report and
+    manifest sit beside the page, and the page lists them."""
+    import json
+
+    from src.build_site import build
+    from src.pipeline.envelope import to_envelope
+
+    def run_dir(name, count):
+        d = tmp_path / name
+        d.mkdir()
+        envs = [to_envelope(make_profile(org_number=f"9236090{i:02d}", legal_name=available_claim(f"ACME {i} AS")), run_id="r") for i in range(count)]
+        (d / "envelopes.jsonl").write_text("\n".join(json.dumps(e) for e in envs) + "\n", encoding="utf-8")
+        (d / "run-report.json").write_text(json.dumps({"run_id": name}), encoding="utf-8")
+        (d / "manifest.txt").write_text("\n".join(e["organisation_number"] for e in envs) + "\n", encoding="utf-8")
+        return d
+
+    site = tmp_path / "site"
+    build(run_dir("corpus", 3), run_dir("smoke", 2), site)
+
+    data = json.loads((site / "data.json").read_text(encoding="utf-8"))
+    assert [f["href"] for f in data["downloads"]] == ["envelopes.jsonl", "run-report.json", "manifest.txt"]
+    for f in data["downloads"]:
+        assert (site / f["href"]).stat().st_size == f["bytes"] > 0
+    assert (site / "corpus" / "envelopes.jsonl").exists()

@@ -195,3 +195,39 @@ def test_the_viewer_records_which_search_keys_the_run_had():
 
     data = json.loads(re.search(r'id="atlas-data">(.*?)</script>', html, re.S).group(1))
     assert data["search_keys"] == {"exa": "absent", "parallel": "absent"}
+
+
+def test_the_one_command_run_never_starts_a_browser_unless_asked(monkeypatch, tmp_path):
+    """The evaluator's install has no browser: the default run must not depend on one."""
+    import src.run_batch as run_batch
+
+    started = []
+
+    class FakeRenderer:
+        def start(self):
+            started.append(True)
+            return True
+
+    monkeypatch.setattr(run_batch, "shared_renderer", lambda: FakeRenderer())
+    monkeypatch.setattr(run_batch, "startup_key_check", lambda *a, **k: (_StopAfterBrowserCheck(), None))
+
+    class _Stop(Exception):
+        pass
+
+    def stop(*a, **k):
+        raise _Stop()
+
+    monkeypatch.setattr(run_batch, "search_key_status", stop)
+    for argv, expected in ((["--input", "x", "--out", str(tmp_path)], []), (["--input", "x", "--out", str(tmp_path), "--browser"], [True])):
+        started.clear()
+        monkeypatch.setattr("sys.argv", ["run_batch"] + argv)
+        try:
+            run_batch.main()
+        except _Stop:
+            pass
+        assert started == expected, argv
+        run_batch.set_active_renderer(None)
+
+
+class _StopAfterBrowserCheck:
+    disabled = {}

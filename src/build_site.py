@@ -29,6 +29,24 @@ def _load(run_dir: Path) -> tuple[list[dict], dict, datetime]:
     return envelopes, report, generated_at
 
 
+_RAW_FILES = (
+    ("envelopes.jsonl", "Envelopes (JSONL, one per company)"),
+    ("run-report.json", "Run report (requests, time, cost)"),
+    ("manifest.txt", "Organisation numbers processed"),
+)
+
+
+def _copy_raw(run_dir: Path, dest: Path) -> list[dict]:
+    """Copy a run's raw output next to its page; return the download links for the viewer."""
+    dest.mkdir(parents=True, exist_ok=True)
+    files = []
+    for name, label in _RAW_FILES:
+        if (run_dir / name).exists():
+            shutil.copy(run_dir / name, dest / name)
+            files.append({"label": label, "href": name, "bytes": (dest / name).stat().st_size})
+    return files
+
+
 def build(corpus: Path, smoke: Path | None, out: Path) -> dict:
     """The smoke test (100 companies, opens at once) is the site root when there is one;
     the full corpus lives under /corpus/. Each page links to the other."""
@@ -41,24 +59,20 @@ def build(corpus: Path, smoke: Path | None, out: Path) -> dict:
     envelopes, report, when = _load(corpus)
     corpus_dir = out / "corpus" if smoke is not None else out
     to_smoke = [{"label": "100-company smoke test", "href": "../"}] if smoke is not None else []
+    corpus_files = _copy_raw(corpus, corpus_dir)
     result["corpus"] = write_site(
         corpus_dir, envelopes, when, search_keys=report.get("search_keys"), run_id=report.get("run_id"),
-        title=f"Full run: {len(envelopes):,} companies", links=to_smoke,
+        title=f"Full run: {len(envelopes):,} companies", links=to_smoke, downloads=corpus_files,
     )
-    if (corpus / "run-report.json").exists():
-        shutil.copy(corpus / "run-report.json", corpus_dir / "run-report.json")
 
     if smoke is not None:
         s_env, s_report, s_when = _load(smoke)
+        smoke_files = _copy_raw(smoke, out)
         result["smoke"] = write_site(
             out, s_env, s_when, search_keys=s_report.get("search_keys"), run_id=s_report.get("run_id"),
             title=f"Smoke test: {len(s_env)} companies",
-            links=[{"label": f"Full run ({len(envelopes):,})", "href": "corpus/"}],
+            links=[{"label": f"Full run ({len(envelopes):,})", "href": "corpus/"}], downloads=smoke_files,
         )
-        shutil.copy(smoke / "envelopes.jsonl", out / "envelopes.jsonl")
-        for name in ("run-report.json", "manifest.txt"):
-            if (smoke / name).exists():
-                shutil.copy(smoke / name, out / name)
     return result
 
 

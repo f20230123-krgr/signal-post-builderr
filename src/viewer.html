@@ -87,6 +87,8 @@ main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60p
 .head .ttl { flex: 1; min-width: 240px; }
 .head h2.co { margin: 0; font-size: clamp(1.25rem, 3vw, 1.7rem); text-transform: none; letter-spacing: 0; color: var(--ink); line-height: 1.2; }
 .head .meta { color: var(--muted); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .88rem; }
+.head .headline { margin: 8px 0 0; color: var(--ink); font-size: .95rem; }
+.item .sub.hl { font-variant-numeric: tabular-nums; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: .76rem; font-weight: 600; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
 .pill.available, .pill.active { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
@@ -336,6 +338,12 @@ function prep(env) {
   const amount = x => { const m = x && /^(-?[\d,]+)/.exec(x.value); return m ? Number(m[1].replace(/,/g, "")) : null; };
   if (amount(newest("revenue")) != null) c.revenue = amount(newest("revenue"));
   if (amount(newest("annual_result")) != null) c.result = amount(newest("annual_result"));
+  // Filings are in NOK, EUR or USD: every amount is shown with its own currency.
+  const cur = x => { const m = x && /\b([A-Z]{3})\s*$/.exec(x.value); return m ? m[1] : null; };
+  c.currency = cur(newest("revenue")) || cur(newest("annual_result")) || ((acc && /\b(NOK|EUR|USD|SEK|DKK|GBP)\b/.exec(acc)) || [])[1] || "NOK";
+  // The summary's one-line headline, minus the company name the row already shows.
+  const hl = (env.summary || {}).headline || "";
+  c.headline = hl.indexOf(c.name + ": ") === 0 ? hl.slice(c.name.length + 2) : hl.replace(/^[^:]*: /, "");
   // News means a dated item from the company's own pages; the registry's own change events
   // exist for every company and would make this bar read 100%.
   const fromSite = claim => (claim.evidence_ids || []).some(i => ev[i] && ev[i].source_class !== "official_registry");
@@ -403,6 +411,7 @@ function renderList() {
     '<button class="item" type="button" data-o="' + c.org + '"' + (state.open === c.org ? ' aria-current="true"' : "") + ">" +
     '<span class="nm">' + esc(c.name) + "</span>" +
     '<span class="sub"><span class="mono">' + esc(c.org) + "</span>" + (c.industry ? " &middot; " + esc(c.industry.replace(/^\d+\.\d+\s*/, "")) : "") + "</span>" +
+    (c.headline ? '<span class="sub hl">' + esc(c.headline) + "</span>" : "") +
     '<span class="dots" title="' + c.score + " of " + FLAGS.length + ' information types found">' + FLAGS.map(f => '<i class="' + (c.flags[f[0]] ? "on" : "") + '"></i>').join("") + "</span>" +
     "</button></li>").join("") +
     (rows.length > shown.length ? '<li class="more"><button class="btn" id="moreBtn" type="button">Show ' + Math.min(60, rows.length - shown.length) + " more</button></li>" : "")
@@ -427,7 +436,7 @@ function keysNote() {
   const active = names.filter(n => k[n] === "active");
   const text = active.length === names.length ? "Optional search providers active: " + active.join(", ") + "."
     : active.length ? "Optional search providers active: " + active.join(", ") + "; not active: " + names.filter(n => k[n] !== "active").join(", ") + "."
-    : "This run used no search keys: it relied on the registry, company sites and free sources. Website coverage is higher when EXA_API_KEY and PARALLEL_API_KEY are set.";
+    : "This run used no API keys or paid services: every fact comes from the official registry, the company's own sites and free public sources.";
   return '<p class="changes">' + esc(text) + "</p>";
 }
 function renderHome() {
@@ -452,7 +461,15 @@ function renderHome() {
     '<div class="card"><h2>Find, compare, verify</h2><ol class="steps">' +
     "<li><b>Find</b> a company: search by name, organisation number, industry or website, or filter by what we found.</li>" +
     "<li><b>Compare</b> up to four companies side by side: tick the boxes in the list, then press Compare.</li>" +
-    "<li><b>Verify</b> any fact: press <i>Evidence</i> (or a numbered citation in the summary) to see the source link, retrieval time, reporting period, content hash and the exact quoted text.</li></ol></div></div>";
+    "<li><b>Verify</b> any fact: press <i>Evidence</i> (or a numbered citation in the summary) to see the source link, retrieval time, reporting period, content hash and the exact quoted text.</li></ol>" +
+    downloadsHtml() + "</div></div>";
+}
+function downloadsHtml() {
+  const files = DATA.downloads || [];
+  if (!files.length) return "";
+  const size = b => b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " kB";
+  return '<p class="changes">Raw output of this run, exactly as the agent wrote it: ' +
+    files.map(f => '<a href="' + esc(f.href) + '" download>' + esc(f.label) + "</a> (" + size(f.bytes || 0) + ")").join(" &middot; ") + ".</p>";
 }
 
 /* ---------- company ---------- */
@@ -527,11 +544,9 @@ const TOPIC = {
   official_website: "Online", hiring_signal: "Hiring", dated_activity: "Latest"
 };
 function topicOf(x, i, n) {
-  if (/^Revenue (up|down|flat)/.test(x.text)) return "Trend";
   const hit = (x.fields || []).find(f => TOPIC[f]);
   if (hit) return TOPIC[hit];
-  if (/^Revenue (up|down|flat)/.test(x.text)) return "Trend";
-  return /^First snapshot|^No material|^Changed since/.test(x.text) ? "Changes" : "Gaps";
+  return /^First run|^No material|^Since the previous run/.test(x.text) ? "Changes" : "Gaps";
 }
 function renderCompany(c) {
   const s = c.env.summary || { sentences: [], unknowns: [], changes: [] };
@@ -544,7 +559,8 @@ function renderCompany(c) {
     '<button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
     '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\"><span class=\"mono\">org. " + esc(c.org) + "</span>" +
     (c.form ? "<span>" + esc(c.form) + "</span>" : "") + (c.status ? '<span class="pill ' + esc(st) + '">' + esc(c.status) + "</span>" : "") +
-    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") + "</div></div>" +
+    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") + "</div>" +
+    (c.headline ? '<p class="headline">' + esc(c.headline.charAt(0).toUpperCase() + c.headline.slice(1)) + "</p>" : "") + "</div>" +
     '<div class="actions"><button class="btn" id="pickBtn" type="button">' + (state.picked.includes(c.org) ? "Remove from compare" : "Add to compare") + "</button>" +
     '<button class="btn" id="jsonBtn" type="button">Envelope JSON</button><button class="btn" id="linkBtn" type="button">Copy link</button></div></div></div>' +
     '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + gaps +
@@ -561,7 +577,7 @@ function renderCompare() {
   const rowsDef = [
     ["Registry status", c => c.status], ["Legal form", c => c.form], ["Industry", c => c.industry], ["Founded", c => c.founded],
     ["Employees", c => c.employees != null ? fmt(c.employees) : null],
-    ["Revenue (NOK)", c => c.revenue != null ? money(c.revenue) : null], ["Net result (NOK)", c => c.result != null ? money(c.result) : null],
+    ["Revenue", c => c.revenue != null ? money(c.revenue) + " " + c.currency : null], ["Net result", c => c.result != null ? money(c.result) + " " + c.currency : null],
     ["Accounts period", c => (c.ok("annual_accounts_latest")[0] || {}).reporting_period],
     ["Leadership", c => c.ok("leader").slice(0, 3).map(x => x.value).join("; ")],
     ["Workplaces", c => c.ok("workplace").length ? String(c.ok("workplace").length) : null],
@@ -694,8 +710,8 @@ function togglePick(org, force) {
 }
 function exportCsv() {
   const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
-  const head = ["org_number", "name", "status", "industry", "employees", "revenue_nok", "net_result_nok", "website"].concat(FLAGS.map(f => f[0])).concat(["found_of_" + FLAGS.length]);
-  const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score]));
+  const head = ["org_number", "name", "status", "industry", "employees", "revenue", "net_result", "currency", "website"].concat(FLAGS.map(f => f[0])).concat(["found_of_" + FLAGS.length]);
+  const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.revenue != null || c.result != null ? c.currency : "", c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score]));
   download("signalpost-companies.csv", [head].concat(rows).map(r => r.map(q).join(",")).join("\n"), "text/csv");
 }
 // Dark by default; the button switches to light and back, and the choice is remembered.

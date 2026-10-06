@@ -55,6 +55,16 @@ official run:
 Coverage >= 21/35 and recall >= 60% remain useful self-check targets, but
 missing them is no longer a qualification failure.
 
+**Current rules (re-checked on builderr.ai 2026-10-06; these override older numbers in
+this repo's docs):** the score is 50 recall & coverage / 30 precision & evidence /
+12 synthesis / 8 UX. Official runs use a Builderr-chosen set (1,500 companies on
+2026-10-05, each entry run twice) under a fixed but unpublished time and resource
+budget; a timeout or a missing result means the run is not scored. Official runs use
+the credential-free public-source path: never participant keys, so every field must
+work with no key. Submit code, one command, and a 100-company smoke-test result or
+report URL; precomputed profiles and a manifest are not needed. Our per-100-company
+standards below (2,000 requests, 45 minutes) stay as internal limits.
+
 Full scoring rubric and definition of done: @docs/success-criteria.md
 
 ## How this repo is organized

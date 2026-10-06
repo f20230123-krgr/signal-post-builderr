@@ -20,6 +20,7 @@ against the October deadline.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import logging
 import os
@@ -481,6 +482,12 @@ async def run_in_chunks(
     chunk (key check, universe download); they belong to the same evaluated
     run, so the first chunk is charged for them.
     """
+    # One worker thread per in-flight company. asyncio's default pool is capped at
+    # min(32, CPUs + 4) -- 12 threads on an 8-vCPU evaluator -- which would silently
+    # cap `concurrency` below what was asked for.
+    asyncio.get_running_loop().set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=max(concurrency, 4), thread_name_prefix="company")
+    )
     # Shared across every chunk on purpose: an exhausted API key stays
     # exhausted for the whole run, so chunk 2 must not rediscover the same
     # 402 the hard way that chunk 1 already paid for.

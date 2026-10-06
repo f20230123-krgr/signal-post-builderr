@@ -54,6 +54,10 @@ DEFAULT_UNIVERSE_PATH = Path("signalpost-company-universe-2025.jsonl.gz")
 # over it. 10 workers x (a fetch and a couple of redirects) fits well inside 60.
 REQUEST_SAFETY_MARGIN = 60
 
+# Companies in flight at once. Research is network-bound (waiting on many different
+# company sites), so this sets wall-clock time far more than CPU does.
+DEFAULT_CONCURRENCY = 10
+
 
 def prepare_universe(
     explicit_path: Optional[Path], default_path: Path, client: httpx.Client
@@ -200,12 +204,20 @@ def main() -> None:
         "ones. Off by default (the per-batch $10 limit always applies).",
     )
     parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Never start the optional headless browser (static HTML only). By default the "
-        "browser is used for pages that fail a static completeness check, if Playwright and "
-        "Chromium are installed; otherwise the run is static-only.",
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help=f"Companies researched at the same time (default {DEFAULT_CONCURRENCY}). Each one "
+        "talks to its own website, so this bounds parallel load on any one site to one company.",
     )
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="Opt in to the optional headless browser for pages that fail a static completeness "
+        "check (needs Playwright and Chromium, see README). Off by default, so the evaluator's "
+        "one-command run is static HTML only and does not depend on a browser being installed.",
+    )
+    parser.add_argument("--no-browser", action="store_true", help=argparse.SUPPRESS)  # the default; kept for old commands
     args = parser.parse_args()
 
     # Before anything is created or written, so a stop leaves no output behind.
@@ -214,7 +226,7 @@ def main() -> None:
     )
 
     renderer = None
-    if not args.no_browser:
+    if args.browser and not args.no_browser:
         renderer = shared_renderer()
         if renderer.start():
             set_active_renderer(renderer)
@@ -262,6 +274,7 @@ def main() -> None:
             run_in_chunks(
                 org_numbers,
                 chunk_size=args.chunk_size,
+                concurrency=args.concurrency,
                 snapshot_store=snapshot_store,
                 universe=universe,
                 cache=cache,
