@@ -16,6 +16,7 @@ scanned for regardless of which path produced the identity facts.
 from __future__ import annotations
 
 import hashlib
+import html as html_lib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -236,16 +237,25 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
 
         title = _as_str(obj.get("title"))
         if any(t in _JOB_POSTING_TYPES for t in obj_types) and title:
+            # Job boards often entity-encode text inside JSON-LD ("Finance &amp; Trading"):
+            # the claim reads as plain text, the span stays the text as the page has it.
             date_posted = obj.get("datePosted")
-            value = f"{title} (posted {date_posted})" if date_posted else title
+            posted_day = re.match(r"\s*(\d{4}-\d{2}-\d{2})", str(date_posted)) if date_posted else None
+            posted = posted_day.group(1) if posted_day else date_posted
+            plain_title = html_lib.unescape(title)
+            value = f"{plain_title} (posted {posted})" if posted else plain_title
             hiring_org = obj.get("hiringOrganization")
             hiring_org_name = _as_str(hiring_org.get("name")) if isinstance(hiring_org, dict) else None
             facts.append(
-                RawFact("hiring_signal", value, source_url, "structured", extracted_at, context_name=hiring_org_name)
+                RawFact(
+                    "hiring_signal", value, source_url, "structured", extracted_at, context_name=hiring_org_name,
+                    evidence_span=title, effective_date=posted_day.group(1) if posted_day else None,
+                )
             )
 
         obj_name = _as_str(obj.get("name"))
-        headline = _as_str(obj.get("headline")) or obj_name or "activity"
+        raw_headline = _as_str(obj.get("headline")) or obj_name
+        headline = html_lib.unescape(raw_headline) if raw_headline else "activity"
         # schema.org puts the date on a different property per type:
         # Article-family objects use datePublished, Event uses startDate.
         # Only checking datePublished silently skipped every event a company
@@ -269,7 +279,7 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
                     "structured",
                     extracted_at,
                     context_name=page_context_name,
-                    evidence_span=headline if headline != "activity" else None,
+                    evidence_span=raw_headline,
                     effective_date=day.group(1) if day else None,
                 )
             )

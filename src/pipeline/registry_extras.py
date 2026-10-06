@@ -686,7 +686,7 @@ def fetch_live_registry_details(
             details.facts.append(fact("founded_date", founded))
             details.facts.append(fact("dated_activity", f"Founded on {founded} - Brønnøysundregistrene"))
 
-        details.identity_facts = _live_identity_facts(body, fact)
+        details.identity_facts = _live_identity_facts(body, fact, raw_text)
 
         former = [
             h for h in (body.get("historiskeNavn") or [])
@@ -707,7 +707,7 @@ def fetch_live_registry_details(
             client.close()
 
 
-def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact]) -> list[ConfirmedFact]:
+def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact], raw_text: str = "") -> list[ConfirmedFact]:
     """The four claims universe_identity_facts() reads from the manifest, read
     from the live registry record instead, in the same published shape. A field
     the record doesn't carry is omitted, never guessed -- in particular a record
@@ -724,7 +724,15 @@ def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact]) 
 
     employees = body.get("antallAnsatte")
     if isinstance(employees, int) and not isinstance(employees, bool):
-        facts.append(fact("employee_count", str(employees)))
+        employee_fact = fact("employee_count", str(employees))
+        # The registry dates its head count: the day it was last registered, so the number is
+        # stated "as of" that day rather than as of whenever we happened to read it.
+        registered = body.get("registreringsdatoAntallAnsatteEnhetsregisteret")
+        if isinstance(registered, str) and re.match(r"\d{4}-\d{2}-\d{2}$", registered.strip()):
+            employee_fact.effective_date = registered.strip()
+        span = re.search(r'"antallAnsatte"\s*:\s*' + str(employees) + r'\b', raw_text or "")
+        employee_fact.evidence_span = span.group(0) if span else None
+        facts.append(employee_fact)
 
     form = body.get("organisasjonsform")
     legal_form = str(form.get("kode") or "").strip() if isinstance(form, dict) else ""

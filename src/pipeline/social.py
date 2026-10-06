@@ -74,6 +74,8 @@ def canonical_social_profile_url(url: str) -> Optional[str]:
             return f"https://www.facebook.com/people/{segments[1]}/{segments[2]}"
         if first == "p" and len(segments) >= 2:  # Facebook's page URL form /p/<name>-<id>
             return f"https://www.facebook.com/p/{segments[1]}"
+        if first == "pg" and len(segments) >= 2 and _HANDLE_RE.match(segments[1]):  # old form /pg/<name>/about
+            return f"https://www.facebook.com/{segments[1]}"
         if first in _RESERVED["facebook.com"] or not _HANDLE_RE.match(segments[0]):
             return None
         return f"https://www.facebook.com/{segments[0]}"
@@ -115,8 +117,8 @@ def social_profile_link(url: str) -> Optional[tuple[str, str]]:
         return None
     parts = urlsplit(url.strip())
     link = f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path}"
-    if "profile.php" in parts.path:
-        link = key  # the account id lives in the query string
+    if "profile.php" in parts.path or parts.path.lower().startswith("/pg/"):
+        link = key  # the account id lives in the query string; /pg/<name>/about is a tab of /<name>
     elif "linkedin.com" in parts.netloc.lower():
         # The company page as the site writes it, never one of its tabs (/about, /posts,
         # /mycompany, /admin/...): the first two path segments, and a trailing slash only

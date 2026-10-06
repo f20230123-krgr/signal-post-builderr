@@ -33,9 +33,10 @@ from src.models.profile import (
     OnlinePresence,
     RefreshMetadata,
 )
-from src.pipeline.careers import CAREERS_VALUE_PREFIX
+from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, careers_page_key
 from src.pipeline.registry_extras import ACCOUNT_METRIC_FIELDS
 from src.pipeline.resolve import ResolvedEntity
+from src.pipeline.social import canonical_social_profile_url
 from src.pipeline.verify import ConfirmedFact
 from src.storage.snapshots import diff_material_changes
 
@@ -166,6 +167,22 @@ def _dedup_claims(claims: list[Claim]) -> list[Claim]:
     return deduped
 
 
+def _dedup_profiles(claims: list[Claim]) -> list[Claim]:
+    """One claim per company profile. The same Facebook page linked as
+    facebook.com/Equinor in the footer and www.facebook.com/Equinor/ in the
+    page's script data is one profile, not two records."""
+    seen: set[str] = set()
+    kept: list[Claim] = []
+    for claim in claims:
+        key = canonical_social_profile_url(claim.value) if claim.value else None
+        key = (key or claim.value or "").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(claim)
+    return kept
+
+
 MAX_CAREERS_CLAIMS = 2
 
 
@@ -177,7 +194,20 @@ def _limit_careers_claims(claims: list[Claim]) -> list[Claim]:
     /career/apprentices and /career/job-opportunities is one careers page, not
     three signals."""
     def is_careers(claim: Claim) -> bool:
-        return bool(claim.value) and claim.value.startswith(CAREERS_VALUE_PREFIX)
+        return bool(claim.value) and claim.value.startswith((CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX))
+
+    # A language copy of a careers page (/da/career/vacancies/) is the same page.
+    seen_pages: set[str] = set()
+    unique: list[Claim] = []
+    for claim in claims:
+        if is_careers(claim):
+            url = claim.value.rsplit(" ", 1)[-1]
+            key = careers_page_key(url)
+            if key in seen_pages:
+                continue
+            seen_pages.add(key)
+        unique.append(claim)
+    claims = unique
 
     careers = [c for c in claims if is_careers(c)]
     if len(careers) <= MAX_CAREERS_CLAIMS:
@@ -208,7 +238,7 @@ def assemble(
     public_brand_claim = _confirmed_claim(brand_fact) if brand_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)
 
     leader_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "leader")])
-    company_profile_claims = _dedup_claims(
+    company_profile_claims = _dedup_profiles(
         [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "company_profile")]
     )
     hiring_claims = _limit_careers_claims(

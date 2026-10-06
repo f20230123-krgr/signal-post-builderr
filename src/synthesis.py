@@ -17,7 +17,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
-from src.pipeline.careers import CAREERS_VALUE_PREFIX
+from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX
 
 
 def _value_or_none(claim: Claim) -> str | None:
@@ -339,7 +339,8 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         text += f", founded {founded[:4]}"
     extras = [f"registry status {status}"] if status else []
     if employees:
-        extras.append(f"{employees} employees")
+        dated = li.employee_count.effective_date
+        extras.append(f"{employees} employees" + (f" (registered {dated[:10]})" if dated else ""))
     if extras:
         text += "; " + ", ".join(extras)
     claims = [c for c in (li.legal_name, li.legal_form, li.industry, li.founded_date, li.operating_status, li.employee_count) if c is not None]
@@ -383,34 +384,108 @@ def _revenue_change(profile: CompanyProfile) -> Optional[tuple[str, str, float, 
     return newest, previous, (a[0] - b[0]) / abs(b[0]) * 100, revenue[newest], revenue[previous]
 
 
+def _year_pair(profile: CompanyProfile, name: str, period: str) -> tuple[Optional[Claim], Optional[Claim], Optional[str]]:
+    """(claim for `period`, claim for the filing before it, that earlier period) of one figure.
+    The earlier claim is returned only when both are amounts in the same currency."""
+    by_period = _metric_by_period(profile, name)
+    now = by_period.get(period)
+    earlier = sorted((p for p in by_period if p < period), reverse=True)
+    if not now or not earlier:
+        return now, None, None
+    before = by_period[earlier[0]]
+    a, b = _amount(now.value), _amount(before.value)
+    if not a or not b or a[1] != b[1]:
+        return now, None, None
+    return now, before, earlier[0]
+
+
+def _revenue_phrase(now: Claim, before: Optional[Claim], before_period: Optional[str]) -> str:
+    if before is None:
+        return f"revenue was {_short_amount(now.value)}"
+    a, b = _amount(now.value)[0], _amount(before.value)[0]
+    if b == 0:
+        return f"revenue was {_short_amount(now.value)}"
+    pct = (a - b) / abs(b) * 100
+    if abs(pct) <= 0.05:
+        return f"revenue was flat on {before_period} at {_short_amount(now.value)}"
+    return f"revenue {'grew' if pct > 0 else 'fell'} {abs(pct):.1f}% on {before_period} to {_short_amount(now.value)}"
+
+
+def _unsigned(value: str) -> str:
+    return _short_amount(value).lstrip("-")
+
+
+def _result_phrase(now: Claim, before: Optional[Claim], before_period: Optional[str], revenue: Optional[Claim]) -> str:
+    """Profit or loss, its share of revenue, and how it compares with the filing before:
+    a turnaround, a swing into loss, or simply higher or lower."""
+    n = _amount(now.value)
+    kind = "net profit" if n[0] >= 0 else "net loss"
+    text = f"a {kind} of {_unsigned(now.value)}"
+    r = _amount(revenue.value) if revenue else None
+    if r and r[0] > 0 and r[1] == n[1]:
+        margin = n[0] / r[0] * 100
+        if abs(margin) < 1000:
+            text += f" ({abs(margin):.1f}% of revenue)"
+    if before is not None:
+        p = _amount(before.value)[0]
+        if p < 0 <= n[0]:
+            text += f", turning round from a loss of {_unsigned(before.value)} in {before_period}"
+        elif n[0] < 0 <= p:
+            text += f", after a profit of {_unsigned(before.value)} in {before_period}"
+        elif p != 0 and abs(n[0] - p) / abs(p) <= 0.005:
+            text += f", about the same as in {before_period}"
+        elif n[0] >= 0:
+            text += f", {'up' if n[0] > p else 'down'} from {_unsigned(before.value)} in {before_period}"
+        else:
+            text += f", {'a smaller' if abs(n[0]) < abs(p) else 'a larger'} loss than the {_unsigned(before.value)} of {before_period}"
+    return text
+
+
+def _equity_phrase(now: Claim, before: Optional[Claim]) -> str:
+    e = _amount(now.value)[0]
+    if e < 0:
+        return f"equity was negative ({_short_amount(now.value)})"
+    if before is None:
+        return f"equity was {_short_amount(now.value)}"
+    p = _amount(before.value)[0]
+    if p < 0:
+        return f"equity turned positive at {_short_amount(now.value)}"
+    if p != 0 and abs(e - p) / abs(p) <= 0.005:
+        return f"equity held at {_short_amount(now.value)}"
+    return f"equity {'rose' if e > p else 'fell'} to {_short_amount(now.value)}"
+
+
 def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    """How big and how profitable, for the latest filed year, with the revenue change
-    on the year before: computed from two sourced figures, quoted for both."""
-    periods = {period for name, _ in _METRIC_WORDS for period in _metric_by_period(profile, name)}
+    """How the company did in its latest filed year, in words: the revenue trend, profit or
+    loss with its margin and its change on the filing before, and which way equity moved.
+    Every figure and percentage is computed only from the cited filing figures (both years
+    are cited whenever a comparison is made)."""
+    periods = {period for name in _SUMMARY_METRICS for period in _metric_by_period(profile, name)}
     if periods:
         period = max(periods)
         claims: list[Claim] = []
-        parts: list[str] = []
-        change = _revenue_change(profile)
-        for name in _SUMMARY_METRICS:
-            claim = _metric_by_period(profile, name).get(period)
-            if not claim:
-                continue
-            word = dict(_METRIC_WORDS)[name]
-            part = f"{word} {_short_amount(claim.value)}"
-            claims.append(claim)
-            if name == "revenue" and change and change[0] == period:
-                direction = "up" if change[2] > 0.05 else "down" if change[2] < -0.05 else "flat"
-                part += f" (flat on {change[1]})" if direction == "flat" else f" ({direction} {abs(change[2]):.1f}% on {change[1]})"
-                claims.append(change[4])
-            parts.append(part)
-        if not parts:  # the year has figures, but none of the ones the summary names
+        segments: list[str] = []
+        revenue, revenue_before, revenue_before_period = _year_pair(profile, "revenue", period)
+        result, result_before, result_before_period = _year_pair(profile, "annual_result", period)
+        equity, equity_before, _ = _year_pair(profile, "total_equity", period)
+        result_text = _result_phrase(result, result_before, result_before_period, revenue) if result else None
+        if revenue:
+            segment = _revenue_phrase(revenue, revenue_before, revenue_before_period)
+            if result_text:
+                segment += " and the company made " + result_text
+            segments.append(segment)
+        elif result_text:
+            segments.append("the company made " + result_text)
+        if equity:
+            segments.append(_equity_phrase(equity, equity_before))
+        for claim in (revenue, revenue_before, result, result_before, equity, equity_before):
+            if claim is not None:
+                claims.append(claim)
+        if not segments:
             return None
         end = claims[0].effective_date[:10] if claims[0].effective_date else None
-        return SummarySentence(
-            f"{period}{f' (to {end})' if end else ''}: " + ", ".join(parts) + ".",
-            list(_SUMMARY_METRICS), claims,
-        )
+        text = f"In {period}{f' (year to {end})' if end else ''}, " + "; ".join(segments)
+        return SummarySentence(text + ".", list(_SUMMARY_METRICS), claims)
 
     claim = profile.annual_accounts.latest
     value = _value_or_none(claim)
@@ -441,7 +516,8 @@ def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     phrases = [f"{n} ({', '.join(r for r in people[n] if r)})" if any(people[n]) else n for n in shown]
     text = "Led by " + " and ".join(phrases)
     if len(names) > len(shown):
-        text += f", with {len(names) - len(shown)} more registered role holders"
+        more = len(names) - len(shown)
+        text += f", with {more} more registered role holder{'s' if more > 1 else ''}"
     return SummarySentence(text + ".", ["leader"], [c for n in shown for c in people_claims[n]])
 
 
@@ -505,6 +581,8 @@ def _online_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
             parts.append(f"careers page lists {count.group(1)} open roles" if count else "careers page lists open roles")
         elif first.value.startswith(CAREERS_VALUE_PREFIX):
             parts.append("careers page")
+        elif first.value.startswith(JOB_AD_VALUE_PREFIX):
+            parts.append("a job ad on its careers pages")
         else:
             title = re.sub(r"\s*\(published.*$| - NAV$", "", first.value).strip()
             parts.append(f"hiring: {title}")
@@ -530,8 +608,10 @@ def _online_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
 
 def _latest_news(profile: CompanyProfile) -> Optional[tuple[Claim, str, str]]:
     """The newest dated item from the company's own pages (not a registry change event),
-    as (claim, ISO date, headline)."""
+    as (claim, ISO date, headline). An item dated after this run (an upcoming event) is not
+    news yet and is never called the latest news."""
     best: Optional[tuple[Claim, str, str]] = None
+    today = profile.run_timestamp.date().isoformat()
     for claim in profile.activity.dated_activity:
         if claim.state != EvidenceState.AVAILABLE or not claim.value or claim.source_class == "official_registry":
             continue
@@ -541,7 +621,7 @@ def _latest_news(profile: CompanyProfile) -> Optional[tuple[Claim, str, str]]:
         if not date:
             found = _DATE_RE.findall(claim.value)
             date = max(found) if found else ""
-        if not date:
+        if not date or date > today:
             continue
         headline = re.sub(r"\s*\([^()]*\d{4}[^()]*\)\s*$", "", claim.value).strip()
         # A headline scraped from a page line can carry its own date ("Arkiv 2026-01-28 ..."):

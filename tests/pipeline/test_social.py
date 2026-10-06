@@ -162,3 +162,9 @@ def test_tracking_pixels_share_links_and_a_partners_profile_in_script_data_are_n
     )
 
     assert script_social_candidates(html, {"afgruppen"}) == []
+
+
+def test_facebooks_old_pg_page_form_is_the_same_page():
+    assert social_profile_link("https://www.facebook.com/pg/MtmSkogservice/about/") == (
+        "https://www.facebook.com/MtmSkogservice", "https://www.facebook.com/MtmSkogservice",
+    )

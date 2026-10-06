@@ -249,7 +249,7 @@ def test_footer_and_terms_links_on_a_job_ad_page_are_not_roles():
 
     assert role_links(html, url, DEFAULT_ATS_DOMAINS) == []
     [fact] = careers_page_facts(html, url, NOW, ats_domains=DEFAULT_ATS_DOMAINS)
-    assert fact.value == f"{CAREERS_VALUE_PREFIX}: {url}"  # the page, never invented roles
+    assert fact.value == f"Job ad: {url}"  # the ad page as what it is, never invented roles
 
 
 def test_roles_linked_to_a_general_job_board_are_not_this_companys_roles():

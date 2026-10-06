@@ -28,7 +28,7 @@ import re
 from datetime import datetime
 from html import unescape
 from typing import TYPE_CHECKING, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 if TYPE_CHECKING:  # extract.py imports crawl.py, which imports this module
     from src.pipeline.extract import RawFact
@@ -36,6 +36,8 @@ if TYPE_CHECKING:  # extract.py imports crawl.py, which imports this module
 # Every careers-page claim value starts with this; verify() relies on it to
 # apply the shared-domain rule to exactly these claims.
 CAREERS_VALUE_PREFIX = "Careers page"
+# A page that is one job ad (reached from the careers page) but carries no JobPosting data.
+JOB_AD_VALUE_PREFIX = "Job ad"
 
 # What the VISIBLE TEXT of a careers link says. Anchored on purpose: an anchor
 # that merely contains "jobb" ("Slik jobber vi med baerekraft") or "bli med"
@@ -313,13 +315,48 @@ def careers_page_facts(
     roles = role_links(html, page_url, ats_domains)
     if len(roles) >= MIN_ROLE_LINKS:
         title = roles[0][0]
-        value = f"{CAREERS_VALUE_PREFIX} lists {len(roles)} open roles, e.g. \"{title}\": {page_url}"
+        value = f"{CAREERS_VALUE_PREFIX} lists {len(roles)} open roles, e.g. \"{title}\": {clean_page_url(page_url)}"
         return [RawFact("hiring_signal", value, page_url, "text", extracted_at, context_name=context_name, evidence_span=title)]
 
+    # A single job ad is not "a careers page". With its own JobPosting data the role is
+    # published from that (title and posting date); without it, the claim says what it is.
+    if _JOB_POSTING_RE.search(html):
+        return []
     on_ats = bool(ats_domains and _on_any(_domain(page_url), ats_domains))
     if is_careers_url(page_url, ats_domains) and (on_ats or CAREERS_HEADING_RE.search(heading)):
+        prefix = JOB_AD_VALUE_PREFIX if _JOB_DETAIL_RE.search(page_url) else CAREERS_VALUE_PREFIX
         return [RawFact(
-            "hiring_signal", f"{CAREERS_VALUE_PREFIX}: {page_url}", page_url, "text", extracted_at,
+            "hiring_signal", f"{prefix}: {clean_page_url(page_url)}", page_url, "text", extracted_at,
             context_name=context_name, evidence_span=heading,
         )]
     return []
+
+
+_JOB_POSTING_RE = re.compile(r'"@type"\s*:\s*"JobPosting"', re.IGNORECASE)
+# Query parameters that only track a visit; a parameter that names the page (?id=42) stays.
+_TRACKING_PARAM_RE = re.compile(r"^(utm_\w+|gclid|fbclid|mc_\w+|ref|source|src|trk)$", re.IGNORECASE)
+_LANGUAGE_SEGMENT_RE = re.compile(r"^[a-z]{2}(?:[-_][a-z]{2})?$", re.IGNORECASE)
+
+
+def clean_page_url(url: str) -> str:
+    """`url` without its fragment, tracking parameters or bare flags (`?JobPosting`)."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    params = [p for p in parts.query.split("&") if p and "=" in p and not _TRACKING_PARAM_RE.match(p.split("=", 1)[0])]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "&".join(params), ""))
+
+
+def careers_page_key(url: str) -> str:
+    """The careers page regardless of language copy: /da/career/vacancies/ and
+    /career/vacancies are one page. Host without www, path without a leading language
+    segment or trailing slash, lower case."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url.lower()
+    segments = [s for s in parts.path.split("/") if s]
+    if segments and _LANGUAGE_SEGMENT_RE.match(segments[0]) and len(segments) > 1:
+        segments = segments[1:]
+    return parts.netloc.lower().removeprefix("www.") + "/" + "/".join(segments).lower()

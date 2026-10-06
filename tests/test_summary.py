@@ -56,6 +56,7 @@ def _rich_profile():
         annual_result={"FY2025": "11,904,000,000 USD"},
         total_equity={"FY2025": "48,500,000,000 USD"},
     )
+    profile.run_timestamp = datetime(2026, 10, 1, tzinfo=timezone.utc)
     return profile
 
 
@@ -67,8 +68,11 @@ def test_the_summary_is_short_dated_and_covers_company_figures_people_web_and_ch
         f"As of {summary.as_of}: EQUINOR ASA (org. no. 923609016) is a public limited company (ASA) in utvinning av raaolje, founded 1972"
     )
     assert "registry status Active, 21000 employees" in text
-    assert "FY2025 (to 2025-12-31): revenue 107.17 bn USD (up 7.2% on FY2024), net result 11.90 bn USD, equity 48.50 bn USD." in text
-    assert "Led by Anders Opedal (managing director) and Jon Erik Reinhardsen (chair of the board), with 1 more registered role holders." in text
+    assert (
+        "In FY2025 (year to 2025-12-31), revenue grew 7.2% on FY2024 to 107.17 bn USD and the company made "
+        "a net profit of 11.90 bn USD (11.1% of revenue); equity was 48.50 bn USD." in text
+    )
+    assert "Led by Anders Opedal (managing director) and Jon Erik Reinhardsen (chair of the board), with 1 more registered role holder." in text
     assert "2 registered sites, including Stavanger, Sandsli." in text
     assert 'Online: equinor.com; careers page lists 3 open roles; latest news "Equinor opens new office" (2026-09-22).' in text
     assert "Since the previous run on 2026-09-24: employees 20000 -> 21000." in text
@@ -99,8 +103,8 @@ def test_a_revenue_decline_and_a_flat_year_are_stated_as_such():
     down = _with_figures(make_profile(legal_name=available_claim("ACME AS")), revenue={"FY2025": "750,000 NOK", "FY2024": "1,000,000 NOK"})
     flat = _with_figures(make_profile(legal_name=available_claim("ACME AS")), revenue={"FY2025": "1,000,000 NOK", "FY2024": "1,000,000 NOK"})
 
-    assert "revenue 750 k NOK (down 25.0% on FY2024)" in build_summary(down).text
-    assert "revenue 1.0 m NOK (flat on FY2024)" in build_summary(flat).text
+    assert "revenue fell 25.0% on FY2024 to 750 k NOK" in build_summary(down).text
+    assert "revenue was flat on FY2024 at 1.0 m NOK" in build_summary(flat).text
 
 
 def test_no_trend_is_stated_across_currencies_from_zero_or_with_a_single_year():
@@ -113,7 +117,45 @@ def test_no_trend_is_stated_across_currencies_from_zero_or_with_a_single_year():
 
     for profile in (mixed, zero, single):
         text = build_summary(profile).text
-        assert " up " not in text and " down " not in text and " flat " not in text
+        assert not any(word in text for word in (" grew ", " fell ", " flat ", " up ", " down "))
+        assert "revenue was 1,200" in text
+
+
+def test_the_financial_trend_is_explained_in_words_not_listed():
+    """Official feedback: "explain the financial trend instead of listing values"."""
+    def acme(**figures):
+        return build_summary(_with_figures(make_profile(legal_name=available_claim("ACME AS")), **figures)).text
+
+    turnaround = acme(
+        revenue={"FY2025": "1,100,000 NOK", "FY2024": "1,000,000 NOK"},
+        annual_result={"FY2025": "50,000 NOK", "FY2024": "-80,000 NOK"},
+        total_equity={"FY2025": "400,000 NOK", "FY2024": "350,000 NOK"},
+    )
+    assert (
+        "revenue grew 10.0% on FY2024 to 1.1 m NOK and the company made a net profit of 50 k NOK (4.5% of revenue), "
+        "turning round from a loss of 80 k NOK in FY2024; equity rose to 400 k NOK." in turnaround
+    )
+
+    into_loss = acme(
+        revenue={"FY2025": "900,000 NOK", "FY2024": "1,000,000 NOK"},
+        annual_result={"FY2025": "-30,000 NOK", "FY2024": "20,000 NOK"},
+        total_equity={"FY2025": "-10,000 NOK"},
+    )
+    assert "a net loss of 30 k NOK (3.3% of revenue), after a profit of 20 k NOK in FY2024" in into_loss
+    assert "equity was negative (-10 k NOK)" in into_loss
+
+    smaller_loss = acme(annual_result={"FY2025": "-30,000 NOK", "FY2024": "-90,000 NOK"})
+    assert "In FY2025 (year to 2025-12-31), the company made a net loss of 30 k NOK, a smaller loss than the 90 k NOK of FY2024." in smaller_loss
+
+    lower_profit = acme(annual_result={"FY2025": "60,000 NOK", "FY2024": "90,000 NOK"}, total_equity={"FY2025": "100,000 NOK", "FY2024": "120,000 NOK"})
+    assert "a net profit of 60 k NOK, down from 90 k NOK in FY2024; equity fell to 100 k NOK." in lower_profit
+
+
+def test_the_employee_count_carries_the_date_the_registry_recorded_it():
+    profile = make_profile(legal_name=available_claim("ACME AS"))
+    profile.legal_identity.employee_count = available_claim("201", effective_date="2026-09-14")
+
+    assert "201 employees (registered 2026-09-14)" in build_summary(profile).text
 
 
 def test_the_summary_names_what_is_unknown_and_invents_nothing_for_an_empty_profile():
@@ -188,31 +230,57 @@ def test_every_figure_in_the_summary_is_traceable_to_a_cited_claim():
     """The scorer's question, 'without unsupported claims', as a test: each amount must
     round-trip to a claim its sentence cites, and each percentage must come from two cited
     revenue claims."""
-    summary = build_summary(_rich_profile())
+    def acme(**figures):
+        return _with_figures(make_profile(legal_name=available_claim("ACME AS")), **figures)
+
+    profiles = [
+        _rich_profile(),
+        acme(revenue={"FY2025": "1,100,000 NOK", "FY2024": "1,000,000 NOK"},
+             annual_result={"FY2025": "50,000 NOK", "FY2024": "-80,000 NOK"},
+             total_equity={"FY2025": "400,000 NOK", "FY2024": "350,000 NOK"}),
+        acme(revenue={"FY2025": "900,000 NOK", "FY2024": "1,000,000 NOK"},
+             annual_result={"FY2025": "-30,000 NOK", "FY2024": "20,000 NOK"}, total_equity={"FY2025": "-10,000 NOK"}),
+        acme(annual_result={"FY2025": "-30,000 NOK", "FY2024": "-90,000 NOK"}),
+    ]
+    sentences = [sentence for profile in profiles for sentence in build_summary(profile).sentences]
     checked = 0
 
-    for sentence in summary.sentences:
+    for sentence in sentences:
         cited = [c for c in sentence.claims if c.value]
         cited_amounts = [
             float(c.value.split()[0].replace(",", "")) for c in cited if re.match(r"^-?[\d,]+(\s+[A-Z]{3})?$", c.value)
         ]
         for number, unit in _MONEY_RE.findall(sentence.text):
-            amount = float(number.replace(",", "")) * _UNITS[unit]
-            assert any(abs(amount - c) <= abs(c) * 0.006 + 1 for c in cited_amounts), (sentence.text, amount, cited_amounts)
+            # A loss is written without its minus sign ("a net loss of 30 k NOK"): compare sizes.
+            amount = abs(float(number.replace(",", "")) * _UNITS[unit])
+            assert any(abs(amount - abs(c)) <= abs(c) * 0.006 + 1 for c in cited_amounts), (sentence.text, amount, cited_amounts)
             checked += 1
         for pct in _PERCENT_RE.findall(sentence.text):
-            # The percentage must be the change between two cited claims of different years.
+            # The percentage must be computed from two cited claims: the change between two
+            # years of one figure, or one figure as a share of another in the same year (margin).
             figures = [(c.reporting_period, float(c.value.split()[0].replace(",", ""))) for c in cited
-                       if c.reporting_period and re.match(r"^[\d,]+ [A-Z]{3}$", c.value)]
-            changes = [
-                abs((a - b) / b * 100) for (pa, a) in figures for (pb, b) in figures if pa > pb and b
-            ]
-            assert any(abs(change - float(pct)) <= 0.06 for change in changes), (sentence.text, pct, changes)
+                       if c.reporting_period and re.match(r"^-?[\d,]+ [A-Z]{3}$", c.value)]
+            computed = [abs((a - b) / b * 100) for (pa, a) in figures for (pb, b) in figures if pa > pb and b]
+            computed += [abs(a / b * 100) for (pa, a) in figures for (pb, b) in figures if pa == pb and b and a != b]
+            assert any(abs(value - float(pct)) <= 0.06 for value in computed), (sentence.text, pct, computed)
             checked += 1
-    assert checked >= 4  # revenue, net result, equity and the percentage were all actually checked
+    assert checked >= 15  # amounts, changes and margins across all four profiles were actually checked
 
 
 def test_the_summary_never_contains_a_figure_when_no_figures_exist():
     text = build_summary(make_profile(legal_name=available_claim("ACME AS"))).text
 
     assert not re.search(r"\d[\d,.]*\s*(?:bn|m|k)?\s*(?:NOK|USD|EUR)", text)
+
+
+def test_an_upcoming_event_is_never_called_the_latest_news():
+    profile = make_profile(org_number="923609016", legal_name=available_claim("ACME AS"))
+    profile.activity.dated_activity = [
+        available_claim("Supplier Day (2099-10-28)", source_class="company_owned", effective_date="2099-10-28"),
+        available_claim("New office opens (2026-01-02)", source_class="company_owned", effective_date="2026-01-02"),
+    ]
+    profile.run_timestamp = profile.run_timestamp.replace(year=2026, month=10, day=6)
+
+    text = build_summary(profile).text
+
+    assert 'latest news "New office opens" (2026-01-02)' in text and "Supplier Day" not in text
