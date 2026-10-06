@@ -700,3 +700,24 @@ def test_a_redirect_loop_is_one_failed_fetch_not_a_retry_storm():
 
     assert any(p.fetch_state == EvidenceState.AVAILABLE for p in pages)  # the site itself is still crawled
     assert len(requested) <= 15
+
+
+def test_a_cached_page_lands_on_the_same_address_the_live_fetch_did(tmp_path):
+    """Running the same companies twice, the second run read the registered address from the
+    cache and reported it, where the first had reported the address it redirects to: the
+    refresh then showed a website 'change' that never happened."""
+    cache = ResponseCache(tmp_path / "cache.sqlite3")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.old-name.no":
+            return httpx.Response(301, headers={"location": "https://new-name.no/"})
+        return httpx.Response(200, text="<html><title>New Name AS</title></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    entity = _entity("https://www.old-name.no/")
+
+    live = crawl(entity, BudgetGovernor(), client=client, cache=cache, date_bucket="2026-10-06", allowed_domains=set())
+    cached = crawl(entity, BudgetGovernor(), client=client, cache=cache, date_bucket="2026-10-06", allowed_domains=set())
+
+    assert live[0].final_url == "https://new-name.no/"
+    assert cached[0].final_url == "https://new-name.no/"

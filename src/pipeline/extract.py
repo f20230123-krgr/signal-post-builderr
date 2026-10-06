@@ -534,8 +534,17 @@ def _activity_facts(
             continue
         # A line that is only dates and punctuation ("2026-10-12 &ndash; 2026-10-14") or a
         # bare section label says nothing: the headline next to the date is the fact.
-        if _DATE_RE.search(line) and is_headline(_DATE_RE.sub(" ", line)):
-            facts.append(RawFact("dated_activity", line, source_url, "text", extracted_at, context_name=context_name))
+        date = _DATE_RE.search(line)
+        if date and is_headline(_DATE_RE.sub(" ", line)):
+            # Same shape as every other dated item: "Headline (YYYY-MM-DD)" in plain text,
+            # the line exactly as the page has it as the span, the date as the effective date.
+            headline = plain_headline(_DATE_RE.sub(" ", line, count=1)).strip(" -–—:|")
+            if not headline:
+                continue
+            facts.append(RawFact(
+                "dated_activity", f"{headline} ({date.group(0)})", source_url, "text", extracted_at,
+                context_name=context_name, evidence_span=line, effective_date=date.group(0),
+            ))
     return facts
 
 

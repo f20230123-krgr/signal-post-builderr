@@ -570,6 +570,14 @@ def crawl(
             if cached_html is not None:
                 html = cached_html
                 status_state = None
+                # Where the address redirected to is part of what was fetched: a cached page
+                # must land on the same address the live fetch did, or a re-run reports the
+                # registered address one time and the landing address the next.
+                final_url = cache.get(url + "#final", date_bucket) or None
+                if final_url:
+                    sent, landed = urlsplit(url), urlsplit(final_url)
+                    if (sent.scheme, sent.netloc) != (landed.scheme, landed.netloc) and _domain(final_url) in allowed:
+                        rebase[f"{sent.scheme}://{sent.netloc}"] = f"{landed.scheme}://{landed.netloc}"
             else:
                 # A domain that has already failed once isn't retried again:
                 # the first page gets its second chance, the rest don't.
@@ -608,6 +616,8 @@ def crawl(
 
             if cache is not None and cached_html is None:
                 cache.put(url, date_bucket, html)
+                if final_url:
+                    cache.put(url + "#final", date_bucket, final_url)
 
             # Static first; a browser only when the static page fails a completeness check
             # (see needs_render), only while the request budget has headroom, and the result
