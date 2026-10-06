@@ -177,3 +177,30 @@ def test_a_dated_line_on_a_page_reads_headline_then_date_in_plain_text():
     assert fact.value == "Building Healthcare Solutions Together: Kitron & CellaVision (2026-09-15)"
     assert fact.effective_date == "2026-09-15"
     assert fact.evidence_span and fact.evidence_span.startswith("2026-09-15 Building")
+
+
+def test_the_latest_accounts_are_the_companys_own_and_group_accounts_are_labelled():
+    """EQUINOR ASA files its own and its group's accounts for each year. The 'latest' claim was
+    the group's (revenue 106.5 bn) while every discrete figure was the company's own (68.0 bn)."""
+    from src.pipeline.registry_extras import fetch_registry_extras
+
+    def filing(kind, revenue, year):
+        return {
+            "regnskapstype": kind, "valuta": "USD",
+            "regnskapsperiode": {"fraDato": f"{year}-01-01", "tilDato": f"{year}-12-31"},
+            "resultatregnskapResultat": {"aarsresultat": 1.0, "driftsresultat": {"driftsinntekter": {"sumDriftsinntekter": revenue}}},
+        }
+
+    body = [filing("KONSERN", 106462000000.0, 2025), filing("SELSKAP", 67956000000.0, 2025), filing("SELSKAP", 72000000000.0, 2024)]
+
+    def handler(request):
+        if "regnskapsregisteret" in str(request.url):
+            return httpx.Response(200, json=body)
+        return httpx.Response(404)
+
+    facts, _ = fetch_registry_extras(_entity(), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    [latest] = [f for f in facts if f.field_name == "annual_accounts_latest"]
+    history = [f.value for f in facts if f.field_name == "annual_accounts_history"]
+    assert "67,956,000,000" in latest.value and latest.reporting_period == "FY2025"
+    assert any(v.startswith("Group accounts (konsern): ") and "106,462,000,000" in v for v in history)

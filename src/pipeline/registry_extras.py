@@ -311,14 +311,35 @@ def _accounts_facts(
     metric_facts = _metric_facts(
         [e for e in entries if isinstance(e, dict)], raw_slices, entity.org_number, url, content_hash, now
     ) if len(raw_slices) == len(entries) else []
-    entries = sorted(entries, key=lambda e: (e.get("regnskapsperiode") or {}).get("tilDato") or "", reverse=True)
+    # Newest first and, within a period, the company's own accounts before its group's: the
+    # "latest" claim must be the same filing the discrete figures come from. A group filing
+    # is still published, labelled as the group's (sources policy: group and parent
+    # relationships are labelled, not collapsed).
+    def is_group(entry: dict) -> bool:
+        return entry.get("regnskapstype") == "KONSERN"
 
+    entries = sorted(
+        entries,
+        key=lambda e: ((e.get("regnskapsperiode") or {}).get("tilDato") or "", not is_group(e)),
+        reverse=True,
+    )
+
+    def period_end(entry: dict) -> str:
+        return (entry.get("regnskapsperiode") or {}).get("tilDato") or ""
+
+    own_periods = {period_end(e) for e in entries if not is_group(e)}
     facts = list(metric_facts)
-    for i, entry in enumerate(entries):
+    latest_done = False
+    for entry in entries:
         value = _format_accounts_value(entry)
         if not value:
             continue
-        field_name = "annual_accounts_latest" if i == 0 else "annual_accounts_history"
+        if is_group(entry):
+            value = f"Group accounts (konsern): {value}"
+        # A group filing is "latest" only when the company has no own filing for that period.
+        set_aside = is_group(entry) and period_end(entry) in own_periods
+        field_name = "annual_accounts_history" if latest_done or set_aside else "annual_accounts_latest"
+        latest_done = latest_done or field_name == "annual_accounts_latest"
         facts.append(
             ConfirmedFact(
                 field_name, value, url, 100.0, now,
