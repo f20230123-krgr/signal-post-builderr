@@ -274,8 +274,26 @@ def news_item_facts(
 
     return [
         RawFact(
-            "dated_activity", f"{title} ({iso})", page_url, "text", extracted_at,
+            "dated_activity", f"{plain_headline(title)} ({iso})", page_url, "text", extracted_at,
             context_name=context_name, evidence_span=title, effective_date=iso,
         )
         for title, iso in news_items(html, extracted_at.date())
+        if plain_headline(title)
     ]
+
+
+_ENTITY_RE = re.compile(r"&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
+_LEADING_DATE_RE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}|\d{1,2}\.\s?\d{1,2}\.\s?\d{2,4})\s*[-:|]?\s*")
+
+
+def plain_headline(raw: str) -> str:
+    """A headline as a reader sees it: HTML entities decoded (twice when a feed encoded them
+    twice, "&amp;#8211;"), and a date the page printed in front of it dropped, since the
+    claim states the date beside it. The evidence span keeps the raw text."""
+    from html import unescape
+
+    text = unescape(raw)
+    if _ENTITY_RE.search(text):
+        text = unescape(text)
+    text = _LEADING_DATE_RE.sub("", text, count=1)
+    return re.sub(r"\s+", " ", text).strip()

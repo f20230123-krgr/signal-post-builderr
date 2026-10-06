@@ -131,6 +131,9 @@ def _is_housing_coop(legal_name: str) -> bool:
     return any(term in lowered for term in _HOUSING_COOP_TERMS)
 
 
+is_housing_coop = _is_housing_coop  # shared with assemble.py's official-website rule
+
+
 _LANGUAGE_SEGMENTS = {"no", "nb", "nn", "en", "se", "sv", "da", "dk", "de", "fi", "nor", "eng", "norsk", "english"}
 
 

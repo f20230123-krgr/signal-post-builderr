@@ -112,3 +112,57 @@ def test_the_live_employee_count_is_dated_by_the_registry_and_quoted():
     assert employees.value == "201"
     assert employees.effective_date == "2026-09-14"
     assert employees.evidence_span and employees.evidence_span.replace(" ", "") == '"antallAnsatte":201'
+
+
+def _coop(site):
+    return ResolvedEntity(
+        org_number="971339071", legal_name="SAMEIET ST OLAV", registered_address="Olavs gate 1, 0165 OSLO",
+        official_site_candidate=site, resolution_state=EvidenceState.AVAILABLE,
+        source="https://data.brreg.no/enhetsregisteret/api/enheter/971339071", retrieved_at=NOW, content_hash="h",
+    )
+
+
+def test_a_housing_coops_registered_manager_website_is_ambiguous_not_its_own():
+    """SAMEIET ST OLAV registers bate.no, its property manager's site: another company's
+    website must not be published under the co-op's profile."""
+    manager = assemble(_coop("https://www.bate.no"), [], previous_snapshot=None, now=lambda: NOW)
+    own = assemble(_coop("https://st-olav.no"), [], previous_snapshot=None, now=lambda: NOW)
+
+    assert manager.online_presence.official_site.state == EvidenceState.AMBIGUOUS
+    assert manager.online_presence.official_site.value is None
+    assert own.online_presence.official_site.value == "https://st-olav.no"
+
+
+def test_a_coop_whose_manager_site_names_it_keeps_the_website():
+    evidence = _fact("official_site_evidence", "https://www.bate.no/st-olav")
+    profile = assemble(_coop("https://www.bate.no"), [evidence], previous_snapshot=None, now=lambda: NOW)
+
+    assert profile.online_presence.official_site.value == "https://www.bate.no/st-olav"
+
+
+def test_the_registry_listing_the_current_name_as_a_former_one_is_not_a_renaming():
+    record = {
+        "organisasjonsnummer": "971339071", "navn": "SAMEIET ST OLAV",
+        "historiskeNavn": [
+            {"navn": "SAMEIET ST OLAV", "fraDato": "1996-03-13", "tilDato": "1996-04-23"},
+            {"navn": "SAMEIET ST OLAV V/ FORR.FØRER", "fraDato": "1990-01-01", "tilDato": "1996-03-13"},
+        ],
+    }
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=record)))
+
+    details = fetch_live_registry_details(_coop("https://st-olav.no"), BudgetGovernor(), client=client, now=lambda: NOW)
+
+    renames = [f.value for f in details.facts if f.value.startswith("Renamed from")]
+    assert renames == ["Renamed from 'SAMEIET ST OLAV V/ FORR.FØRER' on 1996-03-13 - Brønnøysundregistrene"]
+
+
+def test_feed_and_page_headlines_read_as_plain_text_with_the_raw_text_as_span():
+    from src.pipeline.extract import feed_activity_facts
+
+    feed = """<rss><channel><item><title>World&amp;#8217;s largest Pio installation</title>
+    <pubDate>Thu, 18 Sep 2026 08:00:00 GMT</pubDate></item></channel></rss>"""
+
+    [fact] = feed_activity_facts(feed, "https://www.strongpoint.com/news/feed/", NOW)
+
+    assert fact.value == "World\u2019s largest Pio installation (2026-09-18)"
+    assert "&amp;#8217;" in fact.evidence_span

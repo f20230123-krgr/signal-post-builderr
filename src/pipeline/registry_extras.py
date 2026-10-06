@@ -688,9 +688,13 @@ def fetch_live_registry_details(
 
         details.identity_facts = _live_identity_facts(body, fact, raw_text)
 
+        # The registry sometimes lists the current name among the former ones (a record
+        # re-registered under the same name): that is not a renaming.
+        current = str(body.get("navn") or "").strip().upper()
         former = [
             h for h in (body.get("historiskeNavn") or [])
             if isinstance(h, dict) and isinstance(h.get("navn"), str) and h["navn"].strip()
+            and h["navn"].strip().upper() != current
         ]
         former.sort(key=lambda h: str(h.get("tilDato") or ""), reverse=True)
         for entry in former[:MAX_FORMER_NAMES]:

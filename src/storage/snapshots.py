@@ -35,6 +35,20 @@ def _normalized(value: Optional[str]) -> Optional[str]:
     return _WHITESPACE_RE.sub(" ", value).strip()
 
 
+def _site_key(url: str) -> str:
+    """'https://www.Acme.no/' and 'acme.no' are one site."""
+    key = re.sub(r"^[a-z]+://", "", url.strip().lower())
+    return key.removeprefix("www.").rstrip("/")
+
+
+def _hiring_key(value: str) -> str:
+    from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, careers_page_key
+
+    if value.startswith((CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX)):
+        return value.split(" ", 1)[0] + " " + careers_page_key(value.rsplit(" ", 1)[-1])
+    return value
+
+
 def _workplace_names(claims: list) -> set:
     """The establishment name of each workplace claim, before any address or detail."""
     names = set()
@@ -66,12 +80,18 @@ def diff_material_changes(
     if old_legal_name != new_legal_name:
         changes.append(f"legal_name: {old_legal_name!r} -> {new_legal_name!r}")
 
-    old_site = _normalized(previous.online_presence.official_site.value)
-    new_site = _normalized(new.online_presence.official_site.value)
+    old_claim, new_claim = previous.online_presence.official_site, new.online_presence.official_site
+    old_site, new_site = _normalized(old_claim.value), _normalized(new_claim.value)
     # A site that was found before and is not found now is "we did not find it this time"
     # (a different run environment, no search provider), not a verified change to the
-    # company, so only a site that is present in both runs and differs counts.
-    if old_site and new_site and old_site != new_site:
+    # company, so only a site that is present in both runs and differs counts. The same
+    # site written another way (https, www, a trailing slash) is no change, and neither is
+    # the registry's address in one run and the address the site lands on in the other:
+    # that is a difference in how it was sourced, so only like is compared with like.
+    if (
+        old_site and new_site and _site_key(old_site) != _site_key(new_site)
+        and old_claim.source_class == new_claim.source_class
+    ):
         changes.append(f"official_site: {old_site!r} -> {new_site!r}")
 
     old_latest = _normalized(previous.annual_accounts.latest.value)
@@ -130,10 +150,12 @@ def diff_material_changes(
         if old_value and new_value and old_value != new_value:
             changes.append(f"{label}: {old_value!r} -> {new_value!r}")
 
-    old_hiring = _claim_values(previous.activity.hiring_signals)
-    new_hiring = _claim_values(new.activity.hiring_signals)
-    added = new_hiring - old_hiring
-    removed = old_hiring - new_hiring
+    # Keyed so the same careers page under another spelling (www or not, a language copy)
+    # is the same signal; the reported values stay as published.
+    old_hiring = {_hiring_key(v): v for v in _claim_values(previous.activity.hiring_signals)}
+    new_hiring = {_hiring_key(v): v for v in _claim_values(new.activity.hiring_signals)}
+    added = [new_hiring[k] for k in new_hiring.keys() - old_hiring.keys()]
+    removed = [old_hiring[k] for k in old_hiring.keys() - new_hiring.keys()]
     if added:
         changes.append(f"hiring_signal added: {sorted(added)}")
     if removed:

@@ -188,3 +188,42 @@ def test_unchanged_registry_fields_are_not_a_change():
     new = _with_registry_fields(make_profile(legal_name=available_claim("ACME AS")), employee_count="3", legal_form="AS")
 
     assert diff_material_changes(old, new) == []
+
+
+# --- refresh noise seen running the same 100 companies twice (2026-10-06) ------------------
+
+def _site(value, source_class):
+    return make_profile(official_site=available_claim(value, source_class=source_class))
+
+
+def test_the_same_website_written_another_way_is_not_a_change():
+    before = _site("https://furelimaskin.no/", "company_owned")
+    after = _site("https://www.furelimaskin.no", "company_owned")
+
+    assert diff_material_changes(before, after) == []
+
+
+def test_the_registrys_address_in_one_run_and_the_sites_landing_address_in_the_other_is_not_a_change():
+    before = _site("https://hm-spes.no/", "company_owned")
+    after = _site("https://www.hjelpemiddelspesialisten.no", "official_registry")
+
+    assert diff_material_changes(before, after) == []
+
+
+def test_a_real_website_change_is_still_reported():
+    before = _site("https://www.old-name.no", "official_registry")
+    after = _site("https://www.new-name.no", "official_registry")
+
+    assert diff_material_changes(before, after) == ["official_site: 'https://www.old-name.no' -> 'https://www.new-name.no'"]
+
+
+def test_the_same_careers_page_with_or_without_www_is_not_a_hiring_change():
+    before = make_profile(hiring_signals=[available_claim("Careers page: https://thewell.no/om-the-well/ledige-stillinger/")])
+    after = make_profile(hiring_signals=[available_claim("Careers page: https://www.thewell.no/om-the-well/ledige-stillinger/")])
+    new_ad = make_profile(hiring_signals=[
+        available_claim("Careers page: https://www.thewell.no/om-the-well/ledige-stillinger/"),
+        available_claim("Kokk (posted 2026-10-01)"),
+    ])
+
+    assert diff_material_changes(before, after) == []
+    assert diff_material_changes(after, new_ad) == ["hiring_signal added: ['Kokk (posted 2026-10-01)']"]

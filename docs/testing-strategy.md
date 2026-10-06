@@ -68,6 +68,12 @@ a `hiring_signal`. Whitespace/formatting differences in scraped
 text, or a re-fetch of an unchanged page with a new `retrieved_at` timestamp,
 are not material changes on their own.
 
+Measured on 2026-10-06 by running the same 100 companies twice: the same website written
+another way (https, `www.`, a trailing slash), the registry's address in one run and the
+address the site lands on in the other, and the same careers page with or without `www.`
+or as a language copy are not material changes either; a different website from the same
+kind of source, or a new or ended hiring signal, still is.
+
 `annual_accounts.latest`'s `reporting_period` is compared separately from its
 `value` (real evaluator feedback: "a new financial reporting period was missed
 when the amount stayed the same") — a new filing that happens to report an

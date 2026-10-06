@@ -19,8 +19,10 @@ data" hard gate -- never a hard requirement, always a coverage bonus.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Callable, Optional
+from urllib.parse import urlsplit
 
 from src.models.profile import (
     Activity,
@@ -37,7 +39,7 @@ from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, care
 from src.pipeline.registry_extras import ACCOUNT_METRIC_FIELDS
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.social import canonical_social_profile_url
-from src.pipeline.verify import ConfirmedFact
+from src.pipeline.verify import ConfirmedFact, is_housing_coop
 from src.storage.snapshots import diff_material_changes
 
 
@@ -86,6 +88,29 @@ def _legal_name_claim(entity: ResolvedEntity) -> Claim:
     return _registry_claim(entity.legal_name, entity)
 
 
+_COOP_WORDS = {"sameiet", "sameie", "boligsameie", "boligsameiet", "borettslag", "brl", "andelslag", "eierseksjonssameie", "as", "sa"}
+
+
+def _domain_resembles_name(site: Optional[str], legal_name: str) -> bool:
+    """Whether a website's domain plainly belongs to this name: st-olav.no for
+    SAMEIET ST OLAV, not bate.no."""
+    if not site:
+        return False
+    host = urlsplit(site if "://" in site else f"https://{site}").netloc.lower().removeprefix("www.")
+    label = re.sub(r"[^a-z0-9æøå]", "", host.split(".")[0]) if host else ""
+    words = [re.sub(r"[^a-z0-9æøå]", "", w) for w in legal_name.lower().split()]
+    words = [w for w in words if w and w not in _COOP_WORDS]
+    if not label or not words:
+        return False
+    # Domains spell æ, ø and å as ae/oe/aa or e/o/a: try both spellings.
+    for table in (str.maketrans({"æ": "ae", "ø": "o", "å": "a"}), str.maketrans({"æ": "ae", "ø": "oe", "å": "aa"})):
+        folded = [w.translate(table) for w in words]
+        joined = "".join(folded)
+        if joined in label or (len(label) >= 4 and label in joined) or any(len(w) >= 4 and w in label for w in folded):
+            return True
+    return False
+
+
 def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[ConfirmedFact]) -> Claim:
     """Registry value first (authoritative when present). Falls back to a
     confirmed "official_site" fact -- from extract.py's canonical-link/
@@ -105,6 +130,13 @@ def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[Confirmed
         from_site = _first_matching(confirmed_facts, "official_site_evidence")
         if from_site:
             return _confirmed_claim(from_site)
+        # A housing co-op often registers its property manager's website as its own
+        # (SAMEIET ST OLAV -> bate.no). That domain belongs to another company: unless the
+        # site itself names the co-op (handled above), say we cannot be sure.
+        if entity.legal_name and is_housing_coop(entity.legal_name) and not _domain_resembles_name(
+            entity.official_site_candidate, entity.legal_name
+        ):
+            return Claim(value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None)
         # A website the LIVE registry record states (the universe snapshot lacks it for
         # most companies that have one) is cited to that record, not to the snapshot.
         live = _first_matching(confirmed_facts, "official_site_registry")
