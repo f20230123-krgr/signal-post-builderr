@@ -156,8 +156,8 @@ def search_keys_notice(status: dict[str, str]) -> Optional[str]:
         return None
     if not active:
         return (
-            "Search keys not set: running keyless (registry, company sites and free sources). "
-            "Set EXA_API_KEY and PARALLEL_API_KEY for wider website coverage."
+            "No search keys set: running keyless (registry, company sites and free public "
+            "sources), as official runs do. EXA_API_KEY / PARALLEL_API_KEY are optional extras."
         )
     missing = [n for n, s in status.items() if s != "active"]
     return f"Search providers active: {', '.join(active)}. Not active: {', '.join(missing)}."
