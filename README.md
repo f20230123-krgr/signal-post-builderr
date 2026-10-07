@@ -310,14 +310,18 @@ is not sent and not counted, and only costs that one fetch. Known limit: the
 name is resolved once for the check and again by the HTTP client, so a hostile
 DNS server could in principle answer differently the second time.
 
-### The 1,000-company corpus in `results/`
+### The 1,000-company corpus
 
 Builderr scores the agent on companies it supplies at run time, not on precomputed
-profiles, so `results/` is a demonstration of scale, not a submission requirement. It was
-generated keyless on 2026-10-04 with `python -m src.run_batch --input entry-companies.jsonl
---out results/`: 1,000 / 1,000 profiles, 9,897 real requests across 10 chunks, $0. It
-predates the summary and precision changes of 2026-10-06; the hosted smoke test below is
-regenerated with the submitted code.
+profiles, so the corpus demonstrates scale; it is not a submission requirement. The hosted
+corpus (`corpus/` on the site, with its raw envelopes, run report and manifest to download)
+was generated keyless on 2026-10-07 by the submitted code with
+`python -m src.run_batch --input results/manifest.txt --out <dir>`: 1,000 / 1,000 profiles,
+8,720 real requests across 10 chunks, 42.5 minutes, $0; output audit clean. Websites 161,
+company-owned social profiles 62, hiring signals 15, site news 60, registered activity 973,
+roles for 997 companies, workplaces for all 1,000 (most companies in a random sample have no
+website). `results/` in this repository is the earlier 2026-10-04 run of the same companies,
+kept unchanged as history.
 
 ## Submitting
 
