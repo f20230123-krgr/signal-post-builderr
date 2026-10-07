@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Signalpost Atlas</title>
+<style>
+:root {
+  --bg: #0b171e; --panel: #12232d; --panel-2: #0f1e27; --ink: #e5eef2; --muted: #92a8b3; --line: #243a46;
+  --accent: #4db3d4; --accent-soft: #123747; --accent-ink: #06222c;
+  --ok: #52c58c; --ok-soft: #123626; --warn: #e3a54c; --warn-soft: #3a2a0e; --bad: #f08a80; --bad-soft: #3d1b18;
+  --reg: #6fa8ec; --own: #4fc491; --ext: #e6a143; --mark: #5c4b12; --shadow: none;
+  --radius: 10px;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  color-scheme: dark;
+}
+/* Dark is the default for everyone; light is an explicit choice from the Theme button. */
+:root[data-theme="light"] {
+  --bg: #edf1f3; --panel: #ffffff; --panel-2: #f5f8f9; --ink: #0e222d; --muted: #566a75; --line: #d3dce1;
+  --accent: #0a6a89; --accent-soft: #dcecf2; --accent-ink: #ffffff;
+  --ok: #176b43; --ok-soft: #dff1e7; --warn: #9a5a07; --warn-soft: #fbecd2; --bad: #a93a30; --bad-soft: #f8e0dd;
+  --reg: #1d5fa8; --own: #1f8a5b; --ext: #c47a12; --mark: #fff0b8; --shadow: 0 1px 2px rgba(14,34,45,.06), 0 6px 18px rgba(14,34,45,.06);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); -webkit-text-size-adjust: 100%; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.skip { position: absolute; left: -999px; top: 8px; background: var(--accent); color: var(--accent-ink); padding: 8px 12px; border-radius: 6px; z-index: 50; }
+.skip:focus { left: 8px; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: .86em; }
+
+/* top bar */
+.top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand h1 { margin: 0; font-size: 1.05rem; letter-spacing: .01em; white-space: nowrap; }
+.brand h1 b { color: var(--accent); }
+.brand .asof { color: var(--muted); font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top .sp { flex: 1; }
+.sitelinks { display: contents; }
+.sitelinks a { text-decoration: none; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; line-height: 1.3; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--accent); white-space: nowrap; }
+
+/* layout */
+.app { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); height: calc(100vh - 57px); height: calc(100dvh - 57px); }
+.list-pane { display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--panel-2); min-height: 0; }
+.tools { padding: 12px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.search { position: relative; }
+.search input { width: 100%; padding: 9px 12px 9px 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font: .72rem var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 11px; font-size: .84rem; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.row-tools { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--muted); }
+.row-tools select { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 6px; }
+.row-tools .sp { flex: 1; }
+.list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; }
+.row { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.row.sel { background: var(--accent-soft); }
+.pick { align-self: center; margin: 0 0 0 12px; width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.item { flex: 1; text-align: left; background: transparent; border: 0; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.item .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .sub { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dots { display: flex; gap: 3px; margin-top: 3px; }
+.dots i { width: 14px; height: 5px; border-radius: 3px; background: var(--line); }
+.dots i.on { background: var(--accent); }
+.more { padding: 12px; text-align: center; }
+.empty { padding: 24px 16px; color: var(--muted); text-align: center; }
+
+main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60px; }
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.wrap > * { min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.card h2 { margin: 0 0 10px; font-size: .78rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+.head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-start; }
+.head .ttl { flex: 1; min-width: 240px; }
+.head h2.co { margin: 0; font-size: clamp(1.25rem, 3vw, 1.7rem); text-transform: none; letter-spacing: 0; color: var(--ink); line-height: 1.2; }
+.head .meta { color: var(--muted); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .88rem; }
+.head .headline { margin: 8px 0 0; color: var(--ink); font-size: .95rem; }
+.item .sub.hl { font-variant-numeric: tabular-nums; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: .76rem; font-weight: 600; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.pill.available, .pill.active { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.pill.ambiguous, .pill.not_applicable { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.pill.failed, .pill.blocked, .pill.bankrupt { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+
+.story { display: grid; gap: 2px; max-width: 78ch; }
+.story .sent { display: grid; grid-template-columns: 78px 1fr; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); line-height: 1.55; }
+.story .sent:last-child { border-bottom: 0; }
+.story .topic { color: var(--muted); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; padding-top: 3px; font-weight: 650; }
+.cite { font: .7rem var(--mono); border: 1px solid var(--line); background: var(--panel-2); color: var(--accent); border-radius: 5px; padding: 0 4px; margin-left: 2px; vertical-align: super; line-height: 1.2; }
+.cite:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.gaps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; color: var(--muted); font-size: .88rem; }
+.gaps .pill { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.changes { margin-top: 10px; font-size: .9rem; color: var(--muted); }
+
+.facts h3 { margin: 18px 0 4px; font-size: .95rem; }
+.facts h3:first-of-type { margin-top: 0; }
+.fact { display: grid; grid-template-columns: 150px 1fr auto; gap: 4px 14px; padding: 8px 0 8px 12px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--line); margin-left: 0; align-items: baseline; }
+.fact.src-official_registry { border-left-color: var(--reg); }
+.fact.src-company_owned { border-left-color: var(--own); }
+.fact.src-external { border-left-color: var(--ext); }
+.fact .k { color: var(--muted); font-size: .86rem; }
+.fact .v { overflow-wrap: anywhere; }
+.fact.na .v { color: var(--muted); font-style: italic; }
+.fact .why { border: 1px solid var(--line); background: transparent; border-radius: 6px; font-size: .78rem; padding: 2px 8px; color: var(--accent); }
+.fact .why:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.fact .sub { color: var(--muted); font-size: .82rem; }
+.fact.cont { border-top-color: transparent; }
+.fact.cont .k { visibility: hidden; }
+.fin { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 6px 0 12px; font-variant-numeric: tabular-nums; }
+.fin th, .fin td { padding: 7px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.fin th:first-child, .fin td:first-child { text-align: left; color: var(--muted); font-weight: 500; }
+.fin thead th { color: var(--muted); font-weight: 650; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
+.fin tbody tr { border-left: 3px solid var(--reg); }
+.cellbtn { background: none; border: 0; padding: 0; color: var(--ink); font: inherit; cursor: pointer; text-decoration: underline dotted var(--muted); text-underline-offset: 4px; }
+.cellbtn:hover { color: var(--accent); }
+.chg.up { color: var(--ok); }
+.chg.down { color: var(--bad); }
+.dash { color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .82rem; color: var(--muted); margin-bottom: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; background: var(--c); }
+
+.cov { display: grid; gap: 9px; }
+.cov .r { display: grid; grid-template-columns: 170px 1fr 60px; gap: 10px; align-items: center; font-size: .9rem; }
+.bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.bar b { display: block; height: 100%; background: var(--accent); }
+.bar.low b { background: var(--ext); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .l { color: var(--muted); font-size: .82rem; }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+/* compare */
+.cmp { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 560px; }
+.cmp th, .cmp td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.cmp thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.cmp tbody th { color: var(--muted); font-weight: 500; width: 140px; }
+.cmp td.diff { background: var(--mark); }
+.cmp td.na { color: var(--muted); font-style: italic; }
+.scroll-x { overflow-x: auto; }
+.tray { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--ink); color: var(--bg); border-radius: 999px; padding: 8px 10px 8px 18px; display: none; gap: 12px; align-items: center; box-shadow: 0 8px 28px rgba(0,0,0,.3); z-index: 30; max-width: calc(100vw - 24px); }
+.tray.on { display: flex; }
+/* The tray is dark on a light page and light on a dark one (it uses --ink as its ground), so its buttons take the page colour for text. */
+.tray .btn { border-color: color-mix(in srgb, var(--bg) 40%, transparent); background: transparent; color: var(--bg); }
+.tray .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tray .btn.primary:disabled { opacity: .55; }
+
+/* drawer */
+dialog { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
+dialog::backdrop { background: rgba(7,18,24,.5); }
+.drawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(520px, 100vw); margin: 0; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 18px 20px 40px; box-shadow: -10px 0 40px rgba(0,0,0,.25); }
+.drawer h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.drawer .close { float: right; }
+.ev { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 12px; background: var(--panel-2); display: grid; gap: 8px; }
+.ev dl { margin: 0; display: grid; grid-template-columns: 112px 1fr; gap: 4px 10px; font-size: .86rem; }
+.ev dt { color: var(--muted); }
+.ev dd { margin: 0; overflow-wrap: anywhere; }
+.ev blockquote { margin: 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--mark); font: .85rem var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; border-radius: 0 6px 6px 0; }
+.guide { max-width: 640px; margin: 8vh auto; background: var(--panel); border-radius: 14px; padding: 22px 26px; border: 1px solid var(--line); }
+.guide h3 { margin-top: 0; }
+.guide dl { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; }
+.guide dt { font-weight: 600; }
+.guide dd { margin: 0; }
+
+.only-mobile { display: none; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  body[data-view="detail"] .list-pane, body[data-view="compare"] .list-pane, body[data-view="overview"] .list-pane { display: none; }
+  body[data-view="list"] main, body[data-view="home"] main { display: none; }
+  body[data-view="home"] .list-pane, body[data-view="list"] .list-pane { display: flex; }
+  .only-mobile { display: inline-flex; }
+  .fact { grid-template-columns: 1fr auto; }
+  .fact .k { grid-column: 1 / -1; }
+  .cov .r { grid-template-columns: 1fr 60px; }
+  .cov .r .bar { grid-column: 1 / -1; order: 3; }
+  .brand .asof { display: none; }
+  .sitelinks { display: none; }
+  .tray { bottom: 10px; }
+}
+@media (max-width: 560px) {
+  .top { gap: 4px; padding: 8px 10px; }
+  .top .sp { flex: 1 1 0; min-width: 0; }
+  .brand h1 { font-size: .92rem; }
+  .top .btn { padding: 5px 8px; font-size: .86rem; }
+  .story .sent { grid-template-columns: 1fr; gap: 2px; }
+  .story .topic { padding-top: 0; }
+}
+@media (prefers-reduced-motion: no-preference) { .card, .row { transition: background .15s; } }
+@media print { .top, .list-pane, .tray, .actions, .why { display: none !important; } .app { display: block; height: auto; } main { overflow: visible; } }
+</style>
+</head>
+<body data-view="home">
+<a class="skip" href="#main">Skip to company details</a>
+<header class="top">
+  <div class="brand"><h1>Signalpost <b>Atlas</b></h1><span class="asof" id="asof"></span></div>
+  <span class="sp"></span>
+  <span id="siteLinks" class="sitelinks"></span>
+  <button class="btn ghost" id="overviewBtn" type="button">Overview</button>
+  <button class="btn ghost" id="guideBtn" type="button">Guide</button>
+  <button class="btn" id="themeBtn" type="button" aria-label="Switch colour theme">Theme</button>
+</header>
+
+<div class="app">
+  <section class="list-pane" aria-label="Companies">
+    <div class="tools">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Search name, org. number, industry, website" aria-label="Search companies" autocomplete="off">
+        <kbd aria-hidden="true">/</kbd>
+      </div>
+      <div class="chips" id="filters" role="group" aria-label="Filters"></div>
+      <div class="row-tools">
+        <span id="count" aria-live="polite"></span><span class="sp"></span>
+        <label>Sort <select id="sort" aria-label="Sort companies"></select></label>
+        <button class="btn ghost" id="csv" type="button" title="Download the filtered list as CSV">CSV</button>
+      </div>
+    </div>
+    <ul class="list" id="list"></ul>
+  </section>
+  <main id="main" tabindex="-1"><div class="wrap"><div class="card"><h2>Loading</h2><p>Reading the company data embedded in this page. If this message stays, the page is not running its script: open the file in Chrome, Edge, Firefox or Safari rather than a preview pane.</p></div></div></main>
+</div>
+
+<div class="tray" id="tray" role="region" aria-label="Comparison">
+  <span id="trayText"></span>
+  <button class="btn primary" id="cmpGo" type="button">Compare</button>
+  <button class="btn" id="cmpClear" type="button">Clear</button>
+</div>
+
+<dialog id="drawer" aria-label="Evidence"><div class="drawer" id="drawerBody"></div></dialog>
+<dialog id="guide" aria-label="How to read this"><div class="guide" id="guideBody"></div></dialog>
+
+<noscript><h1>Signalpost Atlas</h1><p>This page needs JavaScript for search, comparison and evidence panels. Plain summaries follow (25 companies). Showing the first 25 of 1000.</p><section><h2>RASTAVEGEN 1 AS <small>812702432</small></h2><p>As of 2026-10-07: RASTAVEGEN 1 AS (org. no. 812702432) is a limited company (AS) in rental and operating of own or leased real estate, founded 2013; registry status Active. Registered activity: &quot;Eie og forvaltning av fast eiendom. Deltagelse i selskaper med lignende virksomhet&quot;. In FY2025 (year to 2025-12-31), revenue grew 5.6% on FY2024 to 1.9 m NOK and the company made a net profit of 414 k NOK (22.1% of revenue), turning round from a loss of 38 k NOK in FY2024; equity fell to 1.4 m NOK. Led by Tove Sandbekk (managing director) and Ole Ronny Sandbekk (chair of the board), with 2 more registered role holders. Online: last registry update 2026-08-01. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/812702432">https://data.brreg.no/enhetsregisteret/api/enheter/812702432</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/812702432">https://data.brreg.no/regnskapsregisteret/regnskap/812702432</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/812702432/roller">https://data.brreg.no/enhetsregisteret/api/enheter/812702432/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/912747913">https://data.brreg.no/enhetsregisteret/api/underenheter/912747913</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=812702432&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=812702432&amp;size=100</a></li></ul></section><section><h2>OSLO ANALYTICA AS <small>812840622</small></h2><p>As of 2026-10-07: OSLO ANALYTICA AS (org. no. 812840622) is a limited company (AS) in business and other management consultancy activities, founded 2013; registry status Active. Registered activity: &quot;Utrednings-, rådgivnings-, og kapasitetsbygging nasjonalt og internasjonalt&quot;. In FY2025 (year to 2025-12-31), revenue grew 88.8% on FY2024 to 431 k NOK and the company made a net loss of 33 k NOK (7.7% of revenue), after a profit of 1,400 NOK in FY2024; equity fell to 92 k NOK. Led by Kjetil Tronvoll (managing director, chair of the board), with 1 more registered role holder. Online: last registry update 2026-02-18. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/812840622">https://data.brreg.no/enhetsregisteret/api/enheter/812840622</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/812840622">https://data.brreg.no/regnskapsregisteret/regnskap/812840622</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/812840622/roller">https://data.brreg.no/enhetsregisteret/api/enheter/812840622/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/913032640">https://data.brreg.no/enhetsregisteret/api/underenheter/913032640</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=812840622&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=812840622&amp;size=100</a></li></ul></section><section><h2>BILFORHANDLER1 AS <small>813270862</small></h2><p>As of 2026-10-07: BILFORHANDLER1 AS (org. no. 813270862) is a limited company (AS) in retail sale of motor vehicles, founded 2014; registry status Active. Registered activity: &quot;Kjøp, salg og utleie av biler. Kjøp og salg av bildeler og rekvisita og andre produkter/tjenester som ...&quot;. In FY2025 (year to 2025-12-31), revenue grew 7.2% on FY2024 to 100.0 m NOK and the company made a net profit of 394 k NOK (0.4% of revenue), down from 650 k NOK in FY2024; equity rose to 4.5 m NOK. Led by Kristoffer Ustad (managing director, board member) and Oskar Johannessen (chair of the board), with 3 more registered role holders. Online: bilforhandler1.no; Facebook, Instagram profiles; latest news &quot;Tesla Model Y Long Range AWD Premium lyd/Krok/Varmepumpe/Drop off&quot; (2023-10-03). First run, so there is nothing earlier to compare with. Not found: hiring signals.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/813270862">https://data.brreg.no/enhetsregisteret/api/enheter/813270862</a></li><li><a href="https://www.bilforhandler1.no/">https://www.bilforhandler1.no/</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/813270862">https://data.brreg.no/regnskapsregisteret/regnskap/813270862</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/813270862/roller">https://data.brreg.no/enhetsregisteret/api/enheter/813270862/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/913335961">https://data.brreg.no/enhetsregisteret/api/underenheter/913335961</a></li><li><a href="https://www.bilforhandler1.no/wp-json/wp/v2/posts?per_page=6&amp;_fields=date,title,link">https://www.bilforhandler1.no/wp-json/wp/v2/posts?per_page=6&amp;_fields=date,title,link</a></li></ul></section><section><h2>FRÆNAVEIEN 126 AS <small>815548442</small></h2><p>As of 2026-10-07: FRÆNAVEIEN 126 AS (org. no. 815548442) is a limited company (AS) in rental and operating of own or leased real estate, founded 2015; registry status Active. Registered activity: &quot;Utvikle næringseiendom og drive med utleie til næringsformål&quot;. In FY2025 (year to 2025-12-31), revenue grew 68.9% on FY2024 to 1.5 m NOK and the company made a net profit of 451 k NOK (29.7% of revenue), turning round from a loss of 62 k NOK in FY2024; equity rose to 1.2 m NOK. Led by Olav Terje Flataker (managing director) and Odd Ivar Flataker (chair of the board), with 4 more registered role holders. Online: last registry update 2026-05-27. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/815548442">https://data.brreg.no/enhetsregisteret/api/enheter/815548442</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/815548442">https://data.brreg.no/regnskapsregisteret/regnskap/815548442</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/815548442/roller">https://data.brreg.no/enhetsregisteret/api/enheter/815548442/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/915556043">https://data.brreg.no/enhetsregisteret/api/underenheter/915556043</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=815548442&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=815548442&amp;size=100</a></li></ul></section><section><h2>RAGD AS <small>815699912</small></h2><p>As of 2026-10-07: RAGD AS (org. no. 815699912) is a limited company (AS) in non-specialised retail sale of predominately food, beverages or ..., founded 2015; registry status Active. Registered activity: &quot;Butikkhandel med hovedvekt på varer innen næring og nytelsesmidler ...&quot;. In FY2025 (year to 2025-12-31), the company made a net loss of 111 k NOK, a smaller loss than the 357 k NOK of FY2024; equity rose to 2.5 m NOK. Led by Erlend Bleie (managing director, chair of the board), with 1 more registered role holder. Online: last registry update 2026-07-07. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/815699912">https://data.brreg.no/enhetsregisteret/api/enheter/815699912</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/815699912">https://data.brreg.no/regnskapsregisteret/regnskap/815699912</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/815699912/roller">https://data.brreg.no/enhetsregisteret/api/enheter/815699912/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/935855594">https://data.brreg.no/enhetsregisteret/api/underenheter/935855594</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=815699912&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=815699912&amp;size=100</a></li></ul></section><section><h2>STØVLAND HOLDING AS <small>816028612</small></h2><p>As of 2026-10-07: STØVLAND HOLDING AS (org. no. 816028612) is a limited company (AS) in business and other management consultancy activities, founded 2015; registry status Active. Registered activity: &quot;Investeringsselskap lukket for allmenheten&quot;. In FY2025 (year to 2025-12-31), revenue grew 20.0% on FY2024 to 60 k NOK and the company made a net profit of 108 k NOK (179.2% of revenue), down from 1.4 m NOK in FY2024; equity rose to 2.4 m NOK. Led by Eskil Støvland (chair of the board), with 1 more registered role holder. Online: last registry update 2026-07-18. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816028612">https://data.brreg.no/enhetsregisteret/api/enheter/816028612</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/816028612">https://data.brreg.no/regnskapsregisteret/regnskap/816028612</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816028612/roller">https://data.brreg.no/enhetsregisteret/api/enheter/816028612/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816028612&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816028612&amp;size=100</a></li></ul></section><section><h2>MANOMETEREN AS <small>816377102</small></h2><p>As of 2026-10-07: MANOMETEREN AS (org. no. 816377102) is a limited company (AS) in rental and operating of own or leased real estate, founded 2015; registry status Active. Registered activity: &quot;Å eie, drive, leie ut og utvikle fast eiendom, samt hva herved står i forbindelse ...&quot;. In FY2025 (year to 2025-12-31), revenue grew 0.7% on FY2024 to 11.3 m NOK and the company made a net profit of 3.9 m NOK (34.6% of revenue), up from 3.6 m NOK in FY2024; equity rose to 48.5 m NOK. Led by Preben Holter Ellingsen (chair of the board), with 2 more registered role holders. Online: last registry update 2026-04-18. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816377102">https://data.brreg.no/enhetsregisteret/api/enheter/816377102</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/816377102">https://data.brreg.no/regnskapsregisteret/regnskap/816377102</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816377102/roller">https://data.brreg.no/enhetsregisteret/api/enheter/816377102/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/919637323">https://data.brreg.no/enhetsregisteret/api/underenheter/919637323</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816377102&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816377102&amp;size=100</a></li></ul></section><section><h2>TEAMTEC WASTE TO ENERGY AS <small>816559472</small></h2><p>As of 2026-10-07: TEAMTEC WASTE TO ENERGY AS (org. no. 816559472) is a limited company (AS) in industrial product and fashion design activities, founded 2015; registry status Active. Registered activity: &quot;Utvikling og salg av energigjenvinning system&quot;. In FY2025 (year to 2025-12-31), the company made a net loss of 24 k NOK, a smaller loss than the 26 k NOK of FY2024; equity held at 6.9 m NOK. Led by Jan Martin Grindheim (managing director, board member) and Roy Langseth (chair of the board), with 1 more registered role holder. Online: last registry update 2026-06-25. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816559472">https://data.brreg.no/enhetsregisteret/api/enheter/816559472</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/816559472">https://data.brreg.no/regnskapsregisteret/regnskap/816559472</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816559472/roller">https://data.brreg.no/enhetsregisteret/api/enheter/816559472/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816559472&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816559472&amp;size=100</a></li></ul></section><section><h2>KNUT OLAV HALLAND BRØYTING OG GRAVING AS <small>816668352</small></h2><p>As of 2026-10-07: KNUT OLAV HALLAND BRØYTING OG GRAVING AS (org. no. 816668352) is a limited company (AS) in site preparation, founded 2016; registry status Active. Registered activity: &quot;Brøyting og graving med alt som naturlig hører med, samt deltagelse i andre selskaper&quot;. In FY2025 (year to 2025-12-31), revenue fell 100.6% on FY2024 to -2,156 NOK and the company made a net loss of 146 k NOK, a larger loss than the 127 k NOK of FY2024; equity was negative (-127 k NOK). Led by Knut Olav Halland (managing director, chair of the board), with 1 more registered role holder. Online: last registry update 2026-06-29. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816668352">https://data.brreg.no/enhetsregisteret/api/enheter/816668352</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/816668352">https://data.brreg.no/regnskapsregisteret/regnskap/816668352</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816668352/roller">https://data.brreg.no/enhetsregisteret/api/enheter/816668352/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/916954409">https://data.brreg.no/enhetsregisteret/api/underenheter/916954409</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816668352&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816668352&amp;size=100</a></li></ul></section><section><h2>BERATO INVEST AS <small>816981522</small></h2><p>As of 2026-10-07: BERATO INVEST AS (org. no. 816981522) is a limited company (AS) in other captive investment companies, founded 2015; registry status Active. Registered activity: &quot;Investeringer i finansaktiva og fast eiendom&quot;. In FY2025 (year to 2025-12-31), revenue was 0 NOK and the company made a net profit of 685 k NOK, down from 1.3 m NOK in FY2024; equity rose to 6.8 m NOK. Led by Randi Bugge (chair of the board) and Bernt Christian Bugge (board member), with 1 more registered role holder. Online: last registry update 2026-05-19. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816981522">https://data.brreg.no/enhetsregisteret/api/enheter/816981522</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/816981522">https://data.brreg.no/regnskapsregisteret/regnskap/816981522</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/816981522/roller">https://data.brreg.no/enhetsregisteret/api/enheter/816981522/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816981522&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=816981522&amp;size=100</a></li></ul></section><section><h2>BQL AS <small>817206662</small></h2><p>As of 2026-10-07: BQL AS (org. no. 817206662) is a limited company (AS), founded 2016; registry status Active. Registered activity: &quot;Investeringsfirma, med investering og forvaltning av egne verdier samt eierskap i andre selskaper&quot;. In FY2025 (year to 2025-12-31), revenue was flat on FY2024 at 5,000 NOK and the company made a net loss of 49 k NOK (970.7% of revenue), after a profit of 16 k NOK in FY2024; equity fell to 432 k NOK. Led by Luan Quang Bui (managing director, chair of the board), with 1 more registered role holder. Online: last registry update 2026-09-30. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817206662">https://data.brreg.no/enhetsregisteret/api/enheter/817206662</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/817206662">https://data.brreg.no/regnskapsregisteret/regnskap/817206662</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817206662/roller">https://data.brreg.no/enhetsregisteret/api/enheter/817206662/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=817206662&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=817206662&amp;size=100</a></li></ul></section><section><h2>ONO CONSULTING AS <small>817214142</small></h2><p>As of 2026-10-07: ONO CONSULTING AS (org. no. 817214142) is a limited company (AS) in business and other management consultancy activities, founded 2016; registry status Active. Registered activity: &quot;Konsulentbistand i kombinasjon med investereinger&quot;. In FY2025 (year to 2025-12-31), revenue grew 10.1% on FY2024 to 1.7 m NOK and the company made a net profit of 612 k NOK (37.0% of revenue), up from 278 k NOK in FY2024; equity rose to 866 k NOK. Led by Oddgeir Nord-Varhaug (managing director, chair of the board), with 1 more registered role holder. Online: hjelpregnskap.no; latest news &quot;Outsourcing av regnskap: hva det koster, hva du får og hva du bør sjekke&quot; (2026-09-30). First run, so there is nothing earlier to compare with. Not found: company-owned social profiles, hiring signals.</p><p>Not available: public_brand.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817214142">https://data.brreg.no/enhetsregisteret/api/enheter/817214142</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/817214142">https://data.brreg.no/regnskapsregisteret/regnskap/817214142</a></li><li><a href="https://hjelpregnskap.no/">https://hjelpregnskap.no/</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817214142/roller">https://data.brreg.no/enhetsregisteret/api/enheter/817214142/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/917266069">https://data.brreg.no/enhetsregisteret/api/underenheter/917266069</a></li><li><a href="https://hjelpregnskap.no/wp-json/wp/v2/posts?per_page=6&amp;_fields=date,title,link">https://hjelpregnskap.no/wp-json/wp/v2/posts?per_page=6&amp;_fields=date,title,link</a></li></ul></section><section><h2>SANDSLIMARKA 33A AS <small>817630812</small></h2><p>As of 2026-10-07: SANDSLIMARKA 33A AS (org. no. 817630812) is a limited company (AS) in development of building projects, founded 2016; registry status Active. Registered activity: &quot;Å drive med kjøp, salg og utvikling av fast eiendom, og annet som står i naturlig forbindelse med dette&quot;. In FY2025 (year to 2025-12-31), revenue fell 49.0% on FY2024 to 606 k NOK and the company made a net profit of 1.0 m NOK (171.9% of revenue), down from 1.5 m NOK in FY2024; equity rose to 40.3 m NOK. Led by Atle Ulveseth (managing director, chair of the board) and Evy Ulveseth (board member), with 3 more registered role holders. Online: last registry update 2026-07-23. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817630812">https://data.brreg.no/enhetsregisteret/api/enheter/817630812</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/817630812">https://data.brreg.no/regnskapsregisteret/regnskap/817630812</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817630812/roller">https://data.brreg.no/enhetsregisteret/api/enheter/817630812/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/928358968">https://data.brreg.no/enhetsregisteret/api/underenheter/928358968</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=817630812&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=817630812&amp;size=100</a></li></ul></section><section><h2>LALEKS AS <small>817705642</small></h2><p>As of 2026-10-07: LALEKS AS (org. no. 817705642) is a limited company (AS) in construction of residential and non-residential buildings, founded 2016; registry status Active. Registered activity: &quot;Byggevirksomhet som renovering, maling, skifer- og flis legging, tapetsering ...&quot;. In FY2025 (year to 2025-12-31), revenue fell 50.5% on FY2024 to 844 k NOK and the company made a net loss of 588 k NOK (69.6% of revenue), a larger loss than the 554 k NOK of FY2024; equity was negative (-508 k NOK). Led by Lazar Alenov Katuchev (managing director, chair of the board). Online: last registry update 2026-07-28. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817705642">https://data.brreg.no/enhetsregisteret/api/enheter/817705642</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/817705642">https://data.brreg.no/regnskapsregisteret/regnskap/817705642</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/817705642/roller">https://data.brreg.no/enhetsregisteret/api/enheter/817705642/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/817779212">https://data.brreg.no/enhetsregisteret/api/underenheter/817779212</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=817705642&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=817705642&amp;size=100</a></li></ul></section><section><h2>HAUGE BYGÅRD <small>818751362</small></h2><p>As of 2026-10-07: HAUGE BYGÅRD (org. no. 818751362) is an owner-section condominium (ESEK) in activities of housing cooperatives, founded 2016; registry status Active. Registered activity: &quot;Eierseksjonssameie&quot;. In FY2025 (year to 2025-12-31), revenue grew 44.9% on FY2024 to 4.1 m NOK and the company made a net profit of 1.4 m NOK (35.1% of revenue), up from 401 k NOK in FY2024; equity was negative (-9.1 m NOK). Led by AGIO FORVALTNING AS (Forretningsfører, org. no. 995366517) and Monica Grannes (chair of the board), with 6 more registered role holders. Online: agioforvaltning.no; latest news &quot;Forvaltningsavtale med Workinntoppen C1 Boligsameie&quot; (2024-04-11). First run, so there is nothing earlier to compare with. Not found: company-owned social profiles, hiring signals.</p><p>Not available: public_brand.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/818751362">https://data.brreg.no/enhetsregisteret/api/enheter/818751362</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/818751362">https://data.brreg.no/regnskapsregisteret/regnskap/818751362</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/818751362/roller">https://data.brreg.no/enhetsregisteret/api/enheter/818751362/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/924066245">https://data.brreg.no/enhetsregisteret/api/underenheter/924066245</a></li><li><a href="https://agioforvaltning.no/wp-json/wp/v2/posts?per_page=6&amp;_fields=date,title,link">https://agioforvaltning.no/wp-json/wp/v2/posts?per_page=6&amp;_fields=date,title,link</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=818751362&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=818751362&amp;size=100</a></li></ul></section><section><h2>ARTING EIENDOM AS <small>818842422</small></h2><p>As of 2026-10-07: ARTING EIENDOM AS (org. no. 818842422) is a limited company (AS) in development of building projects, founded 2017; registry status Active. Registered activity: &quot;Utvikling, kjøp og salg av eiendom&quot;. In FY2025 (year to 2025-12-31), the company made a net loss of 6,473 NOK, a smaller loss than the 6,713 NOK of FY2024; equity fell to 23 k NOK. Led by Anders Øiseth (managing director) and Arne Torstein Øiseth (chair of the board), with 2 more registered role holders. Online: last registry update 2026-04-08. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/818842422">https://data.brreg.no/enhetsregisteret/api/enheter/818842422</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/818842422">https://data.brreg.no/regnskapsregisteret/regnskap/818842422</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/818842422/roller">https://data.brreg.no/enhetsregisteret/api/enheter/818842422/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/928359301">https://data.brreg.no/enhetsregisteret/api/underenheter/928359301</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=818842422&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=818842422&amp;size=100</a></li></ul></section><section><h2>AUTOPORTAL AS <small>819895252</small></h2><p>As of 2026-10-07: AUTOPORTAL AS (org. no. 819895252) is a limited company (AS) in retail sale of motor vehicles, founded 2017; registry status Active. Registered activity: &quot;Detaljhandel med biler og lette motorvogner, unntatt motorsykler&quot;. In FY2025 (year to 2025-12-31), revenue fell 29.4% on FY2024 to 78.0 m NOK and the company made a net profit of 673 k NOK (0.9% of revenue), down from 5.9 m NOK in FY2024; equity rose to 31.9 m NOK. Led by Renate Lundros (chair of the board) and Espen Jamt (board member), with 2 more registered role holders. Online: last registry update 2026-08-20. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/819895252">https://data.brreg.no/enhetsregisteret/api/enheter/819895252</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/819895252">https://data.brreg.no/regnskapsregisteret/regnskap/819895252</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/819895252/roller">https://data.brreg.no/enhetsregisteret/api/enheter/819895252/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/919997273">https://data.brreg.no/enhetsregisteret/api/underenheter/919997273</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=819895252&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=819895252&amp;size=100</a></li></ul></section><section><h2>THE ELTON SHOW AS <small>821026792</small></h2><p>As of 2026-10-07: THE ELTON SHOW AS (org. no. 821026792) is a limited company (AS) in performing arts activities in music, founded 2018; registry status Active. Registered activity: &quot;Produksjon og fremføring av musikk&quot;. In FY2025 (year to 2025-12-31), revenue fell 9.8% on FY2024 to 1.0 m NOK and the company made a net profit of 3,206 NOK (0.3% of revenue), down from 60 k NOK in FY2024; equity turned positive at 653 NOK. Led by Carl John Marvin Benedetti (managing director) and Veronica Haugland (chair of the board), with 1 more registered role holder. Online: last registry update 2026-05-23. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821026792">https://data.brreg.no/enhetsregisteret/api/enheter/821026792</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/821026792">https://data.brreg.no/regnskapsregisteret/regnskap/821026792</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821026792/roller">https://data.brreg.no/enhetsregisteret/api/enheter/821026792/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/921054157">https://data.brreg.no/enhetsregisteret/api/underenheter/921054157</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821026792&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821026792&amp;size=100</a></li></ul></section><section><h2>NORDIC WELL AS <small>821199832</small></h2><p>As of 2026-10-07: NORDIC WELL AS (org. no. 821199832) is a limited company (AS) in beauty care and other beauty treatment activities, founded 2018; registry status Active. Registered activity: &quot;Skjønnhets- og velværetjenester, herunder negledesign og hudpleie, samt salg av tilhørende produkter&quot;. In FY2025 (year to 2025-12-31), revenue fell 86.4% on FY2024 to 20 k NOK and the company made a net loss of 30 k NOK (149.4% of revenue), a larger loss than the 15 k NOK of FY2024; equity fell to 11 k NOK. Led by Andreas Birkeland (managing director, chair of the board), with 1 more registered role holder. Online: birkelandtotal.no; latest news &quot;Name Last Modified Size cgi-bin 13:12 - Proudly Served by LiteSpeed Web Server at ...&quot; (2023-12-18). First run, so there is nothing earlier to compare with. Not found: company-owned social profiles, hiring signals.</p><p>Not available: public_brand.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821199832">https://data.brreg.no/enhetsregisteret/api/enheter/821199832</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/821199832">https://data.brreg.no/regnskapsregisteret/regnskap/821199832</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821199832/roller">https://data.brreg.no/enhetsregisteret/api/enheter/821199832/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/921213441">https://data.brreg.no/enhetsregisteret/api/underenheter/921213441</a></li><li><a href="https://birkelandtotal.no">https://birkelandtotal.no</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821199832&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821199832&amp;size=100</a></li></ul></section><section><h2>AJ STANGELAND HOLDING AS <small>821655552</small></h2><p>As of 2026-10-07: AJ STANGELAND HOLDING AS (org. no. 821655552) is a limited company (AS) in rental and operating of own or leased real estate, founded 2018; registry status Active. Registered activity: &quot;Holding- og investeringsselskap&quot;. In FY2025 (year to 2025-12-31), the company made a net profit of 62.5 m NOK, up from 54.9 m NOK in FY2024; equity rose to 587.8 m NOK. Led by Arne Stangeland (managing director, chair of the board), with 2 more registered role holders. Online: last registry update 2026-07-14. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821655552">https://data.brreg.no/enhetsregisteret/api/enheter/821655552</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/821655552">https://data.brreg.no/regnskapsregisteret/regnskap/821655552</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821655552/roller">https://data.brreg.no/enhetsregisteret/api/enheter/821655552/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821655552&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821655552&amp;size=100</a></li></ul></section><section><h2>GREÅKERGRUPPEN AS <small>821666422</small></h2><p>As of 2026-10-07: GREÅKERGRUPPEN AS (org. no. 821666422) is a limited company (AS) in rental and operating of own or leased real estate, founded 2018; registry status Active. Registered activity: &quot;Utleie av bolig, kjøp, salg og videreutvikling av eiendommer med og uten bygninger&quot;. In FY2025 (year to 2025-12-31), revenue fell 0.5% on FY2024 to 426 k NOK and the company made a net profit of 15 k NOK (3.4% of revenue), down from 26 k NOK in FY2024; equity rose to 804 k NOK. Led by Jon Andre Karlsen (managing director, chair of the board). Online: last registry update 2026-06-02. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821666422">https://data.brreg.no/enhetsregisteret/api/enheter/821666422</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/821666422">https://data.brreg.no/regnskapsregisteret/regnskap/821666422</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821666422/roller">https://data.brreg.no/enhetsregisteret/api/enheter/821666422/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/underenheter/921800118">https://data.brreg.no/enhetsregisteret/api/underenheter/921800118</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821666422&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821666422&amp;size=100</a></li></ul></section><section><h2>FLATAVEIEN 22 AS <small>821697522</small></h2><p>As of 2026-10-07: FLATAVEIEN 22 AS (org. no. 821697522) is a limited company (AS) in other real estate activities on a fee or contract basis, founded 2018; registry status Active. Registered activity: &quot;Forvaltning og drift av boligeiendommen Flataveien 22 i Hokksund ...&quot;. In FY2025 (year to 2025-12-31), revenue was 29 k NOK and the company made a net loss of 89 k NOK (311.3% of revenue), a smaller loss than the 112 k NOK of FY2024; equity was negative (-519 k NOK). Led by Gard Ove Andersen (managing director, board member) and Tomas Berg Sandnes (chair of the board), with 1 more registered role holder. Online: last registry update 2026-05-26. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821697522">https://data.brreg.no/enhetsregisteret/api/enheter/821697522</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/821697522">https://data.brreg.no/regnskapsregisteret/regnskap/821697522</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/821697522/roller">https://data.brreg.no/enhetsregisteret/api/enheter/821697522/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821697522&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=821697522&amp;size=100</a></li></ul></section><section><h2>FONT AS <small>822324282</small></h2><p>As of 2026-10-07: FONT AS (org. no. 822324282) is a limited company (AS) in restaurant activities, founded 2019; registry status Active. Registered activity: &quot;Å investere i selskaper, kjøp og salg og annen virksomhet knyttet til dette&quot;. In FY2025 (year to 2025-12-31), revenue grew 110.1% on FY2024 to 15 k NOK and the company made a net profit of 141 k NOK (940.5% of revenue), up from 22 k NOK in FY2024; equity turned positive at 89 k NOK. Led by Tom Sverre Bang (chair of the board). Online: last registry update 2026-09-15. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/822324282">https://data.brreg.no/enhetsregisteret/api/enheter/822324282</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/822324282">https://data.brreg.no/regnskapsregisteret/regnskap/822324282</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/822324282/roller">https://data.brreg.no/enhetsregisteret/api/enheter/822324282/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=822324282&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=822324282&amp;size=100</a></li></ul></section><section><h2>TØMTEVEIEN UTVIKLING AS <small>822532152</small></h2><p>As of 2026-10-07: TØMTEVEIEN UTVIKLING AS (org. no. 822532152) is a limited company (AS) in development of building projects, founded 2019; registry status Active. Registered activity: &quot;Erverve, utvikle, drive og avhende fast eiendom&quot;. In FY2025 (year to 2025-12-31), the company made a net loss of 1.9 m NOK, a larger loss than the 1.8 m NOK of FY2024; equity rose to 80.5 m NOK. Led by Trygve Johan Ulvig Kiær (managing director) and Margrethe Ollendorff Lien (chair of the board), with 4 more registered role holders. Online: last registry update 2026-06-25. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/822532152">https://data.brreg.no/enhetsregisteret/api/enheter/822532152</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/822532152">https://data.brreg.no/regnskapsregisteret/regnskap/822532152</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/822532152/roller">https://data.brreg.no/enhetsregisteret/api/enheter/822532152/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=822532152&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=822532152&amp;size=100</a></li></ul></section><section><h2>BØRUF HOLDING AS <small>823115512</small></h2><p>As of 2026-10-07: BØRUF HOLDING AS (org. no. 823115512) is a limited company (AS), founded 2019; registry status Active. Registered activity: &quot;Eie aksjer med alt som hermed står i forbindelse&quot;. In FY2025 (year to 2025-12-31), revenue was 0 NOK and the company made a net profit of 1.4 m NOK, down from 9.8 m NOK in FY2024; equity fell to 73.8 m NOK. Led by Børuf Eivind Håkedal (chair of the board), with 1 more registered role holder. Online: last registry update 2026-06-11. First run, so there is nothing earlier to compare with. Not found: official website, company-owned social profiles, hiring signals.</p><p>Not available: public_brand, official_website.</p><ul><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/823115512">https://data.brreg.no/enhetsregisteret/api/enheter/823115512</a></li><li><a href="https://data.brreg.no/regnskapsregisteret/regnskap/823115512">https://data.brreg.no/regnskapsregisteret/regnskap/823115512</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/enheter/823115512/roller">https://data.brreg.no/enhetsregisteret/api/enheter/823115512/roller</a></li><li><a href="https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=823115512&amp;size=100">https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer=823115512&amp;size=100</a></li></ul></section></noscript>
+
+<script>
+/* Registered first so that a failure anywhere below shows up on the page instead of leaving it blank. */
+window.addEventListener("unhandledrejection", function (ev) {
+  var m = document.getElementById("main");
+  if (m && !m.dataset.ready) {
+    m.innerHTML = '<div class="wrap"><div class="card"><h2>The viewer could not start</h2><p></p></div></div>';
+    m.querySelector("p").textContent = String(ev.reason && ev.reason.message ? ev.reason.message : ev.reason);
+  }
+});
+window.addEventListener("error", function (ev) {
+  var m = document.getElementById("main");
+  if (m && !m.dataset.ready) {
+    m.innerHTML = '<div class="wrap"><div class="card"><h2>The viewer could not start</h2><p></p><p>Open the browser console for details.</p></div></div>';
+    m.querySelector("p").textContent = String(ev && ev.message ? ev.message : "unknown error");
+  }
+});
+</script>
+<script type="application/json" id="atlas-data"></script>
+<script>
+"use strict";
+(async function () {
+// The data is either embedded in this file (offline copy: report.html) or, on the hosted
+// site, a separate data file that the browser downloads compressed.
+const embedded = document.getElementById("atlas-data");
+let DATA;
+if (embedded && embedded.textContent.trim().length > 2) {
+  DATA = JSON.parse(embedded.textContent);
+} else {
+  const url = (document.documentElement.dataset.src || "data.json");
+  const main = document.getElementById("main");
+  main.querySelector("p").textContent = "Downloading the company data (once, then it is cached by your browser)...";
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Could not load " + url + " (HTTP " + response.status + ")");
+  DATA = await response.json();
+}
+const $ = (s, r) => (r || document).querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isUrl = s => /^https?:\/\//i.test(s || "");
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; } };
+const fmt = n => new Intl.NumberFormat("en-GB").format(n);
+const money = n => { const a = Math.abs(n), s = n < 0 ? "-" : ""; return a >= 1e9 ? s + (a / 1e9).toFixed(2) + " bn" : a >= 1e6 ? s + (a / 1e6).toFixed(1) + " m" : a >= 1e3 ? s + (a / 1e3).toFixed(0) + " k" : String(n); };
+const DATE_RE = /\d{4}-\d{2}-\d{2}/g;
+
+const CLASS_LABEL = { official_registry: "Official registry", company_owned: "Company-owned site", external: "External source" };
+const STATE_HELP = {
+  available: "Found and verified against a source.",
+  not_available: "We looked and the source has nothing for this company.",
+  ambiguous: "A plausible match exists but identity could not be confirmed, so nothing is published.",
+  blocked: "The source refused or restricted access.",
+  failed: "A temporary error stopped the lookup; the last known value is kept when one exists.",
+  not_applicable: "This field does not apply to this company."
+};
+const LABEL = {
+  legal_name: "Legal name", public_brand: "Public brand", legal_form: "Legal form", industry: "Industry", operating_status: "Registry status",
+  founded_date: "Founded", business_description: "Registered activity", employee_count: "Employees", annual_accounts_latest: "Latest accounts", annual_accounts_history: "Earlier accounts",
+  revenue: "Revenue", operating_result: "Operating result", profit_before_tax: "Result before tax", annual_result: "Net result",
+  total_assets: "Total assets", total_equity: "Total equity", total_debt: "Total debt", annual_report_pdf: "Filed accounts",
+  leader: "Roles", workplace: "Workplaces", official_website: "Official website", company_profile: "Company profiles",
+  hiring_signal: "Hiring", dated_activity: "Dated activity"
+};
+const SECTIONS = [
+  ["Identity", ["legal_name", "public_brand", "legal_form", "industry", "business_description", "operating_status", "founded_date", "employee_count"]],
+  ["Annual accounts", ["revenue", "operating_result", "profit_before_tax", "annual_result", "total_assets", "total_equity", "total_debt", "annual_report_pdf", "annual_accounts_latest", "annual_accounts_history"]],
+  ["People and places", ["leader", "workplace"]],
+  ["Web presence", ["official_website", "company_profile"]],
+  ["Hiring and activity", ["hiring_signal", "dated_activity"]]
+];
+const FLAGS = [
+  ["site", "Official website"], ["social", "Company-owned social profiles"], ["hiring", "Hiring signals"],
+  ["news", "Company news (from its own site)"], ["financials", "Financial figures"],
+  ["leaders", "Leadership"], ["workplaces", "Registered workplaces"]
+];
+
+/* ---------- data ---------- */
+function prep(env) {
+  const claims = env.claims || [];
+  const ev = {}; (env.evidence || []).forEach(e => { ev[e.id] = e; });
+  const all = f => claims.map((c, i) => Object.assign({ i }, c)).filter(c => c.field === f);
+  const ok = f => all(f).filter(c => c.availability === "available" && c.value);
+  const one = f => (ok(f)[0] || {}).value;
+  const acc = one("annual_accounts_latest");
+  const rev = acc && /Revenue:\s*(-?[\d,]+)/.exec(acc), res = acc && /Net result:\s*(-?[\d,]+)/.exec(acc);
+  const c = {
+    env, org: env.organisation_number, claims, ev, all, ok, one,
+    name: one("legal_name") || ("Org. " + env.organisation_number),
+    status: one("operating_status"), industry: one("industry"), form: one("legal_form"),
+    employees: one("employee_count") ? Number(one("employee_count")) : null, founded: one("founded_date"),
+    revenue: rev ? Number(rev[1].replace(/,/g, "")) : null, result: res ? Number(res[1].replace(/,/g, "")) : null,
+    site: one("official_website")
+  };
+  // Discrete figures win over the combined string: the newest period's revenue and net result.
+  const newest = f => ok(f).slice().sort((a, b) => String(b.effective_at || "").localeCompare(String(a.effective_at || "")))[0];
+  const amount = x => { const m = x && /^(-?[\d,]+)/.exec(x.value); return m ? Number(m[1].replace(/,/g, "")) : null; };
+  if (amount(newest("revenue")) != null) c.revenue = amount(newest("revenue"));
+  if (amount(newest("annual_result")) != null) c.result = amount(newest("annual_result"));
+  // Filings are in NOK, EUR or USD: every amount is shown with its own currency.
+  const cur = x => { const m = x && /\b([A-Z]{3})\s*$/.exec(x.value); return m ? m[1] : null; };
+  c.currency = cur(newest("revenue")) || cur(newest("annual_result")) || ((acc && /\b(NOK|EUR|USD|SEK|DKK|GBP)\b/.exec(acc)) || [])[1] || "NOK";
+  // The summary's one-line headline, minus the company name the row already shows.
+  const hl = (env.summary || {}).headline || "";
+  c.headline = hl.indexOf(c.name + ": ") === 0 ? hl.slice(c.name.length + 2) : hl.replace(/^[^:]*: /, "");
+  // News means a dated item from the company's own pages; the registry's own change events
+  // exist for every company and would make this bar read 100%.
+  const fromSite = claim => (claim.evidence_ids || []).some(i => ev[i] && ev[i].source_class !== "official_registry");
+  c.siteNews = ok("dated_activity").filter(fromSite);
+  c.flags = {
+    site: !!c.site, social: ok("company_profile").length > 0, hiring: ok("hiring_signal").length > 0,
+    news: ok("dated_activity").some(fromSite), financials: ok("revenue").length > 0 || !!acc,
+    leaders: ok("leader").length > 0, workplaces: ok("workplace").length > 0
+  };
+  c.score = FLAGS.filter(f => c.flags[f[0]]).length;
+  c.changed = (env.changes || []).length > 0;
+  c.hay = [c.name, c.org, c.industry, c.site && host(c.site), one("public_brand")].filter(Boolean).join(" ").toLowerCase();
+  return c;
+}
+const companies = DATA.envelopes.map(prep);
+const byOrg = Object.fromEntries(companies.map(c => [c.org, c]));
+
+/* ---------- state ---------- */
+const state = { q: "", filters: new Set(), sort: "name", limit: 60, picked: [], open: null, view: "home" };
+const FILTERS = {
+  site: ["Website", c => c.flags.site], social: ["Social", c => c.flags.social], hiring: ["Hiring", c => c.flags.hiring],
+  news: ["News", c => c.flags.news], leaders: ["Leadership", c => c.flags.leaders], financials: ["Financials", c => c.flags.financials],
+  active: ["Active only", c => (c.status || "").toLowerCase() === "active"], changed: ["Changed", c => c.changed]
+};
+const SORTS = {
+  name: ["Name A-Z", (a, b) => a.name.localeCompare(b.name, "nb")],
+  complete: ["Most complete", (a, b) => b.score - a.score || a.name.localeCompare(b.name, "nb")],
+  employees: ["Employees", (a, b) => (b.employees || -1) - (a.employees || -1)],
+  revenue: ["Revenue", (a, b) => (b.revenue == null ? -Infinity : b.revenue) - (a.revenue == null ? -Infinity : a.revenue)]
+};
+
+/* ---------- helpers ---------- */
+function setView(v) { state.view = v; document.body.dataset.view = v; }
+function claimClass(c, claim) { const e = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean)[0]; return e ? e.source_class : ""; }
+function valueHtml(v) {
+  // A value may be a bare URL or prose containing one ("Careers page: https://..."):
+  // every http(s) URL in it becomes a link, everything else stays escaped text.
+  return String(v == null ? "" : v).split(/(https?:\/\/[^\s"'<>]+)/).map((part, i) => {
+    if (i % 2 === 0) return esc(part);
+    const url = part.replace(/[.,;:)]+$/, ""), tail = part.slice(url.length);
+    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(url) + "</a>" + esc(tail);
+  }).join("");
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function latestDate(s) { const m = (s || "").match(DATE_RE); return m ? m.sort().pop() : ""; }
+
+/* ---------- list ---------- */
+function filtered() {
+  const q = state.q.toLowerCase().trim();
+  const rows = companies.filter(c => (!q || c.hay.includes(q)) && [...state.filters].every(f => FILTERS[f][1](c)));
+  rows.sort(SORTS[state.sort][1]);
+  return rows;
+}
+function renderList() {
+  const rows = filtered();
+  $("#count").textContent = fmt(rows.length) + " of " + fmt(companies.length) + " companies";
+  const shown = rows.slice(0, state.limit);
+  $("#list").innerHTML = shown.length ? shown.map(c =>
+    '<li class="row' + (state.open === c.org ? " sel" : "") + '">' +
+    '<input class="pick" type="checkbox" data-o="' + c.org + '" aria-label="Compare ' + esc(c.name) + '"' + (state.picked.includes(c.org) ? " checked" : "") + ">" +
+    '<button class="item" type="button" data-o="' + c.org + '"' + (state.open === c.org ? ' aria-current="true"' : "") + ">" +
+    '<span class="nm">' + esc(c.name) + "</span>" +
+    '<span class="sub"><span class="mono">' + esc(c.org) + "</span>" + (c.industry ? " &middot; " + esc(c.industry.replace(/^\d+\.\d+\s*/, "")) : "") + "</span>" +
+    (c.headline ? '<span class="sub hl">' + esc(c.headline) + "</span>" : "") +
+    '<span class="dots" title="' + c.score + " of " + FLAGS.length + ' information types found">' + FLAGS.map(f => '<i class="' + (c.flags[f[0]] ? "on" : "") + '"></i>').join("") + "</span>" +
+    "</button></li>").join("") +
+    (rows.length > shown.length ? '<li class="more"><button class="btn" id="moreBtn" type="button">Show ' + Math.min(60, rows.length - shown.length) + " more</button></li>" : "")
+    : '<li class="empty">No company matches. Clear a filter or change the search.</li>';
+  if (state.view === "home" || state.view === "overview") renderHome();
+}
+function renderTools() {
+  $("#filters").innerHTML = Object.keys(FILTERS).map(k => '<button type="button" class="chip" data-f="' + k + '" aria-pressed="' + state.filters.has(k) + '">' + FILTERS[k][0] + "</button>").join("");
+  $("#sort").innerHTML = Object.keys(SORTS).map(k => '<option value="' + k + '"' + (state.sort === k ? " selected" : "") + ">" + SORTS[k][0] + "</option>").join("");
+}
+function renderTray() {
+  const n = state.picked.length;
+  $("#tray").classList.toggle("on", n > 0);
+  $("#trayText").textContent = n + " selected" + (n < 2 ? " (pick at least 2)" : "");
+  $("#cmpGo").disabled = n < 2;
+}
+
+/* ---------- home ---------- */
+function keysNote() {
+  const k = DATA.search_keys || {}, names = Object.keys(k);
+  if (!names.length) return "";
+  const active = names.filter(n => k[n] === "active");
+  const text = active.length === names.length ? "Optional search providers active: " + active.join(", ") + "."
+    : active.length ? "Optional search providers active: " + active.join(", ") + "; not active: " + names.filter(n => k[n] !== "active").join(", ") + "."
+    : "This run used no API keys or paid services: every fact comes from the official registry, the company's own sites and free public sources.";
+  return '<p class="changes">' + esc(text) + "</p>";
+}
+function renderHome() {
+  // The overview describes the companies currently listed: filter or search and the bars follow.
+  const set = filtered(), n = set.length, cnt = k => set.filter(c => c.flags[k]).length;
+  const evCount = set.reduce((s, c) => s + Object.keys(c.ev).length, 0);
+  const claimCount = set.reduce((s, c) => s + c.claims.filter(x => x.availability === "available").length, 0);
+  const narrowed = n !== companies.length ? '<p class="changes">Showing the ' + fmt(n) + " of " + fmt(companies.length) + " companies that match the current search or filters.</p>" : "";
+  if (!n) { $("#main").innerHTML = '<div class="wrap"><div class="card"><h2>No company matches</h2><p>Clear a filter or change the search.</p></div></div>'; return; }
+  const rows = FLAGS.map(f => ({ label: f[1], p: n ? cnt(f[0]) / n : 0, k: cnt(f[0]) })).sort((a, b) => b.p - a.p);
+  const weakest = rows[rows.length - 1];
+  $("#main").innerHTML = '<div class="wrap"><button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
+    '<div class="card"><h2>This run</h2><div class="kpis">' +
+    '<div class="kpi"><div class="n">' + fmt(n) + '</div><div class="l">companies, one envelope each</div></div>' +
+    '<div class="kpi"><div class="n">' + fmt(claimCount) + '</div><div class="l">verified claims</div></div>' +
+    '<div class="kpi"><div class="n">' + fmt(evCount) + '</div><div class="l">evidence records</div></div>' +
+    '<div class="kpi"><div class="n">' + esc(DATA.as_of) + '</div><div class="l">data as of</div></div></div>' + narrowed + "</div>" +
+    '<div class="card"><h2>What we found, by information type</h2><div class="cov">' +
+    rows.map(r => '<div class="r"><span>' + esc(r.label) + '</span><span class="bar' + (r.p < .3 ? " low" : "") + '"><b style="width:' + (r.p * 100).toFixed(1) + '%"></b></span><span class="num">' + (r.p * 100).toFixed(1) + "%</span></div>").join("") +
+    '</div><p class="changes">Weakest area: <b>' + esc(weakest.label.toLowerCase()) + "</b> (" + fmt(weakest.k) + " of " + fmt(n) + '). A missing value is shown as "not found", never as zero.</p></div>' +
+    keysNote() +
+    '<div class="card"><h2>Find, compare, verify</h2><ol class="steps">' +
+    "<li><b>Find</b> a company: search by name, organisation number, industry or website, or filter by what we found.</li>" +
+    "<li><b>Compare</b> up to four companies side by side: tick the boxes in the list, then press Compare.</li>" +
+    "<li><b>Verify</b> any fact: press <i>Evidence</i> (or a numbered citation in the summary) to see the source link, retrieval time, reporting period, content hash and the exact quoted text.</li></ol>" +
+    downloadsHtml() + "</div></div>";
+}
+function downloadsHtml() {
+  const files = DATA.downloads || [];
+  if (!files.length) return "";
+  const size = b => b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " kB";
+  return '<p class="changes">Raw output of this run, exactly as the agent wrote it: ' +
+    files.map(f => '<a href="' + esc(f.href) + '" download>' + esc(f.label) + "</a> (" + size(f.bytes || 0) + ")").join(" &middot; ") + ".</p>";
+}
+
+/* ---------- company ---------- */
+function citeButtons(c, ids) {
+  const have = (ids || []).filter(i => c.ev[i]), shown = have.slice(0, 3);
+  const btn = i => '<button type="button" class="cite" data-ev="' + esc(i) + '" aria-label="Open evidence ' + esc(i.replace("ev-", "")) + '">' + esc(i.replace("ev-", "")) + "</button>";
+  const rest = have.length - shown.length;
+  return shown.map(btn).join("") + (rest > 0 ? '<button type="button" class="cite" data-ev="' + esc(have[3]) + '" title="' + rest + ' more evidence records, listed under Every fact below">+' + rest + "</button>" : "");
+}
+// A list field (roles, workplaces ...) shows its label once, on the first row.
+function factRow(c, f, claim, first) {
+  const cls = claimClass(c, claim);
+  const val = claim.value;
+  let extra = "";
+  if (claim.reporting_period) extra += '<div class="sub">Period ' + esc(claim.reporting_period) + (claim.effective_at ? ", to " + esc(claim.effective_at) : "") + "</div>";
+  else if (claim.effective_at) extra += '<div class="sub">Effective ' + esc(claim.effective_at) + "</div>";
+  return '<div class="fact src-' + esc(cls) + (first === false ? " cont" : "") + '"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">' + valueHtml(val) + extra + "</div>" +
+    '<button type="button" class="why" data-ci="' + claim.i + '">Evidence</button></div>';
+}
+const SEVERITY = ["failed", "blocked", "ambiguous", "not_applicable", "not_available"];
+// Every field of a section that has nothing becomes ONE line, not one row each.
+function naLine(c, fields, labelOverride) {
+  const states = fields.map(f => (c.all(f)[0] || {}).availability || "not_available");
+  const st = SEVERITY.find(s => states.includes(s)) || "not_available";
+  const names = labelOverride || fields.map(f => LABEL[f]).join(", ");
+  return '<div class="fact na"><div class="k">Not found</div><div class="v">' + esc(names) + ' <span class="pill ' + esc(st) + '" title="' + esc(STATE_HELP[st] || "") + '">' + esc(st.replace("_", " ")) + "</span></div><span></span></div>";
+}
+const FIN_FIELDS = ["revenue", "operating_result", "profit_before_tax", "annual_result", "total_assets", "total_equity", "total_debt"];
+const amountOf = v => { const m = /^(-?[\d,]+)\s*([A-Z]{3})?$/.exec(v || ""); return m ? [Number(m[1].replace(/,/g, "")), m[2] || ""] : null; };
+// The filed figures as a small table, one column per filed year, with the change between the two newest.
+function financialTable(c) {
+  const periods = [...new Set(FIN_FIELDS.flatMap(f => c.ok(f).map(x => x.reporting_period)).filter(Boolean))].sort().reverse();
+  if (!periods.length) return "";
+  const claimOf = (f, p) => c.ok(f).find(x => x.reporting_period === p);
+  const change = f => {
+    if (periods.length < 2) return "";
+    const a = claimOf(f, periods[0]), b = claimOf(f, periods[1]);
+    const x = a && amountOf(a.value), y = b && amountOf(b.value);
+    if (!x || !y || x[1] !== y[1] || y[0] === 0) return "";
+    const pct = (x[0] - y[0]) / Math.abs(y[0]) * 100;
+    return '<span class="chg ' + (pct > 0 ? "up" : pct < 0 ? "down" : "") + '">' + (pct > 0 ? "&#9650; " : pct < 0 ? "&#9660; " : "") + Math.abs(pct).toFixed(1) + "%</span>";
+  };
+  const cell = (f, p) => { const x = claimOf(f, p); return x ? '<button type="button" class="why cellbtn" data-ci="' + x.i + '" title="Open the evidence for this figure">' + esc(x.value) + "</button>" : '<span class="dash">&ndash;</span>'; };
+  const rows = FIN_FIELDS.filter(f => c.ok(f).length).map(f =>
+    "<tr><th scope=\"row\">" + esc(LABEL[f]) + "</th>" + periods.map(p => "<td>" + cell(f, p) + "</td>").join("") + "<td>" + change(f) + "</td></tr>").join("");
+  const pdfs = c.ok("annual_report_pdf");
+  const pdfRow = pdfs.length ? "<tr><th scope=\"row\">Filed accounts</th>" + periods.map(p => { const x = pdfs.find(y => y.reporting_period === p); return "<td>" + (x ? '<a href="' + esc(x.value) + '" target="_blank" rel="noopener noreferrer">PDF</a>' : '<span class="dash">&ndash;</span>') + "</td>"; }).join("") + "<td></td></tr>" : "";
+  return '<div class="scroll-x"><table class="fin"><thead><tr><th></th>' + periods.map(p => "<th scope=\"col\">" + esc(p) + "</th>").join("") +
+    "<th scope=\"col\">Change</th></tr></thead><tbody>" + rows + pdfRow + "</tbody></table></div>";
+}
+function section(c, title, fields) {
+  let html = "<h3>" + esc(title) + "</h3>", missing = [], found = 0;
+  if (title === "Annual accounts") {
+    const table = financialTable(c);
+    // The combined latest/earlier strings only matter when there are no discrete figures.
+    fields = fields.filter(f => !FIN_FIELDS.includes(f) && f !== "annual_report_pdf" && !(table && /^annual_accounts_/.test(f)));
+    if (table) { html += table; found++; }
+  }
+  fields.forEach(f => {
+    let list = c.ok(f);
+    if (f === "dated_activity") list = list.slice().sort((a, b) => latestDate(b.value).localeCompare(latestDate(a.value)));
+    if (!list.length) { missing.push(f); return; }
+    found++;
+    html += list.slice(0, 8).map((x, i) => factRow(c, f, x, i === 0)).join("");
+    if (list.length > 8) html += "<details><summary>Show " + (list.length - 8) + " more</summary>" + list.slice(8).map(x => factRow(c, f, x, false)).join("") + "</details>";
+  });
+  if (missing.length) html += naLine(c, missing, title === "Annual accounts" && !found ? "Financial figures" : null);
+  return html;
+}
+const TOPIC = {
+  legal_name: "Company", business_description: "Activity", annual_accounts_latest: "Accounts", revenue: "Accounts", leader: "People", workplace: "Places",
+  official_website: "Online", hiring_signal: "Hiring", dated_activity: "Latest"
+};
+function topicOf(x, i, n) {
+  const hit = (x.fields || []).find(f => TOPIC[f]);
+  if (hit) return TOPIC[hit];
+  return /^First run|^No material|^Since the previous run/.test(x.text) ? "Changes" : "Gaps";
+}
+// The headline minus the registry status, which the header already shows as a pill.
+function headlineFacts(c) {
+  const rest = c.status && c.headline.toLowerCase().indexOf(c.status.toLowerCase()) === 0 ? c.headline.slice(c.status.length).replace(/^,\s*/, "") : c.headline;
+  return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : "";
+}
+function renderCompany(c) {
+  const s = c.env.summary || { sentences: [], unknowns: [], changes: [] };
+  const story = (s.sentences || []).map((x, i, a) =>
+    '<div class="sent"><span class="topic">' + esc(topicOf(x, i, a.length)) + "</span><span>" + esc(x.text.replace(/^As of \d{4}-\d{2}-\d{2}: /, "")) + citeButtons(c, x.evidence_ids) + "</span></div>").join("");
+  const gaps = (s.unknowns || []).length ? '<div class="gaps">Not found:' + s.unknowns.map(u => '<span class="pill">' + esc(u) + "</span>").join("") + "</div>" : "";
+  const st = (c.status || "").toLowerCase();
+  $("#main").innerHTML = '<div class="wrap">' +
+    '<div class="card"><div class="head"><div class="ttl">' +
+    '<button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
+    '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\"><span class=\"mono\">org. " + esc(c.org) + "</span>" +
+    (c.form ? "<span>" + esc(c.form) + "</span>" : "") + (c.status ? '<span class="pill ' + esc(st) + '">' + esc(c.status) + "</span>" : "") +
+    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") + "</div>" +
+    (headlineFacts(c) ? '<p class="headline">' + esc(headlineFacts(c)) + "</p>" : "") + "</div>" +
+    '<div class="actions"><button class="btn" id="pickBtn" type="button">' + (state.picked.includes(c.org) ? "Remove from compare" : "Add to compare") + "</button>" +
+    '<button class="btn" id="jsonBtn" type="button">Envelope JSON</button><button class="btn" id="linkBtn" type="button">Copy link</button></div></div></div>' +
+    '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + gaps +
+    ((s.changes || []).length ? '<div class="changes">Changes since the last run: ' + esc(s.changes.join("; ")) + "</div>" : "") + "</div>" +
+    '<div class="card facts"><h2>Every fact, with its source</h2><div class="legend">' +
+    '<span style="--c:var(--reg)">Official registry</span><span style="--c:var(--own)">Company-owned</span><span style="--c:var(--ext)">External</span></div>' +
+    SECTIONS.map(sec => section(c, sec[0], sec[1])).join("") + "</div></div>";
+  $("#main").scrollTop = 0;
+}
+
+/* ---------- compare ---------- */
+function renderCompare() {
+  const cs = state.picked.map(o => byOrg[o]).filter(Boolean);
+  const rowsDef = [
+    ["Registry status", c => c.status], ["Legal form", c => c.form], ["Industry", c => c.industry], ["Founded", c => c.founded],
+    ["Employees", c => c.employees != null ? fmt(c.employees) : null],
+    ["Revenue", c => c.revenue != null ? money(c.revenue) + " " + c.currency : null], ["Net result", c => c.result != null ? money(c.result) + " " + c.currency : null],
+    ["Accounts period", c => (c.ok("annual_accounts_latest")[0] || {}).reporting_period],
+    ["Leadership", c => c.ok("leader").slice(0, 3).map(x => x.value).join("; ")],
+    ["Workplaces", c => c.ok("workplace").length ? String(c.ok("workplace").length) : null],
+    ["Website", c => c.site && host(c.site)], ["Social profiles", c => c.ok("company_profile").length ? c.ok("company_profile").map(x => host(x.value)).join(", ") : null],
+    ["Hiring", c => c.ok("hiring_signal").length ? c.ok("hiring_signal")[0].value : null],
+    ["Latest company news", c => { const a = c.siteNews.map(x => x.effective_at || latestDate(x.value)).filter(Boolean).sort().pop(); return a || null; }],
+    ["Information types found", c => c.score + " of " + FLAGS.length], ["Evidence records", c => String(Object.keys(c.ev).length)]
+  ];
+  const head = "<thead><tr><th></th>" + cs.map(c => '<th scope="col"><button class="btn ghost" data-o="' + c.org + '" type="button">' + esc(c.name) + '</button><div class="mono">' + esc(c.org) + "</div></th>").join("") + "</tr></thead>";
+  const body = "<tbody>" + rowsDef.map(r => {
+    const vals = cs.map(c => r[1](c));
+    const distinct = new Set(vals.map(v => v == null || v === "" ? "" : String(v)));
+    const differs = distinct.size > 1;
+    return "<tr><th scope=\"row\">" + esc(r[0]) + "</th>" + vals.map(v => (v == null || v === "") ? '<td class="na">Not found</td>' : '<td class="' + (differs ? "diff" : "") + '">' + esc(v) + "</td>").join("") + "</tr>";
+  }).join("") + "</tbody>";
+  $("#main").innerHTML = '<div class="wrap"><div class="card"><div class="head"><div class="ttl"><button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
+    '<h2 class="co">Comparing ' + cs.length + ' companies</h2><div class="meta">Highlighted cells differ between companies. Select a company name to open its evidence.</div></div>' +
+    '<div class="actions"><button class="btn" id="cmpCsv" type="button">Download CSV</button></div></div></div>' +
+    '<div class="card scroll-x"><table class="cmp">' + head + body + "</table></div></div>";
+  $("#cmpCsv").onclick = () => {
+    const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    download("signalpost-compare.csv", ["Field"].concat(cs.map(c => c.name)).map(q).join(",") + "\n" + rowsDef.map(r => [r[0]].concat(cs.map(c => r[1](c))).map(q).join(",")).join("\n"), "text/csv");
+  };
+  $("#main").scrollTop = 0;
+}
+
+/* ---------- evidence drawer ---------- */
+function evidenceHtml(e) {
+  const src = isUrl(e.source_url) ? '<a href="' + esc(e.source_url) + '" target="_blank" rel="noopener noreferrer">' + esc(e.source_url) + "</a>" :
+    esc(e.source_url) + " (Builderr's frozen registry snapshot, shipped with the run)";
+  return '<div class="ev"><dl><dt>Source</dt><dd>' + src + "</dd><dt>Source type</dt><dd>" + esc(CLASS_LABEL[e.source_class] || e.source_class || "") + "</dd>" +
+    "<dt>Retrieved</dt><dd>" + esc(e.retrieved_at || "unknown") + "</dd>" +
+    (e.reporting_period ? "<dt>Reporting period</dt><dd>" + esc(e.reporting_period) + "</dd>" : "") +
+    (e.effective_at ? "<dt>Effective</dt><dd>" + esc(e.effective_at) + "</dd>" : "") +
+    (e.linked_from ? "<dt>Reached via</dt><dd>" + valueHtml(e.linked_from) + "</dd>" : "") +
+    '<dt>Content SHA-256</dt><dd class="mono">' + esc(e.content_sha256 || "n/a") + "</dd></dl>" +
+    (e.claim_span ? "<div><div class=\"sub\">Supporting text</div><blockquote>" + esc(e.claim_span) + "</blockquote></div>" : "") + "</div>";
+}
+function openDrawer(html) {
+  const d = $("#drawer");
+  $("#drawerBody").innerHTML = '<button class="btn close" type="button" id="drawerClose">Close</button>' + html;
+  if (!d.open) d.showModal();
+  $("#drawerClose").focus();
+}
+function openClaim(c, ci) {
+  const claim = c.claims[ci], st = claim.availability || "available";
+  const evs = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean);
+  openDrawer("<h3>" + esc(LABEL[claim.field] || claim.field) + '</h3><p>' + valueHtml(claim.value || "Not found") + '</p><p><span class="pill ' + esc(st) + '">' + esc(st.replace("_", " ")) + "</span> " +
+    (claim.confidence != null ? '<span class="sub">identity confidence ' + Math.round(claim.confidence * 100) + "%</span>" : "") + '</p><p class="sub">' + esc(STATE_HELP[st] || "") + "</p>" +
+    (evs.length ? evs.map(evidenceHtml).join("") : '<p class="sub">No source recorded: nothing is published without one.</p>'));
+}
+function openEv(c, id) {
+  const e = c.ev[id]; if (!e) return;
+  const used = c.claims.filter(x => (x.evidence_ids || []).includes(id)).slice(0, 6);
+  openDrawer("<h3>Evidence " + esc(id.replace("ev-", "")) + "</h3>" + evidenceHtml(e) +
+    (used.length ? '<p class="sub">Supports: ' + used.map(x => esc(LABEL[x.field] || x.field)).filter((v, i, a) => a.indexOf(v) === i).join(", ") + "</p>" : ""));
+}
+
+/* ---------- guide ---------- */
+function openGuide() {
+  $("#guideBody").innerHTML = "<h3>How to read this page</h3><p>Every sentence and fact comes from a recorded source. Nothing is estimated, and a missing value is shown as <i>not found</i>, never as zero.</p>" +
+    '<dl><dt>Left bar colour</dt><dd><span style="color:var(--reg)">Blue</span> official registry, <span style="color:var(--own)">green</span> the company\'s own site, <span style="color:var(--ext)">amber</span> external source.</dd>' +
+    "<dt>Numbered citations</dt><dd>Open the evidence behind a sentence: link, retrieval time, content hash and quoted text.</dd>" +
+    Object.keys(STATE_HELP).map(k => "<dt>" + esc(k.replace("_", " ")) + "</dt><dd>" + esc(STATE_HELP[k]) + "</dd>").join("") +
+    '</dl><p><b>Shortcuts:</b> <span class="mono">/</span> search, <span class="mono">Esc</span> close.</p><button class="btn primary" type="button" id="guideClose">Got it</button>';
+  $("#guide").showModal(); $("#guideClose").focus();
+}
+
+/* ---------- routing ---------- */
+function route() {
+  const h = decodeURIComponent(location.hash.replace(/^#/, ""));
+  const m = /^c=(\d{9})$/.exec(h), cm = /^cmp=([\d,]+)$/.exec(h);
+  if (m && byOrg[m[1]]) {
+    state.open = m[1]; setView("detail"); renderCompany(byOrg[m[1]]);
+  } else if (cm) {
+    state.picked = cm[1].split(",").filter(o => byOrg[o]).slice(0, 4); state.open = null;
+    if (state.picked.length) { setView("compare"); renderCompare(); } else { setView("home"); renderHome(); }
+    renderTray();
+  } else {
+    state.open = null; setView(h === "overview" ? (window.innerWidth <= 900 ? "overview" : "home") : window.innerWidth <= 900 ? "list" : "home"); renderHome();
+  }
+  renderList();
+}
+function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
+
+/* ---------- events ---------- */
+document.addEventListener("click", e => {
+  const t = e.target.closest("button, a, input");
+  if (!t) return;
+  if (t.classList.contains("item")) { go("#c=" + t.dataset.o); }
+  else if (t.id === "moreBtn") { state.limit += 60; renderList(); }
+  else if (t.dataset.f) { state.filters.has(t.dataset.f) ? state.filters.delete(t.dataset.f) : state.filters.add(t.dataset.f); state.limit = 60; renderTools(); renderList(); }
+  else if (t.dataset.ci != null && t.classList.contains("why")) { openClaim(byOrg[state.open], Number(t.dataset.ci)); }
+  else if (t.classList.contains("cite")) { openEv(byOrg[state.open], t.dataset.ev); }
+  else if (t.id === "drawerClose") { $("#drawer").close(); }
+  else if (t.id === "guideBtn") { openGuide(); }
+  else if (t.id === "overviewBtn") { go("#overview"); }
+  else if (t.id === "guideClose") { $("#guide").close(); }
+  else if (t.id === "backBtn") { go("#"); }
+  else if (t.id === "pickBtn") { const top = $("#main").scrollTop; togglePick(state.open); renderCompany(byOrg[state.open]); $("#main").scrollTop = top; renderList(); $("#pickBtn").focus(); }
+  else if (t.id === "jsonBtn") { download(state.open + ".envelope.json", JSON.stringify(byOrg[state.open].env, null, 2), "application/json"); }
+  else if (t.id === "linkBtn") { try { navigator.clipboard.writeText(location.href); t.textContent = "Link copied"; } catch (x) { t.textContent = "Copy from the address bar"; } }
+  else if (t.id === "cmpGo") { go("#cmp=" + state.picked.join(",")); }
+  else if (t.id === "cmpClear") { state.picked = []; renderTray(); renderList(); if (state.view === "compare") go("#"); }
+  else if (t.id === "csv") { exportCsv(); }
+  else if (t.id === "themeBtn") { cycleTheme(); }
+  else if (t.dataset.o && t.closest(".cmp")) { go("#c=" + t.dataset.o); }
+});
+document.addEventListener("change", e => {
+  if (e.target.classList.contains("pick")) { if (togglePick(e.target.dataset.o, e.target.checked) === false) e.target.checked = false; }
+  else if (e.target.id === "sort") { state.sort = e.target.value; renderList(); }
+});
+let timer; $("#q").addEventListener("input", e => { clearTimeout(timer); timer = setTimeout(() => { state.q = e.target.value; state.limit = 60; renderList(); }, 80); });
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); }
+});
+$("#drawer").addEventListener("click", e => { if (e.target.id === "drawer") $("#drawer").close(); });
+$("#guide").addEventListener("click", e => { if (e.target.id === "guide") $("#guide").close(); });
+window.addEventListener("hashchange", route);
+
+function togglePick(org, force) {
+  const has = state.picked.includes(org), want = force == null ? !has : force;
+  if (want && !has) {
+    if (state.picked.length >= 4) { $("#trayText").textContent = "Compare up to four companies at a time"; return false; }
+    state.picked.push(org);
+  }
+  if (!want && has) state.picked = state.picked.filter(o => o !== org);
+  renderTray();
+  return true;
+}
+function exportCsv() {
+  const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  const head = ["org_number", "name", "status", "industry", "employees", "revenue", "net_result", "currency", "website"].concat(FLAGS.map(f => f[0])).concat(["found_of_" + FLAGS.length]);
+  const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.revenue != null || c.result != null ? c.currency : "", c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score]));
+  download("signalpost-companies.csv", [head].concat(rows).map(r => r.map(q).join(",")).join("\n"), "text/csv");
+}
+// Dark by default; the button switches to light and back, and the choice is remembered.
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $("#themeBtn").setAttribute("aria-label", "Switch to " + (theme === "dark" ? "light" : "dark") + " theme");
+  $("#themeBtn").title = "Switch to " + (theme === "dark" ? "light" : "dark") + " theme";
+  try { localStorage.setItem("atlas-theme", theme); } catch (e) { /* storage may be blocked */ }
+}
+function cycleTheme() { setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); }
+try { if (localStorage.getItem("atlas-theme") === "light") setTheme("light"); } catch (e) { /* ignore */ }
+
+$("#asof").textContent = (DATA.title ? DATA.title + " · " : "") + "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
+$("#siteLinks").innerHTML = (DATA.links || []).map(l => '<a class="btn ghost" href="' + esc(l.href) + '">' + esc(l.label) + "</a>").join("");
+renderTools(); renderTray(); route();
+$("#main").dataset.ready = "1";
+})();
+</script>
+</body>
+</html>
