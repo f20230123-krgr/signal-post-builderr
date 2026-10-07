@@ -220,7 +220,19 @@ _ROLES = {
     "styremedlem": "board member",
     "nestleder": "deputy chair",
     "varamedlem": "deputy board member",
+    "revisor": "auditor",
+    "regnskapsfører": "accountant",
+    "forretningsfører": "business manager",
+    "deltaker med delt ansvar": "partner (shared liability)",
+    "deltaker med fullt ansvar": "partner (full liability)",
+    "innehaver": "owner",
+    "komplementar": "general partner",
+    "kontaktperson": "contact person",
+    "norsk representant for utenlandsk enhet": "Norwegian representative",
+    "bestyrende reder": "managing owner",
 }
+# Roles that do not run the company: never named under "Led by".
+_NOT_LEADING = {"revisor", "regnskapsfører", "varamedlem", "kontaktperson"}
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _PLATFORMS = {
     "linkedin.com": "LinkedIn", "facebook.com": "Facebook", "instagram.com": "Instagram",
@@ -499,7 +511,14 @@ _MAX_LEADERS = 2
 
 
 def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
-    leaders = [c for c in profile.leadership.leaders if c.state == EvidenceState.AVAILABLE and c.value]
+    everyone = [c for c in profile.leadership.leaders if c.state == EvidenceState.AVAILABLE and c.value]
+
+    def role_of(claim: Claim) -> str:
+        inner = claim.value[:-1].rsplit(" (", 1)[-1] if claim.value.endswith(")") and " (" in claim.value else ""
+        return inner.split(",")[0].strip().lower()
+
+    leaders = [c for c in everyone if role_of(c) not in _NOT_LEADING]
+    others = len(everyone) - len(leaders)
     if not leaders:
         return None
     # One person often holds several roles (managing director and board
@@ -515,8 +534,9 @@ def _leadership_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     shown = names[:_MAX_LEADERS]
     phrases = [f"{n} ({', '.join(r for r in people[n] if r)})" if any(people[n]) else n for n in shown]
     text = "Led by " + " and ".join(phrases)
-    if len(names) > len(shown):
-        more = len(names) - len(shown)
+    # Everyone else the registry lists (board members not named, deputies, auditor, accountant).
+    more = len(names) - len(shown) + others
+    if more:
         text += f", with {more} more registered role holder{'s' if more > 1 else ''}"
     return SummarySentence(text + ".", ["leader"], [c for n in shown for c in people_claims[n]])
 

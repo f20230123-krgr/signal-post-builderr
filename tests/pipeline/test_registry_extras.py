@@ -75,10 +75,12 @@ def test_leadership_roles_are_extracted_and_filtered():
     assert any("Eilert" in v and "Hanoa" in v for v in values)
     assert any("Alexander" in v and "Remen" in v for v in values)
 
-    # REVI (auditor, an "enhet" not a "person") and VARA (deputy) excluded --
-    # not "leadership" per docs/data-schema.md ("e.g. CEO, board chair").
-    assert not any("Deloitte" in v for v in values)
-    assert not any("Zelenetska" in v for v in values)
+    # Every role the registry lists, as Builderr's reference data does: the deputy (VARA) and
+    # the auditor (REVI, an organisation, published with its own org number and a quote).
+    assert any("Zelenetska" in v and "Varamedlem" in v for v in values)
+    assert "DELOITTE AS (Revisor, org. no. 980211282)" in values
+    auditor = next(f for f in leaders if f.value.startswith("DELOITTE AS"))
+    assert auditor.evidence_span and "DELOITTE AS" in auditor.evidence_span
 
     # no birthdate leaked into the published value (privacy)
     assert not any("1970" in v for v in values)

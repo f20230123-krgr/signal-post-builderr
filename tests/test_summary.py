@@ -284,3 +284,15 @@ def test_an_upcoming_event_is_never_called_the_latest_news():
     text = build_summary(profile).text
 
     assert 'latest news "New office opens" (2026-01-02)' in text and "Supplier Day" not in text
+
+
+def test_an_auditor_or_deputy_is_never_named_as_leading_the_company():
+    profile = make_profile(org_number="923609016", legal_name=available_claim("ACME AS"), leaders=[
+        available_claim("DELOITTE AS (Revisor, org. no. 980211282)"),
+        available_claim("Kari Nordmann (Varamedlem)"),
+        available_claim("Ola Nordmann (Daglig leder)"),
+    ])
+
+    text = build_summary(profile).text
+
+    assert "Led by Ola Nordmann (managing director), with 2 more registered role holders." in text

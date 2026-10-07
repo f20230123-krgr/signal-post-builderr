@@ -56,8 +56,12 @@ NAME_SEARCH_URL = "https://data.brreg.no/enhetsregisteret/api/enheter"
 MAX_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 0.5
 
-INCLUDED_ROLE_GROUPS = {"DAGL", "STYR"}
-EXCLUDED_ROLE_TYPES = {"REVI", "VARA"}
+# Every role group the registry lists is published: management, board (deputies included),
+# auditor, accountant, partners, business manager and so on. Builderr's own reference data
+# carries all of them (a median of six roles per company); an organisation holding a role
+# (an auditor, an accounting firm) is published with its own organisation number.
+INCLUDED_ROLE_GROUPS: Optional[set[str]] = None  # None: all groups
+EXCLUDED_ROLE_TYPES: set[str] = set()
 
 
 def _get(client: httpx.Client, url: str, sleep: Callable[[float], None]) -> Optional[httpx.Response]:
@@ -107,23 +111,25 @@ def _leadership_facts(
     content_hash = _content_hash(response)
     facts = []
     for group in body.get("rollegrupper", []):
-        if group.get("type", {}).get("kode") not in INCLUDED_ROLE_GROUPS:
+        if INCLUDED_ROLE_GROUPS is not None and group.get("type", {}).get("kode") not in INCLUDED_ROLE_GROUPS:
             continue
         changed = group.get("sistEndret")
         changed_on = changed[:10] if isinstance(changed, str) and re.match(r"\d{4}-\d{2}-\d{2}", changed) else None
         for role in group.get("roller", []):
-            if role.get("avregistrert"):
+            if role.get("avregistrert") or role.get("fratraadt"):
                 continue
             role_type = role.get("type", {}).get("kode")
             if role_type in EXCLUDED_ROLE_TYPES:
                 continue
-            if role.get("person", {}).get("erDoed"):
+            if role.get("person", {}).get("erDoed") or role.get("enhet", {}).get("erSlettet"):
                 continue
             name = _role_holder_name(role)
             if not name:
                 continue
             title = role.get("type", {}).get("beskrivelse")
-            value = f"{name} ({title})" if title else name
+            org_no = role.get("enhet", {}).get("organisasjonsnummer") if "enhet" in role else None
+            detail = ", ".join(p for p in (title, f"org. no. {org_no}" if org_no else None) if p)
+            value = f"{name} ({detail})" if detail else name
             facts.append(
                 ConfirmedFact(
                     "leader", value, url, 100.0, now,
@@ -140,6 +146,11 @@ def _role_span(text: str, role: dict) -> Optional[str]:
     (President and CEO)" has a quotable source. None if the JSON layout differs."""
     person = role.get("person")
     if not isinstance(person, dict):
+        # An organisation holding the role: its name as the registry writes it.
+        names = (role.get("enhet") or {}).get("navn")
+        if isinstance(names, list) and names and isinstance(names[0], str):
+            match = re.search(r'"navn"\s*:\s*\[\s*"' + re.escape(names[0]) + r'"', text)
+            return match.group(0) if match else None
         return None
     navn = person.get("navn") or {}
     first, last = navn.get("fornavn"), navn.get("etternavn")
