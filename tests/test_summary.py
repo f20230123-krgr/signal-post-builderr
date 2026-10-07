@@ -178,11 +178,14 @@ def test_annual_accounts_are_not_reported_unknown_when_only_discrete_figures_exi
 
 def test_a_legal_form_without_a_plain_phrase_is_stated_as_its_code():
     profile = make_profile(org_number="818751362", legal_name=available_claim("HAUGE BYGARD"))
-    profile.legal_identity.legal_form = available_claim("ESEK")
+    profile.legal_identity.legal_form = available_claim("XYZ")
+    esek = make_profile(org_number="818751362", legal_name=available_claim("HAUGE BYGARD"))
+    esek.legal_identity.legal_form = available_claim("ESEK")
 
     text = build_summary(profile).text
 
-    assert "is a registered Norwegian entity (legal form ESEK)" in text and "a ESEK" not in text
+    assert "is a registered Norwegian entity (legal form XYZ)" in text and "a XYZ" not in text
+    assert "is an owner-section condominium (ESEK)" in build_summary(esek).text
 
 
 def test_the_summary_says_careers_page_for_a_bare_page_and_hiring_for_an_ad():

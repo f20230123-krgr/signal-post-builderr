@@ -213,6 +213,22 @@ _LEGAL_FORMS = {
     "ANS": "general partnership (ANS)",
     "DA": "shared-liability partnership (DA)",
     "STI": "foundation (STI)",
+    "ESEK": "owner-section condominium (ESEK)",
+    "FLI": "association (FLI)",
+    "VPFO": "securities fund (VPFO)",
+    "SAM": "jointly owned property (SAM)",
+    "IKS": "inter-municipal company (IKS)",
+    "KS": "limited partnership (KS)",
+    "PRE": "shipping partnership (PRE)",
+    "PK": "pension fund (PK)",
+    "SPA": "savings bank (SPA)",
+    "ANNA": "other legal entity (ANNA)",
+    "SÆR": "entity under special legislation (SÆR)",
+    "BBL": "housing building cooperative (BBL)",
+    "GFS": "mutual insurance company (GFS)",
+    "BA": "limited-liability cooperative (BA)",
+    "SF": "state enterprise (SF)",
+    "KIRK": "Church of Norway body (KIRK)",
 }
 _ROLES = {
     "daglig leder": "managing director",
@@ -366,7 +382,9 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     # A form code we have no plain-English phrase for is stated as the code, not
     # forced into "is a ESEK".
     if form in _LEGAL_FORMS:
-        text = f"{name} (org. no. {profile.org_number}) is a {_LEGAL_FORMS[form]}"
+        phrase = _LEGAL_FORMS[form]
+        article = "an" if phrase[0].lower() in "aeiou" else "a"
+        text = f"{name} (org. no. {profile.org_number}) is {article} {phrase}"
     elif form:
         text = f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity (legal form {form})"
     else:
@@ -392,7 +410,23 @@ def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     text = _value_or_none(claim) if claim is not None else None
     if not text:
         return None
-    return SummarySentence(f'Registered activity: "{text.rstrip(". ")}".', ["business_description"], [claim])
+    return SummarySentence(f'Registered activity: "{_opening(text)}".', ["business_description"], [claim])
+
+
+_MAX_ACTIVITY_QUOTE = 110
+
+
+def _opening(text: str) -> str:
+    """The opening of a registered activity, quoted as written: statutory purposes run to
+    several lines of legal wording, and the summary is meant to be short. The full text is
+    the claim's value."""
+    text = text.rstrip(". ")
+    if len(text) <= _MAX_ACTIVITY_QUOTE:
+        return text
+    cut = text[:_MAX_ACTIVITY_QUOTE]
+    clause = max(cut.rfind(", "), cut.rfind("; "))
+    head = cut[:clause] if clause >= 40 else cut.rsplit(" ", 1)[0]
+    return head.rstrip(",; ") + " ..."
 
 
 _METRIC_WORDS = [
