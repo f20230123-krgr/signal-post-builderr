@@ -243,3 +243,19 @@ def test_a_verified_candidate_that_redirects_to_the_companys_real_domain_is_reco
     fact = verify_discovered_site("https://studix.no", "STUDIX AS", client, BudgetGovernor(), org_number="923456789")
 
     assert fact.value == "https://studix.com/" and fact.source_url == "https://studix.com/"
+
+
+def test_a_holding_company_is_not_given_its_operating_sisters_site():
+    """VETNES INVEST AS was matched to vetnes.no, which names Vetnes Bygg AS at the address the
+    two group companies share. A holding/property company's site must name it exactly, unless
+    the page shows its own org number."""
+    from src.pipeline.discovery import _is_a_sister_companys_site
+
+    sister = "<footer>Vetnes Bygg AS, Vetnesveien 13, 4516 Mandal</footer>"
+    own = "<footer>Vetnes Invest AS, Vetnesveien 13, 4516 Mandal</footer>"
+
+    assert _is_a_sister_companys_site("VETNES INVEST AS", sister)
+    assert not _is_a_sister_companys_site("VETNES INVEST AS", own)
+    assert not _is_a_sister_companys_site("STEBIO AS", "<p>Stebio, Buvika</p>")  # not a holding name: rule n/a
+    assert _is_a_sister_companys_site("ROTNESLEGENE EIENDOM AS", "<b>Rotneslegene AS</b>")
+    assert not _is_a_sister_companys_site("CUSTOS INVEST AS", "<h1>Custos</h1>")  # a brand, not a sister company

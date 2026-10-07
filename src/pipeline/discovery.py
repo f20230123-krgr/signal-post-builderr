@@ -867,6 +867,41 @@ def discover_candidate_site(
     return _discover_via_duckduckgo(legal_name, client, budget, sleep) if use_duckduckgo else None
 
 
+# Words that mark a holding, investment or property company. Such a company usually shares its
+# family name and registered address with an operating sister ("VETNES INVEST AS" and "Vetnes
+# Bygg AS"), so a site under the family name and showing that address is often the sister's.
+_HOLDING_WORDS = {
+    "invest", "investering", "investment", "investments", "holding", "holdings", "eiendom",
+    "eiendommer", "eiendomsselskap", "property", "properties", "kapital", "capital", "finans",
+    "forvaltning", "management",
+}
+_LEGAL_SUFFIX_RE = re.compile(r"\s+(as|asa|ans|da|sa|ks|nuf|enk|ba|sf|iks)$", re.IGNORECASE)
+
+
+def _is_a_sister_companys_site(legal_name: str, page_html: str) -> bool:
+    """For a holding, investment or property company: True when the page does not name this
+    exact company ("Vetnes Invest"), only the family it shares with a sister company.
+
+    Found measuring keyless discovery on 100 random companies: VETNES INVEST AS was matched to
+    vetnes.no (the page names Vetnes Bygg AS) and ROTNESLEGENE EIENDOM AS to rotneslegene.no
+    (Rotneslegene AS), both through the address the group companies share. Org-number proof
+    on the page overrides this (checked by the caller)."""
+    words = legal_name.lower().split()
+    if not any(w.strip(".,") in _HOLDING_WORDS for w in words):
+        return False
+    core = _LEGAL_SUFFIX_RE.sub("", " ".join(words)).strip()
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page_html)).lower()
+    if core in text:
+        return False
+    # The page names another registered company of the same family ("vetnes bygg as",
+    # "rotneslegene as"). A brand alone ("Custos" for CUSTOS INVEST AS) is not a sister.
+    family = re.escape(core.split()[0])
+    for match in re.finditer(rf"\b{family}((?:\s+[a-zæøå&\-]+){{0,3}}?)\s+(?:as|asa)\b", text):
+        if f"{core.split()[0]}{match.group(1)}".strip() != core:
+            return True
+    return False
+
+
 def verify_discovered_site(
     url: str,
     legal_name: str,
@@ -986,6 +1021,8 @@ def verify_discovered_site(
     # A name-derived guess needs more than the name: proof of identity, or at
     # least the registered postcode and town on the page alongside the name match.
     if require_proof and not identity_proven and not (hints and page_shows_location(response.text, hints)):
+        return None
+    if not confirmed_by_org_number and _is_a_sister_companys_site(legal_name, response.text):
         return None
     if not identity_proven and best_score < NAME_MATCH_THRESHOLD:
         return None
