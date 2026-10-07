@@ -78,6 +78,10 @@ def canonical_social_profile_url(url: str) -> Optional[str]:
             return f"https://www.facebook.com/{segments[1]}"
         if first in _RESERVED["facebook.com"] or not _HANDLE_RE.match(segments[0]):
             return None
+        # A bare number or "<page>_<post>" is a post or photo from an embedded feed (seven of
+        # them on one company's homepage), not the page; a page by id is /profile.php?id=.
+        if re.fullmatch(r"[\d_]+", segments[0]):
+            return None
         return f"https://www.facebook.com/{segments[0]}"
 
     if platform == "instagram.com":
@@ -117,8 +121,14 @@ def social_profile_link(url: str) -> Optional[tuple[str, str]]:
         return None
     parts = urlsplit(url.strip())
     link = f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path}"
-    if "profile.php" in parts.path or parts.path.lower().startswith("/pg/"):
-        link = key  # the account id lives in the query string; /pg/<name>/about is a tab of /<name>
+    if (
+        "profile.php" in parts.path
+        or parts.path.lower().startswith("/pg/")
+        or (key.startswith("https://www.youtube.com/") and parts.path.rstrip("/") != urlsplit(key).path)
+    ):
+        # The account id lives in the query string; /pg/<name>/about and a YouTube channel's
+        # /featured or /playlists are tabs of the account itself.
+        link = key
     elif "linkedin.com" in parts.netloc.lower():
         # The company page as the site writes it, never one of its tabs (/about, /posts,
         # /mycompany, /admin/...): the first two path segments, and a trailing slash only
@@ -174,6 +184,29 @@ def _account_name(canonical: str) -> str:
 def resembles_company(canonical: str, tokens: set[str]) -> bool:
     name = _account_name(canonical)
     return len(name) >= 4 and any(t in name or name in t for t in tokens)
+
+
+_ID_LIKE_RE = re.compile(r"^(?:uc[\w-]{15,}|\d+|profilephpid\d+)$")
+
+
+def plausibly_own_profile(canonical: str, legal_name: str, site_url: str) -> bool:
+    """Whether a profile a company's site links can be published as the company's OWN.
+
+    A site also links its parent group's accounts, an owner's personal brand, a supplier's
+    channel embedded in an article. Hand-checked on Builderr's 100-company sample: requiring
+    a named account to resemble the company's name or domain removed every such link and
+    none of the 76 profiles Builderr's own crawl confirmed. An account known only by an id
+    (a YouTube channel id, a numeric page id) cannot be compared by name and is kept."""
+    account = _account_name(canonical)
+    if not account or _ID_LIKE_RE.match(account) or "profile.php" in canonical:
+        return True
+    if resembles_company(canonical, identity_tokens(legal_name, site_url)):
+        return True
+    # A short domain label ("nsp" for nsp.no) is too short to be a token on its own, but an
+    # account that starts with it ("nspnorge") is plainly the same company.
+    host = urlsplit(site_url if "://" in site_url else f"https://{site_url}").netloc.lower().removeprefix("www.")
+    label = re.sub(r"[^a-z0-9æøå]", "", host.split(".")[0]) if host else ""
+    return len(label) >= 3 and account.startswith(label)
 
 
 def script_social_candidates(html: str, tokens: set[str]) -> list[tuple[str, str, str]]:

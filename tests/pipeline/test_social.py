@@ -168,3 +168,30 @@ def test_facebooks_old_pg_page_form_is_the_same_page():
     assert social_profile_link("https://www.facebook.com/pg/MtmSkogservice/about/") == (
         "https://www.facebook.com/MtmSkogservice", "https://www.facebook.com/MtmSkogservice",
     )
+
+
+def test_a_profile_is_the_companys_own_only_when_its_name_resembles_the_company_or_is_an_id():
+    """Hand-checked on Builderr's 100-company sample: this removed a parent group's accounts,
+    an owner's personal brand and a supplier's channel, and none of Builderr's confirmed 76."""
+    from src.pipeline.social import canonical_social_profile_url, plausibly_own_profile
+
+    def own(url, name, site):
+        return plausibly_own_profile(canonical_social_profile_url(url), name, site)
+
+    assert own("https://www.linkedin.com/company/peab/", "PEAB BYGG AS", "https://peab.no")
+    assert own("https://www.instagram.com/nspnorge/", "NORDIC SUPPLY PARTNER AS", "https://www.nsp.no")
+    assert own("https://www.youtube.com/channel/UC-L9GGxaVCNOCMziy1rXqIw", "HJELPEMIDDELSPESIALISTEN AS", "https://hm-spes.no")
+    assert own("https://www.facebook.com/profile.php?id=100057441009551", "RSV GRUPPEN AS", "https://rsvgruppen.no")
+    assert not own("https://www.linkedin.com/company/eltera-gruppen/", "VALDRES INSTALLASJON AS", "https://valdres-installasjon.no")
+    assert not own("https://www.youtube.com/@Prevent1942/playlists", "NORDIC SUPPLY PARTNER AS", "https://www.nsp.no")
+    assert not own("https://www.instagram.com/orsolyahaarberg/", "FJELLHEIMEN GALLERI AS", "https://fjellheimengalleri.no")
+
+
+def test_facebook_feed_posts_are_not_profiles_and_youtube_tabs_are_dropped():
+    from src.pipeline.social import canonical_social_profile_url
+
+    assert canonical_social_profile_url("https://www.facebook.com/599407360228640_1627673669063159") is None
+    assert canonical_social_profile_url("https://facebook.com/1552125346617992") is None
+    assert social_profile_link("https://www.youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw/featured")[0] == (
+        "https://www.youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw"
+    )

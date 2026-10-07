@@ -38,6 +38,7 @@ from rapidfuzz import fuzz
 from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX
 from src.pipeline.extract import RawFact
 from src.pipeline.resolve import ResolvedEntity
+from src.pipeline.social import canonical_social_profile_url, plausibly_own_profile
 
 # Documented threshold -- changing this number changes precision. Any change
 # must be accompanied by a /self-score run reported in the same PR/summary.
@@ -200,6 +201,14 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     # whether the field is normally name-bearing.
     if fact.context_name is not None:
         if name_similarity(entity.legal_name, fact.context_name) < NAME_MATCH_THRESHOLD:
+            return None
+
+    # A profile the site links is published as the company's own only when its account name
+    # resembles the company (or is an id that cannot be compared): not the parent group's, an
+    # owner's personal brand, or a supplier's channel embedded in an article.
+    if fact.field_name == "company_profile":
+        canonical = canonical_social_profile_url(fact.value)
+        if canonical and not plausibly_own_profile(canonical, entity.legal_name or "", entity.official_site_candidate or ""):
             return None
 
     # Real-world regression, confirmed live: a site's own on-page JSON-LD can
