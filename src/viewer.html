@@ -297,14 +297,14 @@ const STATE_HELP = {
 };
 const LABEL = {
   legal_name: "Legal name", public_brand: "Public brand", legal_form: "Legal form", industry: "Industry", operating_status: "Registry status",
-  founded_date: "Founded", employee_count: "Employees", annual_accounts_latest: "Latest accounts", annual_accounts_history: "Earlier accounts",
+  founded_date: "Founded", business_description: "Registered activity", employee_count: "Employees", annual_accounts_latest: "Latest accounts", annual_accounts_history: "Earlier accounts",
   revenue: "Revenue", operating_result: "Operating result", profit_before_tax: "Result before tax", annual_result: "Net result",
   total_assets: "Total assets", total_equity: "Total equity", total_debt: "Total debt", annual_report_pdf: "Filed accounts",
   leader: "Roles", workplace: "Workplaces", official_website: "Official website", company_profile: "Company profiles",
   hiring_signal: "Hiring", dated_activity: "Dated activity"
 };
 const SECTIONS = [
-  ["Identity", ["legal_name", "public_brand", "legal_form", "industry", "operating_status", "founded_date", "employee_count"]],
+  ["Identity", ["legal_name", "public_brand", "legal_form", "industry", "business_description", "operating_status", "founded_date", "employee_count"]],
   ["Annual accounts", ["revenue", "operating_result", "profit_before_tax", "annual_result", "total_assets", "total_equity", "total_debt", "annual_report_pdf", "annual_accounts_latest", "annual_accounts_history"]],
   ["People and places", ["leader", "workplace"]],
   ["Web presence", ["official_website", "company_profile"]],
@@ -540,7 +540,7 @@ function section(c, title, fields) {
   return html;
 }
 const TOPIC = {
-  legal_name: "Company", annual_accounts_latest: "Accounts", revenue: "Accounts", leader: "People", workplace: "Places",
+  legal_name: "Company", business_description: "Activity", annual_accounts_latest: "Accounts", revenue: "Accounts", leader: "People", workplace: "Places",
   official_website: "Online", hiring_signal: "Hiring", dated_activity: "Latest"
 };
 function topicOf(x, i, n) {

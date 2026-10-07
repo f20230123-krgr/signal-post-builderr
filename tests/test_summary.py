@@ -65,7 +65,7 @@ def test_the_summary_is_short_dated_and_covers_company_figures_people_web_and_ch
     text = summary.text
 
     assert text.startswith(
-        f"As of {summary.as_of}: EQUINOR ASA (org. no. 923609016) is a public limited company (ASA) in utvinning av raaolje, founded 1972"
+        f"As of {summary.as_of}: EQUINOR ASA (org. no. 923609016) is a public limited company (ASA) in extraction of crude petroleum, founded 1972"
     )
     assert "registry status Active, 21000 employees" in text
     assert (
@@ -296,3 +296,23 @@ def test_an_auditor_or_deputy_is_never_named_as_leading_the_company():
     text = build_summary(profile).text
 
     assert "Led by Ola Nordmann (managing director), with 2 more registered role holders." in text
+
+
+def test_the_industry_reads_in_english_and_the_registered_activity_is_quoted():
+    profile = make_profile(org_number="811413682", legal_name=available_claim("ELOPAK ASA"))
+    profile.legal_identity.industry = available_claim("17.120 Produksjon av papir og papp")
+    profile.legal_identity.business_description = available_claim("Produksjon og salg av emballasje.")
+
+    summary = build_summary(profile)
+
+    assert "in manufacture of paper and paperboard" in summary.text
+    assert 'Registered activity: "Produksjon og salg av emballasje".' in summary.text
+    activity = next(s for s in summary.sentences if s.fields == ["business_description"])
+    assert activity.claims
+
+
+def test_an_unstated_industry_is_left_out_rather_than_printed():
+    profile = make_profile(org_number="811413682", legal_name=available_claim("ACME AS"))
+    profile.legal_identity.industry = available_claim("00.000 Uoppgitt")
+
+    assert "uoppgitt" not in build_summary(profile).text.lower()

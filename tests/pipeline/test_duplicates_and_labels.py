@@ -204,3 +204,71 @@ def test_the_latest_accounts_are_the_companys_own_and_group_accounts_are_labelle
     history = [f.value for f in facts if f.field_name == "annual_accounts_history"]
     assert "67,956,000,000" in latest.value and latest.reporting_period == "FY2025"
     assert any(v.startswith("Group accounts (konsern): ") and "106,462,000,000" in v for v in history)
+
+
+def test_every_registry_claim_quotes_text_that_is_in_the_response_it_cites():
+    """Builderr checks that a claim's span can be found in its source. Workplaces, accounts,
+    registry events, roles and identity used to "quote" a value we assembled ourselves."""
+    from src.pipeline.registry_extras import fetch_registry_extras, fetch_registry_update_activity
+
+    org = "811413682"
+    bodies = {
+        f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}": {
+            "organisasjonsnummer": org, "navn": "ELOPAK ASA", "stiftelsesdato": "1957-02-11",
+            "naeringskode1": {"beskrivelse": "Produksjon av papir og papp", "kode": "17.120"},
+            "organisasjonsform": {"beskrivelse": "Allmennaksjeselskap", "kode": "ASA"},
+            "konkurs": False, "underAvvikling": False, "antallAnsatte": 201,
+            "vedtektsfestetFormaal": ["Produksjon og salg av emballasje,", "og virksomhet som naturlig hører sammen med dette."],
+            "historiskeNavn": [{"fraDato": "1957-02-11 00:00:00", "navn": "ELOPAK AS", "tilDato": "2021-06-03 10:05:24"}],
+            "forretningsadresse": {"adresse": ["Industriveien 30"], "postnummer": "3430", "poststed": "SPIKKESTAD"},
+        },
+        f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}/roller": {"rollegrupper": [
+            {"type": {"kode": "REVI", "beskrivelse": "Revisor"}, "sistEndret": "2017-11-06", "roller": [
+                {"type": {"kode": "REVI", "beskrivelse": "Revisor"}, "enhet": {"navn": ["PRICEWATERHOUSECOOPERS AS"], "organisasjonsnummer": "987009713"}}]},
+        ]},
+        f"https://data.brreg.no/regnskapsregisteret/regnskap/{org}": [{
+            "regnskapstype": "SELSKAP", "valuta": "EUR", "journalnr": "2026123",
+            "regnskapsperiode": {"fraDato": "2025-01-01", "tilDato": "2025-12-31"},
+            "resultatregnskapResultat": {"aarsresultat": 65488000.0, "driftsresultat": {"driftsinntekter": {"sumDriftsinntekter": 753009000.0}}},
+        }],
+        f"https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org}": {"_embedded": {"underenheter": [
+            {"navn": "ELOPAK ASA", "organisasjonsnummer": "973153773",
+             "beliggenhetsadresse": {"adresse": ["Karenslyst allé 53"], "kommune": "OSLO", "postnummer": "0279", "poststed": "OSLO"}}]}},
+        f"https://data.brreg.no/enhetsregisteret/api/oppdateringer/enheter?organisasjonsnummer={org}&size=100": {"_embedded": {"oppdaterteEnheter": [
+            {"dato": "2026-05-12T21:03:14.806Z", "endringstype": "Endring", "organisasjonsnummer": org}]}},
+    }
+    served = {}
+
+    def handler(request):
+        body = bodies.get(str(request.url))
+        if body is None:
+            return httpx.Response(404)
+        response = httpx.Response(200, json=body)
+        served[str(request.url)] = response.text
+        return response
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    entity = ResolvedEntity(
+        org_number=org, legal_name="ELOPAK ASA", registered_address="Industriveien 30, 3430 SPIKKESTAD",
+        official_site_candidate=None, resolution_state=EvidenceState.AVAILABLE,
+        source=f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}", retrieved_at=NOW,
+    )
+
+    facts, _ = fetch_registry_extras(entity, BudgetGovernor(), client=client)
+    facts += fetch_registry_update_activity(entity, BudgetGovernor(), client=client)
+    live = fetch_live_registry_details(entity, BudgetGovernor(), client=client, now=lambda: NOW)
+    facts += live.facts + live.identity_facts + [live.legal_name, live.description]
+
+    checked = set()
+    for fact in facts:
+        if fact.field_name in ("annual_report_pdf",):
+            continue
+        source_text = next((t for u, t in served.items() if fact.source_url == u or fact.source_url.startswith(u.split("?")[0])), None)
+        if fact.field_name == "workplace":
+            source_text = served[f"https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org}"]
+        assert fact.evidence_span, (fact.field_name, fact.value)
+        assert fact.evidence_span in source_text, (fact.field_name, fact.evidence_span)
+        checked.add(fact.field_name)
+    assert {"workplace", "annual_accounts_latest", "dated_activity", "leader", "industry", "legal_form",
+            "operating_status", "employee_count", "founded_date", "legal_name_registry", "business_description"} <= checked
+    assert live.description.value.startswith("Produksjon og salg av emballasje, og virksomhet")

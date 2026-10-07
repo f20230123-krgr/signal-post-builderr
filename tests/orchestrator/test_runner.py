@@ -804,7 +804,9 @@ def test_without_the_universe_file_the_live_record_is_fetched_once_not_twice():
     assert len(entity_lookups) == 1
 
 
-def test_with_the_universe_file_identity_claims_come_from_it_and_are_not_duplicated():
+def test_identity_claims_cite_the_live_record_when_it_was_read_and_are_not_duplicated():
+    """The universe file is a download, not an address a reader can open: when the live
+    record was read, industry, legal form and status cite it, with its text quoted."""
     universe_entry = {
         "organisation_number": "923609016", "name": "EXAMPLE CORP AS", "website": "example.no",
         "industry_code": "43.210", "industry_label": "Elektrisk installasjonsarbeid",
@@ -815,8 +817,30 @@ def test_with_the_universe_file_identity_claims_come_from_it_and_are_not_duplica
         "923609016", BudgetGovernor(), universe_entry=universe_entry, client=_live_registry_client(_LIVE_BODY)
     )
 
-    assert profile.legal_identity.industry.value == "43.210 Elektrisk installasjonsarbeid"
-    assert profile.legal_identity.industry.source == "signalpost-company-universe-2025.jsonl.gz"  # not the live record's
+    from src.pipeline.envelope import _claim_entries
+
+    live = "https://data.brreg.no/enhetsregisteret/api/enheter/923609016"
+    assert profile.legal_identity.industry.value == "62.010 Programmeringstjenester"  # the current record
+    assert profile.legal_identity.industry.source == live
+    assert profile.legal_identity.legal_form.source == live
+    assert profile.legal_identity.legal_name.source == live
+    assert "62.010" in profile.legal_identity.industry.evidence_span
+    fields = [field for field, _ in _claim_entries(profile)]
+    for field in ("legal_name", "industry", "legal_form", "operating_status", "employee_count"):
+        assert fields.count(field) == 1, field
+
+
+def test_identity_claims_fall_back_to_the_universe_file_when_the_live_record_cannot_be_read():
+    universe_entry = {
+        "organisation_number": "923609016", "name": "EXAMPLE CORP AS", "website": "example.no",
+        "industry_code": "43.210", "industry_label": "Elektrisk installasjonsarbeid",
+        "employees": 11, "legal_form": "AS", "bankrupt": False, "liquidating": False,
+    }
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503)))
+
+    profile = _default_process_one("923609016", BudgetGovernor(), universe_entry=universe_entry, client=client)
+
+    assert profile.legal_identity.industry.source == "signalpost-company-universe-2025.jsonl.gz"
 
 
 def test_the_leader_name_used_for_the_search_fallback_is_fetched_once_not_twice():

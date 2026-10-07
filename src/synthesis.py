@@ -319,7 +319,33 @@ _INDUSTRY_CODE_RE = re.compile(r"^\d{2}\.\d{2,3}\s+")
 _MAX_INDUSTRY_LEN = 70
 
 
+_INDUSTRY_EN: Optional[dict[str, str]] = None
+
+
+def _english_industry(code: str) -> Optional[str]:
+    """Statistics Norway's official English label for an industry code (src/data/
+    industry_en.json, shipped with the code: no request), or None."""
+    global _INDUSTRY_EN
+    if _INDUSTRY_EN is None:
+        import json
+        from pathlib import Path
+
+        path = Path(__file__).parent / "data" / "industry_en.json"
+        try:
+            _INDUSTRY_EN = json.loads(path.read_text(encoding="utf-8")).get("codes", {})
+        except (OSError, ValueError):
+            _INDUSTRY_EN = {}
+    return _INDUSTRY_EN.get(code)
+
+
 def _industry_text(industry: str) -> str:
+    """The industry in English when the code has an official English label ("17.120
+    Produksjon av papir og papp" -> "manufacture of paper and paperboard"), else the
+    registry's own wording."""
+    code = industry.split(" ", 1)[0]
+    english = _english_industry(code) if _INDUSTRY_CODE_RE.match(industry) else None
+    if english:
+        industry = f"{code} {english}"
     text = _INDUSTRY_CODE_RE.sub("", industry).strip()
     if len(text) > _MAX_INDUSTRY_LEN:
         text = text[: _MAX_INDUSTRY_LEN].rsplit(" ", 1)[0].rstrip(",;") + " ..."
@@ -345,7 +371,7 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         text = f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity (legal form {form})"
     else:
         text = f"{name} (org. no. {profile.org_number}) is a registered Norwegian entity"
-    if industry:
+    if industry and not industry.startswith("00.000"):  # 00.000: the registry has no industry on file
         text += f" in {_industry_text(industry)}"
     if founded:
         text += f", founded {founded[:4]}"
@@ -357,6 +383,16 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         text += "; " + ", ".join(extras)
     claims = [c for c in (li.legal_name, li.legal_form, li.industry, li.founded_date, li.operating_status, li.employee_count) if c is not None]
     return SummarySentence(text + ".", ["legal_name", "legal_form", "industry", "founded_date", "operating_status", "employee_count"], claims)
+
+
+def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
+    """What the company itself registered that it does, quoted in the registry's own words
+    (Norwegian, untranslated: a quote is not paraphrased)."""
+    claim = profile.legal_identity.business_description
+    text = _value_or_none(claim) if claim is not None else None
+    if not text:
+        return None
+    return SummarySentence(f'Registered activity: "{text.rstrip(". ")}".', ["business_description"], [claim])
 
 
 _METRIC_WORDS = [
@@ -684,7 +720,10 @@ def build_summary(profile: CompanyProfile) -> Summary:
     Same discipline as always: nothing is stated that a verified Claim does not support,
     and every gap is named under `unknowns` instead of guessed."""
     as_of = profile.run_timestamp.date().isoformat()
-    builders = (_identity_sentence, _accounts_sentence, _leadership_sentence, _workplaces_sentence, _online_sentence)
+    builders = (
+        _identity_sentence, _activity_sentence, _accounts_sentence, _leadership_sentence, _workplaces_sentence,
+        _online_sentence,
+    )
     sentences = [s for s in (build(profile) for build in builders) if s is not None]
 
     unknowns: list[str] = []

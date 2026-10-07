@@ -96,6 +96,9 @@ class LegalIdentity(BaseModel):
     # Founding date from the live registry record (registry_extras.
     # fetch_live_registry_details) -- not carried by the universe manifest.
     founded_date: Optional[Claim] = None
+    # What the company registered that it does (its activity, or failing that its statutory
+    # purpose), quoted from the live registry record.
+    business_description: Optional[Claim] = None
 
 
 class AnnualAccounts(BaseModel):

@@ -99,6 +99,31 @@ def _content_hash(response: httpx.Response) -> str:
     return hashlib.sha256(response.content).hexdigest()
 
 
+# --- verbatim quotes from a registry response ------------------------------------------
+# A claim's span must be text a checker can find in the source exactly as written. These
+# return a fragment of `raw` itself (never a reconstruction), or None when it isn't there.
+
+def _quote(raw: Optional[str], pattern: str) -> Optional[str]:
+    match = re.search(pattern, raw or "")
+    return match.group(0) if match else None
+
+
+def _quote_string(raw: Optional[str], key: str, value: str) -> Optional[str]:
+    """`"key":"value"` as written in the JSON."""
+    return _quote(raw, rf'"{re.escape(key)}"\s*:\s*"{re.escape(value)}"')
+
+
+def _quote_object(raw: Optional[str], key: str) -> Optional[str]:
+    """`"key":{...}` for a flat JSON object (no nested braces), as written."""
+    return _quote(raw, rf'"{re.escape(key)}"\s*:\s*\{{[^{{}}]*\}}')
+
+
+def _quote_number(raw: Optional[str], key: str, amount: float) -> Optional[str]:
+    """`"key":753009000.00` as written, for a figure we read as `amount`."""
+    whole = int(amount)
+    return _quote(raw, rf'"{re.escape(key)}"\s*:\s*{whole}(?:\.0+)?(?![\d.])')
+
+
 def _leadership_facts(
     entity: ResolvedEntity, client: httpx.Client, sleep: Callable[[float], None], now: datetime
 ) -> list[ConfirmedFact]:
@@ -351,12 +376,19 @@ def _accounts_facts(
         set_aside = is_group(entry) and period_end(entry) in own_periods
         field_name = "annual_accounts_history" if latest_done or set_aside else "annual_accounts_latest"
         latest_done = latest_done or field_name == "annual_accounts_latest"
+        # The filing's own figure, as written (the revenue, or the result when there is none).
+        revenue = _dig(entry, ACCOUNT_METRICS[0][1])
+        result = _dig(entry, ("resultatregnskapResultat", "aarsresultat"))
+        span = (_quote_number(response.text, "sumDriftsinntekter", revenue) if revenue is not None else None) or (
+            _quote_number(response.text, "aarsresultat", result) if result is not None else None
+        )
         facts.append(
             ConfirmedFact(
                 field_name, value, url, 100.0, now,
                 reporting_period=_reporting_period(entry),
                 effective_date=(entry.get("regnskapsperiode") or {}).get("tilDato"),
                 content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+                evidence_span=span,
             )
         )
     return facts, (EvidenceState.AVAILABLE if facts else EvidenceState.NOT_AVAILABLE)
@@ -425,6 +457,7 @@ def _workplace_facts(
                 ConfirmedFact(
                     "workplace", value, source_url, 100.0, now,
                     content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+                    evidence_span=_workplace_span(response.text, entry),
                 )
             )
 
@@ -463,6 +496,29 @@ def subunit_org_numbers(facts: list[ConfirmedFact]) -> set[str]:
         for m in [_SUBUNIT_URL_RE.search(f.source_url or "")]
         if m
     }
+
+
+def _workplace_span(raw: str, entry: dict) -> Optional[str]:
+    """This sub-unit's registered address object exactly as the registry writes it
+    (`"beliggenhetsadresse":{"adresse":["Forusbeen 50"],...,"poststed":"STAVANGER"}`), or
+    its name when it has no address."""
+    for key in ("beliggenhetsadresse", "postadresse"):
+        location = entry.get(key)
+        if isinstance(location, dict):
+            streets = location.get("adresse") or []
+            street = streets[0] if streets and isinstance(streets[0], str) else None
+            postcode = location.get("postnummer")
+            if street:
+                pattern = rf'"{key}"\s*:\s*\{{[^{{}}]*"adresse"\s*:\s*\[\s*"{re.escape(street)}"[^{{}}]*\}}'
+            elif postcode:
+                pattern = rf'"{key}"\s*:\s*\{{[^{{}}]*"postnummer"\s*:\s*"{re.escape(str(postcode))}"[^{{}}]*\}}'
+            else:
+                continue
+            span = _quote(raw, pattern)
+            if span:
+                return span
+    name = entry.get("navn")
+    return _quote_string(raw, "navn", name) if isinstance(name, str) else None
 
 
 def _own_registered_workplace_value(entity: ResolvedEntity) -> Optional[str]:
@@ -528,6 +584,10 @@ def fetch_registry_update_activity(
         for event in dated[:max_events]:
             day = str(event["dato"]).split("T")[0]
             change = event.get("endringstype") or "Endring"
+            stamp = re.escape(str(event["dato"]))
+            span = _quote(response.text, rf'"dato"\s*:\s*"{stamp}"\s*,\s*"endringstype"\s*:\s*"[^"]*"') or _quote(
+                response.text, rf'"dato"\s*:\s*"{stamp}"'
+            )
             facts.append(
                 ConfirmedFact(
                     "dated_activity",
@@ -538,6 +598,8 @@ def fetch_registry_update_activity(
                     content_hash=content_hash,
                     extraction_method="registry",
                     source_class="official_registry",
+                    evidence_span=span,
+                    effective_date=day if re.match(r"\d{4}-\d{2}-\d{2}$", day) else None,
                 )
             )
         return facts
@@ -627,6 +689,16 @@ class LiveRegistryDetails:
     # have one (measured on 78 notable companies: 65 of them have it live), so it
     # is read from the record this function fetches anyway. None when absent.
     website: Optional[ConfirmedFact] = None
+    # The legal name as the live record states it, cited to that record (the universe file
+    # is a download, not an address a reader can open). None when the record wasn't read.
+    legal_name: Optional[ConfirmedFact] = None
+    # What the company says it does, in the registry's own words: its registered activity
+    # (`aktivitet`) or, failing that, its statutory purpose (`vedtektsfestetFormaal`).
+    description: Optional[ConfirmedFact] = None
+    # The record's address and its registered business-address object, quoted: the source
+    # of the own-location workplace for a company with no sub-units.
+    record_url: Optional[str] = None
+    business_address_span: Optional[str] = None
 
 
 _SOCIAL_HOSTS = ("linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com", "youtube.com", "tiktok.com")
@@ -695,8 +767,14 @@ def fetch_live_registry_details(
                 return details
             content_hash = _content_hash(response)
             raw_text = response.text
+        if raw_text is None:
+            # The record resolve() downloaded: the registry serves compact JSON, which this
+            # re-serialisation reproduces for the strings and objects quoted below.
+            raw_text = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
         retrieved_at = now()
         details.hints = hints_from_registry_record(body)
+        details.record_url = url
+        details.business_address_span = _quote_object(raw_text, "forretningsadresse")
 
         def fact(field_name: str, value: str) -> ConfirmedFact:
             return ConfirmedFact(
@@ -712,11 +790,29 @@ def fetch_live_registry_details(
             site_fact.evidence_span = span.group(0) if span else None
             details.website = site_fact
 
+        name = body.get("navn")
+        if isinstance(name, str) and name.strip():
+            details.legal_name = fact("legal_name_registry", name.strip())
+            details.legal_name.evidence_span = _quote_string(raw_text, "navn", name)
+
+        description = _registered_description(body)
+        if description:
+            key, text = description
+            details.description = fact("business_description", text)
+            details.description.evidence_span = _quote(raw_text, rf'"{key}"\s*:\s*\[[^\]]*\]')
+
         founded = body.get("stiftelsesdato")
         if isinstance(founded, str) and founded.strip():
+            raw_founded = founded
             founded = founded.strip()[:10]
-            details.facts.append(fact("founded_date", founded))
-            details.facts.append(fact("dated_activity", f"Founded on {founded} - Brønnøysundregistrene"))
+            founded_span = _quote_string(raw_text, "stiftelsesdato", raw_founded)
+            founded_fact = fact("founded_date", founded)
+            founded_fact.evidence_span = founded_span
+            founded_fact.effective_date = founded
+            founded_event = fact("dated_activity", f"Founded on {founded} - Brønnøysundregistrene")
+            founded_event.evidence_span = founded_span
+            founded_event.effective_date = founded
+            details.facts += [founded_fact, founded_event]
 
         details.identity_facts = _live_identity_facts(body, fact, raw_text)
 
@@ -734,13 +830,36 @@ def fetch_live_registry_details(
             details.former_names.append(name)
             renamed_on = str(entry.get("tilDato") or "").split(" ")[0].split("T")[0]
             if renamed_on:
-                details.facts.append(
-                    fact("dated_activity", f"Renamed from '{name}' on {renamed_on} - Brønnøysundregistrene")
-                )
+                renamed = fact("dated_activity", f"Renamed from '{name}' on {renamed_on} - Brønnøysundregistrene")
+                renamed.evidence_span = _quote(
+                    raw_text, rf'"navn"\s*:\s*"{re.escape(entry["navn"])}"\s*,\s*"tilDato"\s*:\s*"[^"]*"'
+                ) or _quote_string(raw_text, "navn", entry["navn"])
+                renamed.effective_date = renamed_on if re.match(r"\d{4}-\d{2}-\d{2}$", renamed_on) else None
+                details.facts.append(renamed)
         return details
     finally:
         if owns_client:
             client.close()
+
+
+_MIN_DESCRIPTION_CHARS = 15
+_MAX_DESCRIPTION_CHARS = 400
+
+
+def _registered_description(body: dict) -> Optional[tuple[str, str]]:
+    """(JSON key, text) of what the company registered that it does: `aktivitet` (its
+    activity) first, else `vedtektsfestetFormaal` (its statutory purpose). The registry
+    stores either as a list of lines; they are one sentence, so they are joined with spaces.
+    None when absent or too short to say anything."""
+    for key in ("aktivitet", "vedtektsfestetFormaal"):
+        lines = body.get(key)
+        if isinstance(lines, list):
+            text = re.sub(r"\s+", " ", " ".join(l for l in lines if isinstance(l, str))).strip()
+            if len(text) >= _MIN_DESCRIPTION_CHARS:
+                if len(text) > _MAX_DESCRIPTION_CHARS:
+                    text = text[:_MAX_DESCRIPTION_CHARS].rsplit(" ", 1)[0].rstrip(",;") + " ..."
+                return key, text
+    return None
 
 
 def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact], raw_text: str = "") -> list[ConfirmedFact]:
@@ -756,7 +875,9 @@ def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact], 
             p for p in (str(code_block.get("kode") or "").strip(), str(code_block.get("beskrivelse") or "").strip()) if p
         )
         if industry:
-            facts.append(fact("industry", industry))
+            industry_fact = fact("industry", industry)
+            industry_fact.evidence_span = _quote_object(raw_text, "naeringskode1")
+            facts.append(industry_fact)
 
     employees = body.get("antallAnsatte")
     if isinstance(employees, int) and not isinstance(employees, bool):
@@ -773,7 +894,9 @@ def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact], 
     form = body.get("organisasjonsform")
     legal_form = str(form.get("kode") or "").strip() if isinstance(form, dict) else ""
     if legal_form:
-        facts.append(fact("legal_form", legal_form))
+        form_fact = fact("legal_form", legal_form)
+        form_fact.evidence_span = _quote_string(raw_text, "kode", legal_form)
+        facts.append(form_fact)
 
     flags = ("konkurs", "underAvvikling", "underTvangsavviklingEllerTvangsopplosning")
     if any(flag in body for flag in flags):
@@ -783,7 +906,12 @@ def _live_identity_facts(body: dict, fact: Callable[[str, str], ConfirmedFact], 
             status = "In liquidation"
         else:
             status = "Active"
-        facts.append(fact("operating_status", status))
+        status_fact = fact("operating_status", status)
+        # The flag that decides the status, as written ("konkurs":true / "underAvvikling":true,
+        # or "konkurs":false for an active company).
+        deciding = next((f for f in flags if body.get(f)), "konkurs")
+        status_fact.evidence_span = _quote(raw_text, '"' + deciding + '"' + r"\s*:\s*(?:true|false)")
+        facts.append(status_fact)
 
     return facts
 

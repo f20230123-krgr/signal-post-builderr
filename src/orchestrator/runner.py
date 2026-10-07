@@ -361,10 +361,25 @@ def _default_process_one(
     # for the ~89% of companies with no website to crawl at all.
     confirmed_facts += fetch_registry_update_activity(entity, budget, client=client, now=now)
     confirmed_facts += live_details.facts
-    if universe_entry is None:
-        # No manifest (e.g. a clean checkout): the live record supplies the
-        # same identity claims. With a manifest they are already above.
-        confirmed_facts += live_details.identity_facts
+    # Identity claims cite the live record when it was read: an address a reader can open,
+    # with the registry's own text quoted. The universe manifest (a download, not an address)
+    # only fills in a field the live record could not supply.
+    live_fields = {f.field_name for f in live_details.identity_facts}
+    already_live = {f.field_name for f in confirmed_facts if live_details.record_url and f.source_url == live_details.record_url}
+    confirmed_facts = [
+        f for f in confirmed_facts if not (f.field_name in live_fields and f.source_url == UNIVERSE_SOURCE)
+    ] + [f for f in live_details.identity_facts if f.field_name not in already_live]
+    if live_details.legal_name is not None:
+        confirmed_facts.append(live_details.legal_name)
+    if live_details.description is not None:
+        confirmed_facts.append(live_details.description)
+    # A company with no sub-units: its own registered address, cited to the live record.
+    if live_details.record_url and live_details.business_address_span:
+        confirmed_facts = [
+            dataclasses.replace(f, source_url=live_details.record_url, evidence_span=live_details.business_address_span)
+            if f.field_name == "workplace" and not f.source_url.startswith("http") else f
+            for f in confirmed_facts
+        ]
     confirmed_facts += nav_facts
     return assemble(entity, confirmed_facts, previous_snapshot, accounts_state=accounts_state, now=now)
 

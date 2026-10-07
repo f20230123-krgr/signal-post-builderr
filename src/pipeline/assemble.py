@@ -84,7 +84,12 @@ def _registry_claim(value: Optional[str], entity: ResolvedEntity) -> Claim:
     )
 
 
-def _legal_name_claim(entity: ResolvedEntity) -> Claim:
+def _legal_name_claim(entity: ResolvedEntity, confirmed_facts: Optional[list[ConfirmedFact]] = None) -> Claim:
+    """The registered legal name. Cited to the live registry record when it was read (an
+    address a reader can open, the name quoted), else to the resolve stage's source."""
+    live = _first_matching(confirmed_facts or [], "legal_name_registry")
+    if live is not None and entity.resolution_state == EvidenceState.AVAILABLE:
+        return _confirmed_claim(live)
     return _registry_claim(entity.legal_name, entity)
 
 
@@ -263,7 +268,7 @@ def assemble(
     """
     run_timestamp = now()
 
-    legal_name_claim = _legal_name_claim(entity)
+    legal_name_claim = _legal_name_claim(entity, confirmed_facts)
     official_site_claim = _official_site_claim(entity, confirmed_facts)
 
     brand_fact = _first_matching(confirmed_facts, "organization_name")
@@ -326,6 +331,7 @@ def assemble(
         legal_form=_optional_identity_claim("legal_form"),
         operating_status=_optional_identity_claim("operating_status"),
         founded_date=_optional_identity_claim("founded_date"),
+        business_description=_optional_identity_claim("business_description"),
     )
     account_metrics = {
         name: claims
