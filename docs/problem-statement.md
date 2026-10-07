@@ -74,6 +74,9 @@ recall is reported as "not measured" for that batch rather than 0%.
 
 ## Scoring (100 points total; an official run and 65 to qualify)
 
+> **Superseded scoring (checked on builderr.ai 2026-10-06):** the score is now 50 recall & coverage / 30 precision & evidence / 12 synthesis / 8 UX, official runs use a Builderr-chosen 1,000-1,500-company set under an unpublished budget with no participant keys, and no precomputed corpus or manifest is required. See CLAUDE.md "Current rules". The weights below are kept as the historical record.
+
+
 | Category | Weight |
 |---|---|
 | Coverage & source discovery | 35 |

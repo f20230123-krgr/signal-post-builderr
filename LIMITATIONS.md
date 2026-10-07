@@ -230,3 +230,20 @@ All permissive; no copyleft (GPL-style) obligations.
   precision and summary changes; Builderr scores the agent on its own companies, not on
   precomputed profiles, and the hosted smoke test is regenerated with the submitted code.
 
+## Known limits added 2026-10-07
+
+- **Roles include advisers.** Every role group the registry lists is published (deputies,
+  auditor, accountant, partners); a resigned, deregistered, deceased or deleted holder is not.
+  The summary names only people who run the company under "Led by".
+- **The registered activity is quoted, not translated.** It is the company's own text in the
+  registry (usually Norwegian); the summary quotes its opening and the claim carries it whole.
+  The industry label is translated using Statistics Norway's official English classification
+  (SN2007/SN2025, NLOD / CC BY 4.0), shipped with the code; an unknown code keeps the
+  registry's wording and "00.000" (not stated) is left out.
+- **A social profile must look like the company's own.** An account whose name resembles
+  neither the company's name nor its domain is not published, even when the company's site
+  links it (a parent group's or an owner's account); an account known only by an id is kept.
+  A genuine profile under an unrelated brand name is therefore missed rather than risked.
+- **Spans are verbatim.** A claim's span is text found in the cited response; where none can
+  be found, the envelope falls back to the value, as before.
+

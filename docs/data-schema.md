@@ -73,11 +73,12 @@ CompanyProfile:
     public_brand: Claim
     # Optional registry identity facts -- omitted (not emitted as a gap) when
     # the source doesn't carry them:
-    industry: Claim | null          # universe manifest industry code + label
+    industry: Claim | null          # live registry record (code + label); universe manifest if it can't be read
     employee_count: Claim | null    # live registry record; universe manifest if it can't be read
-    legal_form: Claim | null        # universe manifest (AS, ASA, ENK, ...)
+    legal_form: Claim | null        # live registry record (AS, ASA, ENK, ...); universe manifest fallback
     operating_status: Claim | null  # Active / Bankrupt / In liquidation
     founded_date: Claim | null      # live registry record (stiftelsesdato)
+    business_description: Claim | null  # registered activity / statutory purpose, quoted
 
   # 2. Latest annual accounts and available history
   annual_accounts:
@@ -93,7 +94,7 @@ CompanyProfile:
 
   # 3. Leadership and registered workplaces
   leadership:
-    leaders: list[Claim]        # e.g. CEO, board chair
+    leaders: list[Claim]        # every registry role: CEO, board, deputies, auditor, accountant, partners
     workplaces: list[Claim]
 
   # 4. Verified official website and company-owned profiles

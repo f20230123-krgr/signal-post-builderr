@@ -50,15 +50,17 @@ keys (`EXA_API_KEY`, `PARALLEL_API_KEY`), used only if set -- see "Cost and opti
 - `snapshots/` -- append-only `CompanyProfile` history (idempotent refresh)
 
 **The summary.** Each envelope's `summary` is one short, dated narrative: what
-the company is, its latest filed accounts and period, who runs it, where it
-operates, its web presence, hiring and latest dated activity, what changed
-since the previous run, and what could not be found. Every sentence lists the
+the company is and what it registered that it does (quoted), how its latest filed
+year went (revenue trend, profit or loss and margin, equity, all computed from the
+cited filings), who runs it, where it operates, its web presence, hiring and latest
+dated news, what changed since the previous run, and what could not be found, plus a
+one-line `headline`. Every sentence lists the
 claim fields it rests on and the ids of the evidence records that support it;
 a gap is named under `unknowns`, never guessed or turned into zero.
 
 ```json
-{"as_of": "2026-09-21",
- "text": "As of 2026-09-21: INSIDER FACILITY SOLUTIONS AS (org. no. 834327082) is a limited company (AS) ... Not found: hiring signals.",
+{"as_of": "2026-10-07", "headline": "ELOPAK ASA: active, revenue 753.0 m EUR (FY2025, up 7%)",
+ "text": "As of 2026-10-07: ELOPAK ASA (org. no. 811413682) is a public limited company (ASA) in manufacture of paper and paperboard ... In FY2025 (year to 2025-12-31), revenue grew 6.6% on FY2024 to 753.0 m EUR and the company made a net profit of 65.5 m EUR (8.7% of revenue), turning round from a loss of 465 k EUR in FY2024 ...",
  "sentences": [{"text": "...", "fields": ["legal_name", "..."], "evidence_ids": ["ev-1", "ev-4"]}],
  "changes": [], "unknowns": ["hiring signals"]}
 ```
@@ -149,30 +151,14 @@ A third pass (September 2026) focused on coverage and precision:
   startup and mid-run, switched off for the rest of the run, and reported;
   search results are cached per day and search spend is recorded.
 
-**Synthesis, per Soham's per-category breakdown for `e44e85c` (scored 0/10):**
-that commit's `envelopes.jsonl` -- the artifact actually submitted -- had no
-synthesis content anywhere in it; `report.html` existed but is a local file,
-never part of a submission. Fixed by embedding `src/synthesis.py`'s templated
-answers under `answers` in every envelope (commit `6c3d454`), and, after the
-same breakdown made it worth double-checking, by adding a `sources` list to
-every answer -- the rubric asks for a summary "with sources for its
-conclusions," and the answers had none before this.
+**Synthesis (earlier passes).** The first submission carried no synthesis in its envelopes;
+the second added templated answers with sources; since October each envelope carries one
+short dated `summary` instead (below and in "The summary" above), and the `answers` list
+is gone.
 
-**Social links, per Soham's private-diagnostic feedback on 2026-09-25:** company
-pages we already crawl were carrying social-link evidence that wasn't reaching
-the output. `src/pipeline/extract.py` now also reads `data-href` attributes and
-recovers the real profile URL embedded in embed-widget iframes (the Facebook
-Page Plugin pattern), and JSON-LD `sameAs` links are filtered by the same
-host/share-URL rules as every other social-link source -- it used to publish
-any string verbatim (Wikipedia links, Google Maps links, share URLs included).
-Re-crawling only each company's already-known official site (no search
-discovery, so no Exa/Parallel spend) found 10 companies whose social-profile
-claims changed; other companies with a known site had it unreachable at the
-time of the refresh and were correctly left untouched rather than wiped to
-empty. `src/pipeline/nav_jobs.py`'s hiring signals were already role-level and
-JSON-LD `JobPosting` extraction was already the only source of a hiring
-claim -- Soham's "no generic careers keywords" ask was already satisfied,
-confirmed by re-reading that code, not assumed.
+**Social links (September).** Profile links are read from anchors, `data-href` attributes,
+embed widgets and JSON-LD `sameAs`, all through the same profile rules
+(`src/pipeline/social.py`).
 
 A fourth pass (October 2026) followed Builderr's per-family coverage feedback on the
 third submission (websites 4.5%, hiring 0.0%, social 72.7%, dated news 46.8%; "turn the
@@ -232,6 +218,24 @@ financial trend instead of listing values; show the period behind ... claims"):
   one per careers page across language copies; a single job ad is published as the role
   (title and posting date) and never labelled a careers page; HTML entities in job titles
   read as plain text while the span keeps the page's own text.
+
+Final pass for the fourth revision (2026-10-07):
+
+- **Every registry role.** Deputy board members, auditor, accountant, partners and business
+  manager are published as well as management and the board, as Builderr's own reference data
+  does (a median of six roles per company); an organisation holding a role carries its
+  organisation number. The summary's "Led by" names only people who run the company.
+- **Spans a checker can find.** Every registry claim quotes the exact text of the response it
+  cites (an address object, a filing's figure, an update's date and type, a JSON key and
+  value), checked by a test against the served text. Identity claims cite the live registry
+  record, an address a reader can open, whenever it was read.
+- **What the company does.** The registry's own description of the company's activity (or its
+  statutory purpose) is published and quoted in the summary; the industry reads in English
+  using Statistics Norway's official labels (shipped as `src/data/industry_en.json`).
+- **Only the company's own social profiles.** A named account must resemble the company's
+  name or domain, so a parent group's account, an owner's personal brand or a supplier's
+  channel is not published as the company's; Facebook feed posts are not profiles. Tested
+  against the 76 profiles Builderr's own crawl confirmed: none removed.
 
 On the self-check harness's fixture sample (10 companies: 4 hand-verified
 with websites, plus 6 with no website on file to represent the ~89% majority
