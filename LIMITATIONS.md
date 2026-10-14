@@ -247,3 +247,16 @@ All permissive; no copyleft (GPL-style) obligations.
 - **Spans are verbatim.** A claim's span is text found in the cited response; where none can
   be found, the envelope falls back to the value, as before.
 
+## Known limits added 2026-10-14
+
+- **A registered website that is someone else's lends no content.** If a company's registered
+  site neither names it (org number or name) nor carries its name in the domain, its pages are
+  not used; a genuine site under an unrelated brand that never names the company therefore
+  contributes nothing beyond the registry's own statement of the website.
+- **Roles are read from static HTML.** Job lists drawn by script (ReachMee, some Teamtailor and
+  Webcruiter embeds) are not seen; the careers page itself is still reported. Job-board ads are
+  counted only when the company's own careers page links the individual ad; the ad page itself is
+  not fetched, so its employer field is not checked (a staffing company may list a client's ad).
+- **The homepage description is the company's own wording**, quoted as published (Norwegian or
+  English); descriptions that are cookie notices, placeholders or generic welcomes are skipped.
+

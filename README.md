@@ -245,6 +245,28 @@ company recall 100%, external precision 100%.
 Use `/self-score` to re-run the harness and quote fresh numbers, and
 `/guard-check` before any PR to confirm no standard has regressed.
 
+Fifth revision (2026-10-14), after Builderr's C300 estimate (74.59: recall 32.19, precision
+30.00, synthesis 8.40, UX 4.00; "5 of 43 verified hiring-bearing companies matched ... capture
+role title, direct URL, and company match"; a USBL article attributed to STRANDVEGEN BOLIGPARK AS):
+
+- **Only the company's own site lends content.** When a company registers a website that neither
+  names it nor carries its name in the domain (an owner's, a housing manager's or a chain's site),
+  the registered website is still reported, cited to the registry, but nothing read from its pages
+  is attributed to the company. On Builderr's 100-company sample this removed content for 3
+  companies, all of that kind.
+- **Role-level hiring.** Each open role a company's careers page lists is its own claim, "Open
+  role: <title> - <direct link>", sourced to that careers page (the company match): titles from
+  the heading inside a card or above a "Les mer" link, and individual ads on FINN, NAV's
+  arbeidsplassen and Jobbnorge when the company's own page lists them. Staff profiles,
+  ad-section headings and open applications are never roles. Measured on 120 companies:
+  role-level hiring for 3 -> 7 companies, 30 roles, each hand-checked. A longer NAV feed window
+  (120 days) was measured and not built: 0 more matched companies in 1,000.
+- **What the company does, in its own words.** The homepage description is quoted in the
+  summary (as Builderr's own sample shows it), with the registered activity as the fallback.
+- **Viewer.** A website-identity panel per company (how the site was proven to be the company's,
+  with the quoted text and page hash), a one-line run audit above the list, labelled coverage,
+  and touch-sized compare checkboxes.
+
 ## Cost and optional keys
 
 **Expected cost per official run: $0.** No model, no paid API and no key is used.
