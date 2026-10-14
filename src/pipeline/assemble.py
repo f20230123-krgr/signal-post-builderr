@@ -96,7 +96,7 @@ def _legal_name_claim(entity: ResolvedEntity, confirmed_facts: Optional[list[Con
 _COOP_WORDS = {"sameiet", "sameie", "boligsameie", "boligsameiet", "borettslag", "brl", "andelslag", "eierseksjonssameie", "as", "sa"}
 
 
-def _domain_resembles_name(site: Optional[str], legal_name: str) -> bool:
+def domain_resembles_name(site: Optional[str], legal_name: str) -> bool:
     """Whether a website's domain plainly belongs to this name: st-olav.no for
     SAMEIET ST OLAV, not bate.no."""
     if not site:
@@ -138,7 +138,7 @@ def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[Confirmed
         # A housing co-op often registers its property manager's website as its own
         # (SAMEIET ST OLAV -> bate.no). That domain belongs to another company: unless the
         # site itself names the co-op (handled above), say we cannot be sure.
-        if entity.legal_name and is_housing_coop(entity.legal_name) and not _domain_resembles_name(
+        if entity.legal_name and is_housing_coop(entity.legal_name) and not domain_resembles_name(
             entity.official_site_candidate, entity.legal_name
         ):
             return Claim(value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None)

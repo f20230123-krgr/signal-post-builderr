@@ -915,3 +915,27 @@ def test_the_manifest_employee_count_is_used_when_the_live_record_cannot_be_read
     profile = _default_process_one("923609016", BudgetGovernor(), universe_entry=universe_entry, client=client)
 
     assert profile.legal_identity.employee_count.value == "11"
+
+
+def test_a_registered_site_that_is_someone_elses_lends_no_content_to_the_company():
+    """STRANDVEGEN BOLIGPARK AS registers usbl.no (its owner's site): a USBL article was
+    published as its news. Unless the site names the company or the domain carries its name,
+    nothing read from the site's pages is attributed to it; the registered website stands."""
+    record = {"organisasjonsnummer": "923609016", "navn": "STRANDVEGEN BOLIGPARK AS", "hjemmeside": "usbl.no", "historiskeNavn": []}
+    manager_page = """<html><head><title>USBL</title></head><body>
+      <article><h2>Nye boliger i Trondheim</h2><time datetime="2026-09-01">1. september 2026</time></article>
+      <footer><a href="https://www.facebook.com/usbl.no">Facebook</a> USBL, org.nr 938 011 487</footer></body></html>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(200, json=record)
+        if request.url.host in ("usbl.no", "www.usbl.no"):
+            return httpx.Response(200, text=manager_page)
+        return httpx.Response(404)
+
+    profile = _default_process_one("923609016", BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert profile.online_presence.official_site.value in ("https://usbl.no", "http://usbl.no", "usbl.no")
+    assert profile.online_presence.company_profiles == []
+    assert not [c for c in profile.activity.dated_activity if c.value and "Nye boliger" in c.value]

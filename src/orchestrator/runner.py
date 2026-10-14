@@ -33,7 +33,7 @@ import dataclasses
 
 from src.models.profile import CompanyProfile, EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
-from src.pipeline.assemble import assemble
+from src.pipeline.assemble import assemble, domain_resembles_name
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
 from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.render import active_renderer
@@ -342,6 +342,13 @@ def _default_process_one(
         site_evidence = official_site_evidence(pages, crawl_entity)
         if site_evidence:
             confirmed_facts.append(site_evidence)
+        elif not domain_resembles_name(crawl_entity.official_site_candidate, crawl_entity.legal_name or ""):
+            # The company registered a site that neither names it nor carries its name in the
+            # domain: often its owner's or manager's site (STRANDVEGEN BOLIGPARK AS registers
+            # usbl.no, and a USBL article was published as its news). The registry's own
+            # statement of the website stands; nothing read from that site's pages is
+            # attributed to this company.
+            confirmed_facts = []
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
     confirmed_facts += registry_facts
