@@ -68,7 +68,13 @@ a { color: var(--accent); }
 .list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; }
 .row { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .row.sel { background: var(--accent-soft); }
-.pick { align-self: center; margin: 0 0 0 12px; width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.pick { align-self: center; margin: 0 0 0 10px; width: 24px; height: 24px; padding: 10px; box-sizing: content-box; accent-color: var(--accent); flex: none; cursor: pointer; }
+.found { color: var(--muted); font-size: .75rem; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.audit { margin: 4px 0 0; color: var(--muted); font-size: .8rem; line-height: 1.4; }
+.identity dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 8px 0 0; }
+.identity dt { color: var(--muted); }
+.identity dd { margin: 0; overflow-wrap: anywhere; }
+.identity .why { margin: 0; color: var(--ink); }
 .item { flex: 1; text-align: left; background: transparent; border: 0; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
 .item .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .sub { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -220,6 +226,7 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
         <input id="q" type="search" placeholder="Search name, org. number, industry, website" aria-label="Search companies" autocomplete="off">
         <kbd aria-hidden="true">/</kbd>
       </div>
+      <p class="audit" id="audit"></p>
       <div class="chips" id="filters" role="group" aria-label="Filters"></div>
       <div class="row-tools">
         <span id="count" aria-live="polite"></span><span class="sp"></span>
@@ -412,7 +419,8 @@ function renderList() {
     '<span class="nm">' + esc(c.name) + "</span>" +
     '<span class="sub"><span class="mono">' + esc(c.org) + "</span>" + (c.industry ? " &middot; " + esc(c.industry.replace(/^\d+\.\d+\s*/, "")) : "") + "</span>" +
     (c.headline ? '<span class="sub hl">' + esc(c.headline) + "</span>" : "") +
-    '<span class="dots" title="' + c.score + " of " + FLAGS.length + ' information types found">' + FLAGS.map(f => '<i class="' + (c.flags[f[0]] ? "on" : "") + '"></i>').join("") + "</span>" +
+    '<span class="dots" title="' + c.score + " of " + FLAGS.length + ' information types found">' + FLAGS.map(f => '<i class="' + (c.flags[f[0]] ? "on" : "") + '"></i>').join("") +
+    '<span class="found">' + c.score + " of " + FLAGS.length + " found</span></span>" +
     "</button></li>").join("") +
     (rows.length > shown.length ? '<li class="more"><button class="btn" id="moreBtn" type="button">Show ' + Math.min(60, rows.length - shown.length) + " more</button></li>" : "")
     : '<li class="empty">No company matches. Clear a filter or change the search.</li>';
@@ -548,6 +556,31 @@ function topicOf(x, i, n) {
   if (hit) return TOPIC[hit];
   return /^First run|^No material|^Since the previous run/.test(x.text) ? "Changes" : "Gaps";
 }
+// Why this website was published as the company's: how its identity was proven, from the
+// website claim's own evidence (no extra data needed).
+function identityHtml(c) {
+  const site = c.ok("official_website")[0];
+  const missing = c.all("official_website").find(x => x.availability !== "available");
+  if (!site) {
+    if (missing && missing.availability === "ambiguous") return '<div class="card identity"><h2>Website identity</h2><p class="why">A website is registered for this company, but it belongs to another organisation (for example a property manager), so it is not published as this company\'s own.</p></div>';
+    return "";
+  }
+  const e = c.ev[(site.evidence_ids || [])[0]] || {};
+  const span = e.claim_span || "";
+  const digits = span.replace(/\D/g, "");
+  let why;
+  if (e.source_class === "official_registry") why = "Registered by the company in the Brønnøysund Register: the registry record lists this website. Content from its pages is used only when the site itself names the company.";
+  else if (digits.indexOf(c.org) >= 0) why = "The website itself shows this company's organisation number.";
+  else if (/telefon|phone|tlf|\d{2} ?\d{2} ?\d{2} ?\d{2}|\d{4} [A-ZÆØÅ]/i.test(span)) why = "The website shows the company's registered phone number or address.";
+  else why = "The website names the company.";
+  const src = isUrl(e.source_url) ? '<a href="' + esc(e.source_url) + '" target="_blank" rel="noopener noreferrer">' + esc(e.source_url) + "</a>" : esc(e.source_url || "");
+  return '<div class="card identity"><h2>Website identity</h2><p class="why">' + esc(why) + "</p><dl>" +
+    "<dt>Website</dt><dd>" + valueHtml(site.value) + "</dd>" +
+    "<dt>Proven by</dt><dd>" + src + "</dd>" +
+    (span ? '<dt>Quoted</dt><dd class="mono">' + esc(span.slice(0, 160)) + "</dd>" : "") +
+    "<dt>Checked</dt><dd>" + esc(e.retrieved_at || "") + "</dd>" +
+    '<dt>Page hash</dt><dd class="mono">' + esc((e.content_sha256 || "").slice(0, 16)) + "…</dd></dl></div>";
+}
 // The headline minus the registry status, which the header already shows as a pill.
 function headlineFacts(c) {
   const rest = c.status && c.headline.toLowerCase().indexOf(c.status.toLowerCase()) === 0 ? c.headline.slice(c.status.length).replace(/^,\s*/, "") : c.headline;
@@ -570,6 +603,7 @@ function renderCompany(c) {
     '<button class="btn" id="jsonBtn" type="button">Envelope JSON</button><button class="btn" id="linkBtn" type="button">Copy link</button></div></div></div>' +
     '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + gaps +
     ((s.changes || []).length ? '<div class="changes">Changes since the last run: ' + esc(s.changes.join("; ")) + "</div>" : "") + "</div>" +
+    identityHtml(c) +
     '<div class="card facts"><h2>Every fact, with its source</h2><div class="legend">' +
     '<span style="--c:var(--reg)">Official registry</span><span style="--c:var(--own)">Company-owned</span><span style="--c:var(--ext)">External</span></div>' +
     SECTIONS.map(sec => section(c, sec[0], sec[1])).join("") + "</div></div>";
@@ -731,6 +765,12 @@ try { if (localStorage.getItem("atlas-theme") === "light") setTheme("light"); } 
 
 $("#asof").textContent = (DATA.title ? DATA.title + " · " : "") + "Data as of " + DATA.as_of + " · " + fmt(companies.length) + " companies";
 $("#siteLinks").innerHTML = (DATA.links || []).map(l => '<a class="btn ghost" href="' + esc(l.href) + '">' + esc(l.label) + "</a>").join("");
+// One line of run audit above the list, on every screen size: what this run is and why it can be trusted.
+(function audit() {
+  const claims = companies.reduce((s, c) => s + c.claims.filter(x => x.availability === "available").length, 0);
+  const keys = Object.values(DATA.search_keys || {}).some(v => v === "active") ? "optional search keys used" : "no API keys or paid services";
+  $("#audit").textContent = fmt(companies.length) + " companies, one result each · " + fmt(claims) + " verified claims, each linked to its source and date · " + keys;
+})();
 renderTools(); renderTray(); route();
 $("#main").dataset.ready = "1";
 })();
