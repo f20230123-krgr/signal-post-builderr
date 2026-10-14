@@ -346,7 +346,58 @@ def _meta_tag_facts(html: str, source_url: str, extracted_at: datetime) -> list[
     if canonical and canonical.group(1):
         facts.append(RawFact("official_site", canonical.group(1), source_url, "structured", extracted_at))
 
+    description = _site_description(html, source_url)
+    if description:
+        raw, text = description
+        facts.append(RawFact("site_description", text, source_url, "structured", extracted_at, evidence_span=raw))
+
     return facts
+
+
+# What the company says it does, in its own words: the homepage's meta description (or
+# og:description). Builderr's own sample site shows exactly this as "What the company does".
+# Only the homepage: a sub-page's description describes that page, not the company.
+_META_DESCRIPTION_RES = (
+    re.compile(r'<meta\s[^>]*name\s*=\s*["\']description["\'][^>]*content\s*=\s*"([^"]*)"', re.IGNORECASE),
+    re.compile(r'<meta\s[^>]*content\s*=\s*"([^"]*)"[^>]*name\s*=\s*["\']description["\']', re.IGNORECASE),
+    re.compile(r'<meta\s[^>]*property\s*=\s*["\']og:description["\'][^>]*content\s*=\s*"([^"]*)"', re.IGNORECASE),
+    re.compile(r'<meta\s[^>]*content\s*=\s*"([^"]*)"[^>]*property\s*=\s*["\']og:description["\']', re.IGNORECASE),
+)
+_JUNK_DESCRIPTION_RE = re.compile(
+    r"cookie|informasjonskaps|javascript|just another wordpress|lorem ipsum|under (construction|utvikling)|"
+    r"kommer snart|coming soon|domain (is )?for sale|domenet|parkert|page not found|side ikke funnet|"
+    r"^(velkommen|welcome)( til| to)? [^.]{0,40}\.?$|^(hjem|home|forside)$",
+    re.IGNORECASE,
+)
+_MIN_SITE_DESCRIPTION = 40
+_MAX_SITE_DESCRIPTION = 300
+
+
+def _is_homepage(url: str) -> bool:
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return False
+    segments = [s for s in path.split("/") if s]
+    return not segments or (len(segments) == 1 and re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?|index\.(?:html?|php)", segments[0], re.IGNORECASE) is not None)
+
+
+def _site_description(html: str, page_url: str) -> Optional[tuple[str, str]]:
+    """(the attribute text as written, the description as plain text), or None."""
+    if not _is_homepage(page_url):
+        return None
+    for pattern in _META_DESCRIPTION_RES:
+        match = pattern.search(html)
+        if not match:
+            continue
+        raw = match.group(1)
+        text = re.sub(r"\s+", " ", html_lib.unescape(raw)).strip()
+        if len(text) < _MIN_SITE_DESCRIPTION or len(text.split()) < 6 or _JUNK_DESCRIPTION_RE.search(text):
+            continue
+        if len(text) > _MAX_SITE_DESCRIPTION:
+            text = text[:_MAX_SITE_DESCRIPTION].rsplit(" ", 1)[0].rstrip(",;:") + " ..."
+        return raw, text
+    return None
 
 
 # Company-owned social profiles, extracted from plain markup rather than only

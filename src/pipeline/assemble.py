@@ -249,7 +249,7 @@ def _limit_careers_claims(claims: list[Claim]) -> list[Claim]:
     careers = [c for c in claims if is_careers(c)]
     if len(careers) <= MAX_CAREERS_CLAIMS:
         return claims
-    role_level = [c for c in careers if " open roles" in c.value]
+    role_level = [c for c in careers if " open role" in c.value]
     keep = role_level[:MAX_CAREERS_CLAIMS] or sorted(careers, key=lambda c: len(c.value))[:MAX_CAREERS_CLAIMS]
     return [c for c in claims if not is_careers(c) or c in keep]
 
@@ -332,6 +332,7 @@ def assemble(
         operating_status=_optional_identity_claim("operating_status"),
         founded_date=_optional_identity_claim("founded_date"),
         business_description=_optional_identity_claim("business_description"),
+        site_description=_optional_identity_claim("site_description"),
     )
     account_metrics = {
         name: claims

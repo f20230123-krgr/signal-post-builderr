@@ -38,6 +38,9 @@ if TYPE_CHECKING:  # extract.py imports crawl.py, which imports this module
 CAREERS_VALUE_PREFIX = "Careers page"
 # A page that is one job ad (reached from the careers page) but carries no JobPosting data.
 JOB_AD_VALUE_PREFIX = "Job ad"
+# One open role, listed on the company's careers page: "Open role: <title> - <direct url>".
+ROLE_VALUE_PREFIX = "Open role"
+MAX_ROLE_CLAIMS = 15
 
 # What the VISIBLE TEXT of a careers link says. Anchored on purpose: an anchor
 # that merely contains "jobb" ("Slik jobber vi med baerekraft") or "bli med"
@@ -72,7 +75,7 @@ _CAREERS_HOST_RE = re.compile(r"^(careers?|karriere|jobs?|jobb)\.", re.IGNORECAS
 _JOB_DETAIL_RE = re.compile(
     r"/[\w-]*(stilling|position|vacanc|ledig|opening|annonse|apply)[\w-]*/[^/?#]+"
     r"|/(jobs?|jobb|jobber|careers?|karriere)/\d{4,}[^/?#]*"
-    r"|[?&](jobid|job_id|adid|positionid|id)=\d+|/\d{5,}",
+    r"|[?&](jobid|job_id|adid|positionid|id)=\d+|/\d{5,}(?=[-_/?#.]|$)",
     re.IGNORECASE,
 )
 # Pages of an applicant-tracking system that are the company's back office or a login, not
@@ -234,33 +237,110 @@ def role_links(
 ) -> list[tuple[str, str]]:
     """Distinct (title, url) pairs for individual job ads listed on the page.
 
-    Only links that stay on the page's own site, or go to a known applicant-
-    tracking platform, count: a careers page that links out to a general job
-    board is not listing this company's roles. Footer and legal links ("Terms
-    of use", "Privacy") that sit on every page never count."""
+    Only links that stay on the page's own site, go to a known applicant-tracking
+    platform, or are an individual ad on a public job board (FINN, NAV's
+    arbeidsplassen, Jobbnorge) count: the company's own careers page listing them is
+    what ties them to the company. Footer and legal links never count.
+
+    The title is the link's own text, or the heading inside the link when the link is a
+    whole card (title plus teaser), or the heading just above it when the link only says
+    "Read more" / "Les mer på finn.no"."""
     page_key = page_url.split("#")[0].rstrip("/")
     page_base = _base_domain(_domain(page_url))
     seen_titles: set[str] = set()
     seen_urls: set[str] = set()
     roles: list[tuple[str, str]] = []
-    for url, text in _anchors(html, page_url):
+    for url, text, inner, cleaned, start in _anchor_items(html, page_url):
         key = url.split("#")[0].rstrip("/")
         if key == page_key or key in seen_urls:
             continue
+        board_ad = bool(_JOB_BOARD_AD_RE.search(url))
         domain = _domain(url)
-        if _base_domain(domain) != page_base and not (ats_domains and _on_any(domain, ats_domains)):
+        if _base_domain(domain) != page_base and not (ats_domains and _on_any(domain, ats_domains)) and not board_ad:
             continue
-        if not (_MIN_TITLE_LEN <= len(text) <= _MAX_TITLE_LEN) or _NAV_TEXT_RE.match(text) or _BOILERPLATE_TEXT_RE.search(text):
+        if not (_JOB_DETAIL_RE.search(url) or board_ad) or _NOT_A_ROLE_PATH_RE.search(url):
             continue
-        if not _JOB_DETAIL_RE.search(url):
+        title = _role_title(text, inner, cleaned, start)
+        if title is None or _NAV_TEXT_RE.match(title) or _BOILERPLATE_TEXT_RE.search(title) or _AD_SECTION_RE.match(title):
             continue
-        title_key = text.lower()
+        title_key = title.lower()
         if title_key in seen_titles:
             continue
         seen_titles.add(title_key)
         seen_urls.add(key)
-        roles.append((text, url))
+        roles.append((title, url))
     return roles
+
+
+# An individual ad on a public job board, linked from the company's own careers page.
+_JOB_BOARD_AD_RE = re.compile(
+    r"finn\.no/job/(?:[a-z]+/)?ad(?:\.html\?finnkode=|/)\d+"
+    r"|arbeidsplassen\.nav\.no/stillinger/stilling/[0-9a-f-]{36}"
+    r"|jobbnorge\.no/(?:ledige-stillinger/stilling|vacancies/job|en/available-jobs/job)/\d+",
+    re.IGNORECASE,
+)
+# Link texts that point at an ad without naming it: the title is the heading above.
+_GENERIC_LINK_RE = re.compile(
+    r"^(les\s+mer|read\s+more|se\s+(stilling(en)?|annonsen?|mer)|mer\s+info(rmasjon)?|more\s+info|søk(\s+her|\s+nå)?|"
+    r"apply(\s+(now|here))?|vis\s+stilling|til\s+annonsen|les\s+om(\s+stillingen)?)\b|finn\.no$",
+    re.IGNORECASE,
+)
+_HEADING_INSIDE_RE = re.compile(r"<(h[1-6]|strong|b)\b[^>]*>(.*?)</\1>", re.IGNORECASE | re.DOTALL)
+_HEADING_BEFORE_RE = re.compile(r"<(h[1-6])\b[^>]*>(.*?)</\1>", re.IGNORECASE | re.DOTALL)
+_BLOCK_SPLIT_RE = re.compile(r"<(?:br|/?p|/?div|/?span|/?h[1-6]|/?li)\b[^>]*>", re.IGNORECASE)
+_LOOKBACK_CHARS = 1500
+# Pages of a careers site that are not ads: staff profiles (karriere.dips.com/no/people/<id>-<name>
+# was published as eight "roles"), departments, locations, posts.
+_NOT_A_ROLE_PATH_RE = re.compile(r"/(people|employees|ansatte|team|departments|avdelinger|locations|lokasjoner|blog|posts|news|nyheter|stories|events)(/|$)", re.IGNORECASE)
+# Section headings inside a job ad ("Vi kan tilby", "Arbeidsoppgaver"), never a role's title.
+_AD_SECTION_RE = re.compile(
+    r"^(vi\s+(kan\s+)?tilbyr?|vi\s+søker|arbeidsoppgaver|ansvar(sområder)?|kvalifikasjoner|ønskede\s+kvalifikasjoner|"
+    r"personlige\s+egenskaper|om\s+(oss|stillingen|selskapet)|hvem\s+er\s+vi|søknad(sfrist)?|kontakt(person)?|"
+    r"we\s+offer|responsibilities|qualifications|about\s+(us|the\s+role)|how\s+to\s+apply|om\s+arbeidsgiver(en)?|"
+    r"(send\s+(en\s+|inn\s+)?)?åpen\s+søknad|open\s+application|vil\s+du\s+vite\s+mer|søk(e)?\s+på\s+stillingen)\b|:$",
+    re.IGNORECASE,
+)
+
+
+def _anchor_items(html: str, base_url: str) -> list[tuple[str, str, str, str, int]]:
+    """(absolute url, visible text, inner html, cleaned page html, anchor position)."""
+    cleaned = _SCRIPT_STYLE_RE.sub(" ", html)
+    out = []
+    for match in _ANCHOR_RE.finditer(cleaned):
+        attrs, inner = match.group(1), match.group(2)
+        href = _HREF_ATTR_RE.search(attrs)
+        if not href:
+            continue
+        raw = unescape(href.group(1).strip())
+        if raw.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        try:
+            out.append((urljoin(base_url, raw), _text(inner), inner, cleaned, match.start()))
+        except ValueError:  # malformed href: skip it, don't fail the page
+            continue
+    return out
+
+
+def _fits(title: str) -> bool:
+    return _MIN_TITLE_LEN <= len(title) <= _MAX_TITLE_LEN
+
+
+def _role_title(text: str, inner: str, cleaned: str, start: int) -> Optional[str]:
+    heading = _HEADING_INSIDE_RE.search(inner)
+    if heading and _fits(_text(heading.group(2))):
+        return _text(heading.group(2))
+    if not text or _GENERIC_LINK_RE.search(text):
+        before = list(_HEADING_BEFORE_RE.finditer(cleaned[max(0, start - _LOOKBACK_CHARS):start]))
+        if before and _fits(_text(before[-1].group(2))):
+            return _text(before[-1].group(2))
+        return None
+    if _fits(text):
+        return text
+    for piece in _BLOCK_SPLIT_RE.split(inner):  # a whole card: its first line is the title
+        first = _text(piece)
+        if first:
+            return first if _fits(first) else None
+    return None
 
 
 _TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -313,10 +393,23 @@ def careers_page_facts(
         return []
 
     roles = role_links(html, page_url, ats_domains)
-    if len(roles) >= MIN_ROLE_LINKS:
-        title = roles[0][0]
-        value = f"{CAREERS_VALUE_PREFIX} lists {len(roles)} open roles, e.g. \"{title}\": {clean_page_url(page_url)}"
-        return [RawFact("hiring_signal", value, page_url, "text", extracted_at, context_name=context_name, evidence_span=title)]
+    # One ad on a job board or applicant-tracking platform, listed by the company's own careers
+    # page, is as clear as two on its own site.
+    off_site = [r for r in roles if _base_domain(_domain(r[1])) != _base_domain(_domain(page_url))]
+    if len(roles) >= MIN_ROLE_LINKS or off_site:
+        page = clean_page_url(page_url)
+        facts = [RawFact(
+            "hiring_signal", f"{CAREERS_VALUE_PREFIX} lists {len(roles)} open role{'s' if len(roles) != 1 else ''}: {page}",
+            page_url, "text", extracted_at, context_name=context_name, evidence_span=roles[0][0],
+        )]
+        # Each role on its own: title and direct link, sourced to the company's careers page
+        # that lists it (the company match).
+        for title, url in roles[:MAX_ROLE_CLAIMS]:
+            facts.append(RawFact(
+                "hiring_signal", f"{ROLE_VALUE_PREFIX}: {title} - {clean_page_url(url)}", page_url, "text", extracted_at,
+                context_name=context_name, evidence_span=title,
+            ))
+        return facts
 
     # A single job ad is not "a careers page". With its own JobPosting data the role is
     # published from that (title and posting date); without it, the claim says what it is.
@@ -334,7 +427,7 @@ def careers_page_facts(
 
 _JOB_POSTING_RE = re.compile(r'"@type"\s*:\s*"JobPosting"', re.IGNORECASE)
 # Query parameters that only track a visit; a parameter that names the page (?id=42) stays.
-_TRACKING_PARAM_RE = re.compile(r"^(utm_\w+|gclid|fbclid|mc_\w+|ref|source|src|trk)$", re.IGNORECASE)
+_TRACKING_PARAM_RE = re.compile(r"^(utm_\w+|gclid|fbclid|mc_\w+|ref|source|src|trk|link_source\w*)$", re.IGNORECASE)
 _LANGUAGE_SEGMENT_RE = re.compile(r"^[a-z]{2}(?:[-_][a-z]{2})?$", re.IGNORECASE)
 
 

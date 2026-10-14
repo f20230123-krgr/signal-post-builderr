@@ -86,12 +86,16 @@ def test_a_page_listing_open_roles_is_a_role_level_signal_with_the_title_as_span
         '<a href="/stillinger/">Se alle stillinger</a>'
     )
 
-    [fact] = careers_page_facts(html, "https://www.example.no/karriere", NOW)
+    page, *roles = careers_page_facts(html, "https://www.example.no/karriere", NOW)
 
-    assert fact.field_name == "hiring_signal"
-    assert fact.value == f'{CAREERS_VALUE_PREFIX} lists 2 open roles, e.g. "Backend-utvikler": https://www.example.no/karriere'
-    assert fact.evidence_span == "Backend-utvikler"
-    assert fact.evidence_span in html
+    assert page.field_name == "hiring_signal"
+    assert page.value == f"{CAREERS_VALUE_PREFIX} lists 2 open roles: https://www.example.no/karriere"
+    # Each role on its own (official feedback: "capture role title, direct URL, and company match").
+    assert [r.value for r in roles] == [
+        "Open role: Backend-utvikler - https://www.example.no/stillinger/backend-utvikler",
+        "Open role: Elektriker - https://www.example.no/stillinger/elektriker",
+    ]
+    assert all(r.evidence_span in html and r.source_url == "https://www.example.no/karriere" for r in roles)
 
 
 def test_navigation_links_are_not_counted_as_roles():
@@ -252,10 +256,31 @@ def test_footer_and_terms_links_on_a_job_ad_page_are_not_roles():
     assert fact.value == f"Job ad: {url}"  # the ad page as what it is, never invented roles
 
 
-def test_roles_linked_to_a_general_job_board_are_not_this_companys_roles():
-    html = _page('<a href="https://www.finn.no/job/ad/111111">Sjåfør</a><a href="https://www.finn.no/job/ad/222222">Lagerarbeider</a>')
+def test_individual_job_board_ads_listed_by_the_companys_careers_page_are_its_roles_but_searches_are_not():
+    """nordicdoor.no/ledige-stillinger/ lists its own FINN ads, each under a heading, with the
+    link text "Les mer på finn.no": the title is the heading above the link."""
+    html = _page(
+        '<h3>Sjåfør</h3><p>Fast stilling</p><a href="https://www.finn.no/job/ad/111111">Les mer på finn.no</a>'
+        '<h3>Lagerarbeider</h3><a href="https://www.finn.no/job/ad/222222">Les mer på finn.no</a>'
+        '<a href="https://www.jobbnorge.no/search?term=acme">Jobbnorge.no</a>'
+    )
 
-    assert role_links(html, "https://www.example.no/karriere", DEFAULT_ATS_DOMAINS) == []
+    assert role_links(html, "https://www.example.no/karriere", DEFAULT_ATS_DOMAINS) == [
+        ("Sjåfør", "https://www.finn.no/job/ad/111111"), ("Lagerarbeider", "https://www.finn.no/job/ad/222222"),
+    ]
+
+
+def test_a_card_link_takes_its_heading_as_the_title_not_the_whole_teaser():
+    """backe.no wraps each Webcruiter ad in a card: title plus teaser in one link."""
+    html = _page(
+        '<a href="https://23392300.webcruiter.no/Main/Recruit/Public/5173322543"><h3>Sommerstudenter</h3>'
+        "<p>Bli med og form fremtidens byggebransje sammen med oss i sommer, med spennende oppgaver og god oppfølging hele veien.</p></a>"
+    )
+
+    page, role = careers_page_facts(html, "https://backe.no/ledige-stillinger", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
+
+    assert role.value == "Open role: Sommerstudenter - https://23392300.webcruiter.no/Main/Recruit/Public/5173322543"
+    assert page.value == "Careers page lists 1 open role: https://backe.no/ledige-stillinger"
 
 
 def test_roles_on_a_known_ats_count_for_the_companys_careers_page():
@@ -327,9 +352,9 @@ def test_a_listing_at_the_root_of_a_careers_subdomain_counts_roles_under_its_own
         title="Careers - ORS",
     )
 
-    [fact] = careers_page_facts(html, "https://career.example.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
+    page, *roles = careers_page_facts(html, "https://career.example.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
 
-    assert "lists 2 open roles" in fact.value
+    assert "lists 2 open roles" in page.value and len(roles) == 2
 
 
 def test_malformed_links_on_a_real_page_are_skipped_not_fatal():
@@ -413,3 +438,31 @@ def test_the_crawl_follows_the_sites_contact_link_instead_of_guessing_paths():
     crawl(_entity("https://example.com/"), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)), follow_info=True)
 
     assert requested == ["https://example.com/", "https://example.com/kontakt"]
+
+
+def test_staff_profiles_and_ad_section_headings_are_never_roles():
+    """DIPS's careers site lists staff at /people/<id>-<name> (published as eight "roles"), and
+    a FINN link under the heading "Vi kan tilby" took that section heading as its title."""
+    html = _page(
+        '<a href="https://karriere.dips.com/no/people/3884219-rafael-martins">Rafael Martins Utviklingsleder</a>'
+        '<a href="https://karriere.dips.com/no/people/1979730-hanne-gunby">Hanne Gunby Utviklingsleder</a>'
+        '<h3>Vi kan tilby</h3><a href="https://www.finn.no/job/ad/449661794">Les mer på finn.no</a>'
+    )
+
+    assert role_links(html, "https://karriere.dips.com/no", DEFAULT_ATS_DOMAINS) == []
+
+
+def test_open_applications_section_labels_and_hashed_link_ids_are_not_roles():
+    """From the 120-company check: "Send en åpen søknad", "Om arbeidsgiveren:" and
+    NorgesGruppen's /link/<hex id> pages ("Vår arbeidsplass", "Varsling") were taken for roles;
+    "Les om stillingen →" takes the heading above it as the title."""
+    html = _page(
+        '<a href="/ledige-stillinger/apen-soknad-12345">Send en åpen søknad</a>'
+        '<h4>Om arbeidsgiveren:</h4><a href="https://www.finn.no/job/ad/476688637">Les mer på finn.no</a>'
+        '<a href="https://www.norgesgruppen.no/link/8027529e52d64d72aa">Vår arbeidsplass</a>'
+        '<h3>Nettverkstekniker</h3><a href="/ledige-stillinger/nettverkstekniker-54321">Les om stillingen →</a>'
+    )
+
+    assert role_links(html, "https://connectxnet.no/ledige-stillinger", DEFAULT_ATS_DOMAINS) == [
+        ("Nettverkstekniker", "https://connectxnet.no/ledige-stillinger/nettverkstekniker-54321"),
+    ]

@@ -17,7 +17,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
-from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX
+from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, ROLE_VALUE_PREFIX
 
 
 def _value_or_none(claim: Claim) -> str | None:
@@ -406,6 +406,12 @@ def _identity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
 def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
     """What the company itself registered that it does, quoted in the registry's own words
     (Norwegian, untranslated: a quote is not paraphrased)."""
+    # The company's own words on its homepage first (Builderr's sample site shows exactly this
+    # as "What the company does"), else what it registered as its activity.
+    own = profile.legal_identity.site_description
+    own_text = _value_or_none(own) if own is not None else None
+    if own_text:
+        return SummarySentence(f'In its own words: "{_opening(own_text, 160)}".', ["site_description"], [own])
     claim = profile.legal_identity.business_description
     text = _value_or_none(claim) if claim is not None else None
     if not text:
@@ -416,14 +422,14 @@ def _activity_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
 _MAX_ACTIVITY_QUOTE = 110
 
 
-def _opening(text: str) -> str:
+def _opening(text: str, limit: int = _MAX_ACTIVITY_QUOTE) -> str:
     """The opening of a registered activity, quoted as written: statutory purposes run to
     several lines of legal wording, and the summary is meant to be short. The full text is
     the claim's value."""
     text = text.rstrip(". ")
-    if len(text) <= _MAX_ACTIVITY_QUOTE:
+    if len(text) <= limit:
         return text
-    cut = text[:_MAX_ACTIVITY_QUOTE]
+    cut = text[:limit]
     clause = max(cut.rfind(", "), cut.rfind("; "))
     head = cut[:clause] if clause >= 40 else cut.rsplit(" ", 1)[0]
     return head.rstrip(",; ") + " ..."
@@ -662,22 +668,27 @@ def _online_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
 
     signals = [c for c in profile.activity.hiring_signals if c.state == EvidenceState.AVAILABLE and c.value]
     if signals:
-        def is_page(claim: Claim) -> bool:
-            return claim.value.startswith(CAREERS_VALUE_PREFIX) and " open roles" not in claim.value
-
-        first = sorted(signals, key=is_page)[0]  # role-level evidence first
-        if " open roles" in first.value:
-            count = re.search(r"lists (\d+) open roles", first.value)
-            parts.append(f"careers page lists {count.group(1)} open roles" if count else "careers page lists open roles")
-        elif first.value.startswith(CAREERS_VALUE_PREFIX):
-            parts.append("careers page")
-        elif first.value.startswith(JOB_AD_VALUE_PREFIX):
-            parts.append("a job ad on its careers pages")
+        roles = [c for c in signals if c.value.startswith(ROLE_VALUE_PREFIX)]
+        if roles:
+            # "3 open roles, e.g. "Elektriker"": counted from the role claims themselves.
+            title = roles[0].value[len(ROLE_VALUE_PREFIX) + 2:].rsplit(" - ", 1)[0]
+            many = len(roles) > 1
+            parts.append(f'{len(roles)} open role{"s" if many else ""}{", e.g." if many else ":"} "{title}"')
+            claims.extend(roles[:2])
         else:
-            title = re.sub(r"\s*\(published.*$| - NAV$", "", first.value).strip()
-            parts.append(f"hiring: {title}")
+            def is_page(claim: Claim) -> bool:
+                return claim.value.startswith(CAREERS_VALUE_PREFIX)
+
+            first = sorted(signals, key=is_page)[0]  # an ad before a bare careers page
+            if first.value.startswith(CAREERS_VALUE_PREFIX):
+                parts.append("careers page")
+            elif first.value.startswith(JOB_AD_VALUE_PREFIX):
+                parts.append("a job ad on its careers pages")
+            else:
+                title = re.sub(r"\s*\(published.*$| - NAV$", "", first.value).strip()
+                parts.append(f"hiring: {title}")
+            claims.append(first)
         fields.append("hiring_signal")
-        claims.append(first)
 
     news = _latest_news(profile)
     if news is not None:

@@ -36,7 +36,11 @@ def _rich_profile():
             available_claim("EQUINOR ENERGY, Forusbeen 50, 4035 STAVANGER (50 ansatte)"),
             available_claim("EQUINOR BERGEN, Sandsliveien 90, 5254 SANDSLI"),
         ],
-        hiring_signals=[available_claim('Careers page lists 3 open roles, e.g. "Engineer": https://equinor.com/careers')],
+        hiring_signals=[
+            available_claim("Careers page lists 2 open roles: https://equinor.com/careers"),
+            available_claim("Open role: Engineer - https://equinor.com/careers/engineer-1234"),
+            available_claim("Open role: Geologist - https://equinor.com/careers/geologist-5678"),
+        ],
         is_first_run=False,
         previous_run_timestamp=datetime(2026, 9, 24, tzinfo=timezone.utc),
         material_changes=["employee_count: '20000' -> '21000'"],
@@ -74,7 +78,7 @@ def test_the_summary_is_short_dated_and_covers_company_figures_people_web_and_ch
     )
     assert "Led by Anders Opedal (managing director) and Jon Erik Reinhardsen (chair of the board), with 1 more registered role holder." in text
     assert "2 registered sites, including Stavanger, Sandsli." in text
-    assert 'Online: equinor.com; careers page lists 3 open roles; latest news "Equinor opens new office" (2026-09-22).' in text
+    assert 'Online: equinor.com; 2 open roles, e.g. "Engineer"; latest news "Equinor opens new office" (2026-09-22).' in text
     assert "Since the previous run on 2026-09-24: employees 20000 -> 21000." in text
     assert len(text.split()) <= 120
 
@@ -190,11 +194,13 @@ def test_a_legal_form_without_a_plain_phrase_is_stated_as_its_code():
 
 def test_the_summary_says_careers_page_for_a_bare_page_and_hiring_for_an_ad():
     bare = make_profile(org_number="923609016", hiring_signals=[available_claim("Careers page: https://s.no/karriere")])
-    roles = make_profile(org_number="923609016", hiring_signals=[available_claim('Careers page lists 3 open roles, e.g. "X": https://s.no/k')])
+    roles = make_profile(org_number="923609016", hiring_signals=[
+        available_claim("Careers page lists 1 open role: https://s.no/k"), available_claim("Open role: Elektriker - https://s.no/k/elektriker-123"),
+    ])
     nav = make_profile(org_number="923609016", hiring_signals=[available_claim("Elektriker (published 2026-09-02, apply by 2026-10-31) - NAV")])
 
     assert "Online: careers page." in build_summary(bare).text
-    assert "careers page lists 3 open roles" in build_summary(roles).text
+    assert '1 open role: "Elektriker"' in build_summary(roles).text
     assert "hiring: Elektriker" in build_summary(nav).text
 
 
@@ -319,3 +325,15 @@ def test_an_unstated_industry_is_left_out_rather_than_printed():
     profile.legal_identity.industry = available_claim("00.000 Uoppgitt")
 
     assert "uoppgitt" not in build_summary(profile).text.lower()
+
+
+def test_the_companys_own_description_comes_first_and_the_registered_activity_is_the_fallback():
+    own = make_profile(org_number="979543883", legal_name=available_claim("DIPS AS"))
+    own.legal_identity.site_description = available_claim("DIPS utvikler helseteknologi og skaper løsninger for helsepersonell i norske sykehus og kommuner.")
+    own.legal_identity.business_description = available_claim("Utvikling og salg av programvare.")
+    registry_only = make_profile(org_number="979543883", legal_name=available_claim("DIPS AS"))
+    registry_only.legal_identity.business_description = available_claim("Utvikling og salg av programvare.")
+
+    assert 'In its own words: "DIPS utvikler helseteknologi' in build_summary(own).text
+    assert "Registered activity" not in build_summary(own).text
+    assert 'Registered activity: "Utvikling og salg av programvare".' in build_summary(registry_only).text

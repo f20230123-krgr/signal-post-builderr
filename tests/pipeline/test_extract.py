@@ -637,3 +637,14 @@ def test_json_ld_sameas_is_filtered_the_same_way_as_plain_links():
     profiles = [f.value for f in facts if f.field_name == "company_profile"]
 
     assert profiles == ["https://www.linkedin.com/company/acme-norge"]
+
+
+def test_the_homepage_description_is_what_the_company_says_it_does_and_junk_is_skipped():
+    good = '<html><head><meta name="description" content="DIPS utvikler helseteknologi og skaper l&oslash;sninger for helsepersonell."></head></html>'
+    cookie = '<html><head><meta name="description" content="Vi bruker informasjonskapsler for &aring; gi deg en bedre opplevelse p&aring; nettsiden."></head></html>'
+
+    [fact] = [f for f in extract(_inline_page(good, "https://www.dips.com/")) if f.field_name == "site_description"]
+    assert fact.value == "DIPS utvikler helseteknologi og skaper løsninger for helsepersonell."
+    assert fact.evidence_span in good
+    assert not [f for f in extract(_inline_page(cookie, "https://www.dips.com/")) if f.field_name == "site_description"]
+    assert not [f for f in extract(_inline_page(good, "https://www.dips.com/om-oss")) if f.field_name == "site_description"]

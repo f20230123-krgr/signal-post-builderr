@@ -59,6 +59,7 @@ def _claim_entries(profile: CompanyProfile) -> list[tuple[str, Claim]]:
             ("operating_status", profile.legal_identity.operating_status),
             ("founded_date", profile.legal_identity.founded_date),
             ("business_description", profile.legal_identity.business_description),
+            ("site_description", profile.legal_identity.site_description),
         )
         if claim is not None
     ]

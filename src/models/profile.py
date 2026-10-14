@@ -99,6 +99,8 @@ class LegalIdentity(BaseModel):
     # What the company registered that it does (its activity, or failing that its statutory
     # purpose), quoted from the live registry record.
     business_description: Optional[Claim] = None
+    # What the company says it does on its own homepage (meta description), quoted.
+    site_description: Optional[Claim] = None
 
 
 class AnnualAccounts(BaseModel):
