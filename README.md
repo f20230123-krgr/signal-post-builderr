@@ -266,6 +266,10 @@ role title, direct URL, and company match"; a USBL article attributed to STRANDV
 - **Viewer.** A website-identity panel per company (how the site was proven to be the company's,
   with the quoted text and page hash), a one-line run audit above the list, labelled coverage,
   and touch-sized compare checkboxes.
+- **What changed, even on a first run.** The summary states the latest dated changes the profile
+  already holds (management or board change, a recent renaming, the newest registry update), each
+  cited; the viewer shows Builderr's five data areas ("n/5 data", an "All five areas" filter,
+  "Most data found" first), as Builderr's own sample site does.
 
 ## Cost and optional keys
 
