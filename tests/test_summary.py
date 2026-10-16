@@ -100,7 +100,7 @@ def test_the_summary_names_the_newest_news_from_the_companys_own_pages_not_a_reg
     profile.activity.dated_activity = [
         available_claim("Registry record updated (Endring) on 2026-03-23 - X", source_class="official_registry")
     ]
-    assert "last registry update 2026-03-23" in build_summary(profile).text
+    assert "latest changes on record: registry record updated 2026-03-23." in build_summary(profile).text
 
 
 def test_a_revenue_decline_and_a_flat_year_are_stated_as_such():
@@ -337,3 +337,27 @@ def test_the_companys_own_description_comes_first_and_the_registered_activity_is
     assert 'In its own words: "DIPS utvikler helseteknologi' in build_summary(own).text
     assert "Registered activity" not in build_summary(own).text
     assert 'Registered activity: "Utvikling og salg av programvare".' in build_summary(registry_only).text
+
+
+def test_a_first_run_still_says_what_changed_from_the_dated_claims_it_holds():
+    """Builderr's synthesis criterion is "what the company does, what changed and what remains
+    unknown": a first run used to say only that there was nothing to compare with."""
+    profile = make_profile(org_number="938702675", legal_name=available_claim("AF GRUPPEN ASA"), leaders=[
+        available_claim("Amund Tøftum (Daglig leder)", effective_date="2020-09-14"),
+        available_claim("Morten Grongstad (Styrets leder)", effective_date="2026-07-02"),
+        available_claim("PRICEWATERHOUSECOOPERS AS (Revisor, org. no. 987009713)", effective_date="2026-08-01"),
+    ])
+    profile.run_timestamp = profile.run_timestamp.replace(year=2026, month=10, day=16)
+    profile.activity.dated_activity = [
+        available_claim("Registry record updated (Endring) on 2026-05-12 - Brønnøysundregistrene", source_class="official_registry"),
+        available_claim("Renamed from 'AF GRUPPEN AS' on 2023-01-10 - Brønnøysundregistrene", source_class="official_registry"),
+        available_claim("Renamed from 'VERY OLD AS' on 1999-01-01 - Brønnøysundregistrene", source_class="official_registry"),
+    ]
+
+    summary = build_summary(profile)
+
+    expected = ("First run, so no earlier snapshot to compare with; latest changes on record: board changed 2026-07-02, "
+                "renamed from 'AF GRUPPEN AS' on 2023-01-10, registry record updated 2026-05-12.")
+    assert expected in summary.text  # the 2020 managing-director date and the 1999 rename are not recent
+    sentence = next(s for s in summary.sentences if s.text.startswith("First run"))
+    assert sentence.claims and set(sentence.fields) == {"leader", "dated_activity"}

@@ -323,6 +323,13 @@ const FLAGS = [
   ["leaders", "Leadership"], ["workplaces", "Registered workplaces"]
 ];
 
+const AREAS = [
+  ["record", "Company record", c => c.name && (c.industry || c.form || c.status)],
+  ["financials", "Financials", c => c.flags.financials],
+  ["people", "People & locations", c => c.flags.leaders || c.flags.workplaces],
+  ["website", "Company website", c => c.flags.site],
+  ["activity", "Hiring & public activity", c => c.flags.hiring || c.flags.social || c.flags.news]
+];
 /* ---------- data ---------- */
 function prep(env) {
   const claims = env.claims || [];
@@ -361,6 +368,9 @@ function prep(env) {
     leaders: ok("leader").length > 0, workplaces: ok("workplace").length > 0
   };
   c.score = FLAGS.filter(f => c.flags[f[0]]).length;
+  // Builderr's own five data areas (its sample site's "5/5 data"), alongside our seven types.
+  c.area = AREAS.map(a => !!a[2](c));
+  c.areas = c.area.filter(Boolean).length;
   c.changed = (env.changes || []).length > 0;
   c.hay = [c.name, c.org, c.industry, c.site && host(c.site), one("public_brand")].filter(Boolean).join(" ").toLowerCase();
   return c;
@@ -369,15 +379,16 @@ const companies = DATA.envelopes.map(prep);
 const byOrg = Object.fromEntries(companies.map(c => [c.org, c]));
 
 /* ---------- state ---------- */
-const state = { q: "", filters: new Set(), sort: "name", limit: 60, picked: [], open: null, view: "home" };
+const state = { q: "", filters: new Set(), sort: "most", limit: 60, picked: [], open: null, view: "home" };
 const FILTERS = {
+  all5: ["All five areas", c => c.areas === AREAS.length],
   site: ["Website", c => c.flags.site], social: ["Social", c => c.flags.social], hiring: ["Hiring", c => c.flags.hiring],
   news: ["News", c => c.flags.news], leaders: ["Leadership", c => c.flags.leaders], financials: ["Financials", c => c.flags.financials],
   active: ["Active only", c => (c.status || "").toLowerCase() === "active"], changed: ["Changed", c => c.changed]
 };
 const SORTS = {
+  most: ["Most data found", (a, b) => b.areas - a.areas || b.score - a.score || a.name.localeCompare(b.name, "nb")],
   name: ["Name A-Z", (a, b) => a.name.localeCompare(b.name, "nb")],
-  complete: ["Most complete", (a, b) => b.score - a.score || a.name.localeCompare(b.name, "nb")],
   employees: ["Employees", (a, b) => (b.employees || -1) - (a.employees || -1)],
   revenue: ["Revenue", (a, b) => (b.revenue == null ? -Infinity : b.revenue) - (a.revenue == null ? -Infinity : a.revenue)]
 };
@@ -419,8 +430,8 @@ function renderList() {
     '<span class="nm">' + esc(c.name) + "</span>" +
     '<span class="sub"><span class="mono">' + esc(c.org) + "</span>" + (c.industry ? " &middot; " + esc(c.industry.replace(/^\d+\.\d+\s*/, "")) : "") + "</span>" +
     (c.headline ? '<span class="sub hl">' + esc(c.headline) + "</span>" : "") +
-    '<span class="dots" title="' + c.score + " of " + FLAGS.length + ' information types found">' + FLAGS.map(f => '<i class="' + (c.flags[f[0]] ? "on" : "") + '"></i>').join("") +
-    '<span class="found">' + c.score + " of " + FLAGS.length + " found</span></span>" +
+    '<span class="dots" title="' + esc(AREAS.map((a, i) => a[1] + (c.area[i] ? ": found" : ": not found")).join("; ")) + '">' + c.area.map(on => '<i class="' + (on ? "on" : "") + '"></i>').join("") +
+    '<span class="found">' + c.areas + "/" + AREAS.length + " data</span></span>" +
     "</button></li>").join("") +
     (rows.length > shown.length ? '<li class="more"><button class="btn" id="moreBtn" type="button">Show ' + Math.min(60, rows.length - shown.length) + " more</button></li>" : "")
     : '<li class="empty">No company matches. Clear a filter or change the search.</li>';
@@ -552,6 +563,7 @@ const TOPIC = {
   official_website: "Online", hiring_signal: "Hiring", dated_activity: "Latest"
 };
 function topicOf(x, i, n) {
+  if (/^First run|^No material|^Since the previous run/.test(x.text)) return "Changes";
   const hit = (x.fields || []).find(f => TOPIC[f]);
   if (hit) return TOPIC[hit];
   return /^First run|^No material|^Since the previous run/.test(x.text) ? "Changes" : "Gaps";
@@ -749,8 +761,8 @@ function togglePick(org, force) {
 }
 function exportCsv() {
   const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
-  const head = ["org_number", "name", "status", "industry", "employees", "revenue", "net_result", "currency", "website"].concat(FLAGS.map(f => f[0])).concat(["found_of_" + FLAGS.length]);
-  const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.revenue != null || c.result != null ? c.currency : "", c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score]));
+  const head = ["org_number", "name", "status", "industry", "employees", "revenue", "net_result", "currency", "website"].concat(FLAGS.map(f => f[0])).concat(["found_of_" + FLAGS.length, "areas_of_5"]);
+  const rows = filtered().map(c => [c.org, c.name, c.status, c.industry, c.employees, c.revenue, c.result, c.revenue != null || c.result != null ? c.currency : "", c.site].concat(FLAGS.map(f => c.flags[f[0]] ? 1 : 0)).concat([c.score, c.areas]));
   download("signalpost-companies.csv", [head].concat(rows).map(r => r.map(q).join(",")).join("\n"), "text/csv");
 }
 // Dark by default; the button switches to light and back, and the choice is remembered.
@@ -769,7 +781,8 @@ $("#siteLinks").innerHTML = (DATA.links || []).map(l => '<a class="btn ghost" hr
 (function audit() {
   const claims = companies.reduce((s, c) => s + c.claims.filter(x => x.availability === "available").length, 0);
   const keys = Object.values(DATA.search_keys || {}).some(v => v === "active") ? "optional search keys used" : "no API keys or paid services";
-  $("#audit").textContent = fmt(companies.length) + " companies, one result each · " + fmt(claims) + " verified claims, each linked to its source and date · " + keys;
+  const five = companies.filter(c => c.areas === AREAS.length).length;
+  $("#audit").textContent = fmt(companies.length) + " companies, one result each · " + fmt(claims) + " verified claims, each linked to its source and date · " + fmt(five) + " with data in all five areas · " + keys;
 })();
 renderTools(); renderTray(); route();
 $("#main").dataset.ready = "1";

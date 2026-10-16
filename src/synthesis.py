@@ -696,11 +696,7 @@ def _online_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         parts.append(f"latest news \"{headline}\" ({date})")
         fields.append("dated_activity")
         claims.append(claim)
-    elif (latest := _latest_dated(profile.activity.dated_activity)) is not None:
-        claim, date = latest
-        parts.append(f"last registry update {date}")
-        fields.append("dated_activity")
-        claims.append(claim)
+    # (The newest registry update is stated with the other dated changes, see _changes_on_record.)
 
     if not parts:
         return None
@@ -759,6 +755,63 @@ def humanize_change(change: str) -> str:
     return change
 
 
+_BOARD_ROLES = {"styrets leder", "styremedlem", "nestleder", "varamedlem"}
+_RECENT_ROLE_YEARS = 3
+_RECENT_RENAME_YEARS = 5
+_RENAMED_RE = re.compile(r"^Renamed from '(.+)' on (\d{4}-\d{2}-\d{2})")
+_REGISTRY_UPDATE_RE = re.compile(r"^Registry record updated .* on (\d{4}-\d{2}-\d{2})")
+
+
+def _changes_on_record(profile: CompanyProfile) -> Optional[tuple[list[str], list[str], list[Claim]]]:
+    """What changed, dated, from claims the profile already holds -- so even a first run can
+    say what changed: the latest change to the management or the board (the registry's own
+    last-changed date of that role group), a renaming in the last few years, and the newest
+    registry update. (phrases, fields, cited claims), or None when nothing is on record."""
+    today = profile.run_timestamp.date()
+    phrases: list[str] = []
+    fields: list[str] = []
+    claims: list[Claim] = []
+
+    def recent(day: str, years: int) -> bool:
+        return len(day) == 10 and int(day[:4]) >= today.year - years
+
+    newest: dict[str, tuple[str, Claim]] = {}
+    for claim in profile.leadership.leaders:
+        if claim.state != EvidenceState.AVAILABLE or not claim.value or not claim.effective_date:
+            continue
+        role = claim.value[:-1].rsplit(" (", 1)[-1].split(",")[0].strip().lower() if claim.value.endswith(")") else ""
+        group = "managing director" if role == "daglig leder" else "board" if role in _BOARD_ROLES else None
+        day = claim.effective_date[:10]
+        if group and recent(day, _RECENT_ROLE_YEARS) and (group not in newest or day > newest[group][0]):
+            newest[group] = (day, claim)
+    for group, (day, claim) in sorted(newest.items(), key=lambda item: item[1][0], reverse=True):
+        phrases.append(f"{group} changed {day}")
+        claims.append(claim)
+    if newest:
+        fields.append("leader")
+
+    renamed = None
+    updated = None
+    for claim in profile.activity.dated_activity:
+        if claim.state != EvidenceState.AVAILABLE or not claim.value:
+            continue
+        rename = _RENAMED_RE.match(claim.value)
+        if rename and recent(rename.group(2), _RECENT_RENAME_YEARS) and (renamed is None or rename.group(2) > renamed[1]):
+            renamed = (rename.group(1), rename.group(2), claim)
+        update = _REGISTRY_UPDATE_RE.match(claim.value)
+        if update and (updated is None or update.group(1) > updated[0]):
+            updated = (update.group(1), claim)
+    if renamed:
+        phrases.append(f"renamed from '{renamed[0]}' on {renamed[1]}")
+        claims.append(renamed[2])
+    if updated:
+        phrases.append(f"registry record updated {updated[0]}")
+        claims.append(updated[1])
+    if renamed or updated:
+        fields.append("dated_activity")
+    return (phrases, fields, claims) if phrases else None
+
+
 def build_summary(profile: CompanyProfile) -> Summary:
     """A short dated narrative (about 80 words): what the company is, how big and how it is
     doing, who runs it, where it is online, what changed, and what could not be found.
@@ -784,9 +837,17 @@ def build_summary(profile: CompanyProfile) -> Summary:
         unknowns.append("hiring signals")
 
     meta = profile.refresh_metadata
+    on_record = _changes_on_record(profile)
     if meta.is_first_run:
         changes: list[str] = []
-        sentences.append(SummarySentence("First run, so there is nothing earlier to compare with.", []))
+        if on_record:
+            phrases, fields, claims = on_record
+            sentences.append(SummarySentence(
+                "First run, so no earlier snapshot to compare with; latest changes on record: " + ", ".join(phrases) + ".",
+                fields, claims,
+            ))
+        else:
+            sentences.append(SummarySentence("First run, so there is nothing earlier to compare with.", []))
     elif meta.material_changes:
         changes = list(meta.material_changes)
         said = [humanize_change(c) for c in changes[:3]]
@@ -796,7 +857,14 @@ def build_summary(profile: CompanyProfile) -> Summary:
     else:
         changes = []
         previous = f" ({meta.previous_run_timestamp.date().isoformat()})" if meta.previous_run_timestamp else ""
-        sentences.append(SummarySentence(f"No material change since the previous run{previous}.", []))
+        if on_record:
+            phrases, fields, claims = on_record
+            sentences.append(SummarySentence(
+                f"No material change since the previous run{previous}; latest changes on record: " + ", ".join(phrases) + ".",
+                fields, claims,
+            ))
+        else:
+            sentences.append(SummarySentence(f"No material change since the previous run{previous}.", []))
     if unknowns:
         sentences.append(SummarySentence("Not found: " + ", ".join(unknowns) + ".", []))
 
