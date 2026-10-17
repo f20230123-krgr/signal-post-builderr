@@ -345,6 +345,9 @@ def nav_hiring_signal_facts(
                 content_hash=hashlib.sha256(response.content).hexdigest(),
                 extraction_method="structured",
                 source_class="external",
+                # The ad's own title, as the ad states it; the value adds our dates around it.
+                evidence_span=title.strip(),
+                effective_date=published,
             )
         )
     return facts
