@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-10-16T12-46-12Z",
+  "input_count": 1000,
+  "profile_count": 1000,
+  "universe_used": true,
+  "chunk_size": 100,
+  "chunk_count": 10,
+  "requests_used": 8727,
+  "outbound_requests_measured": 8727,
+  "outbound_requests_breakdown": {
+    "total": 8727,
+    "redirect_hops": 449,
+    "server_error_responses": 53,
+    "by_host": {
+      "data.brreg.no": 5195,
+      "api.duckduckgo.com": 830,
+      "pam-stilling-feed.nav.no": 77,
+      "www.usbl.no": 21,
+      "www.fruits.co": 16,
+      "www.insbo.no": 15,
+      "www.storebrand.no": 14,
+      "www.centennial.no": 14,
+      "connectxnet.no": 14,
+      "www.nifu.no": 14,
+      "www.mpstorkjokken.no": 14,
+      "www.tsbank.no": 13,
+      "peab.no": 13,
+      "insider.no": 12,
+      "www.zivid.com": 12
+    }
+  },
+  "request_safety_margin": 60,
+  "spend_used_usd": 0.0,
+  "spend_limits": {
+    "exa_first_round_only": false,
+    "max_search_spend_usd": null
+  },
+  "wall_clock_seconds": 1371.46,
+  "degraded_providers": {},
+  "search_keys": {
+    "exa": "absent",
+    "parallel": "absent"
+  },
+  "browser_rendering": {
+    "available": false
+  },
+  "nav_job_index": {
+    "pages_fetched": 62,
+    "requests_used": 63,
+    "active_ads_indexed": 8903,
+    "truncated_at_page_cap": false
+  }
+}
