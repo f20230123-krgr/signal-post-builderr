@@ -39,7 +39,7 @@ keys (`EXA_API_KEY`, `PARALLEL_API_KEY`), used only if set -- see "Cost and opti
 - `envelopes.jsonl` -- one submission envelope per input, matching the
   reference agent's `OUTPUT_CONTRACT.md` shape (`claims`/`evidence`/`run`/
   `changes`/`errors`/`operations`) plus a `summary` -- this is the file to submit
-- `report.html` -- **Signalpost Atlas**, a self-contained viewer of those same
+- `index.html` (also written as `report.html`) -- **Signalpost Atlas**, a self-contained viewer of those same
   envelopes (open it in any browser, no server): search and filter the
   companies, compare up to four side by side, and press *Evidence* on any fact
   to see its source link, retrieval time, reporting period, content hash and
@@ -48,6 +48,22 @@ keys (`EXA_API_KEY`, `PARALLEL_API_KEY`), used only if set -- see "Cost and opti
 - `run-report.json` -- machine-readable requests/spend/runtime totals, and which
   optional search keys the run had (`search_keys`)
 - `snapshots/` -- append-only `CompanyProfile` history (idempotent refresh)
+
+### Reviewing the output (find, compare, verify)
+
+After a run, open **`<out>/index.html`** in any browser, desktop or phone. It is one file with the
+data embedded: no server, no network, no install.
+
+1. **Find:** type a company name or organisation number in the search box (or filter: "All five
+   areas", Website, Hiring, ...). The list opens on "Most data found".
+2. **Compare:** tick two to four companies in the list, then press **Compare** in the bar at the
+   bottom: one table, differences highlighted.
+3. **Verify:** open a company and press **Evidence** next to any fact, or a numbered citation in the
+   summary: the source address, retrieval time, reporting period, content hash and the exact quoted
+   text. The "Website identity" card says how the website was proven to be the company's.
+
+The same viewer for the submitted smoke test is hosted at
+https://f20230123-krgr.github.io/signal-post-builderr/.
 
 **The summary.** Each envelope's `summary` is one short, dated narrative: what
 the company is and what it registered that it does (quoted), how its latest filed

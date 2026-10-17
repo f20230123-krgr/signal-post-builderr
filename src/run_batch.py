@@ -54,6 +54,9 @@ DEFAULT_UNIVERSE_PATH = Path("signalpost-company-universe-2025.jsonl.gz")
 # over it. 10 workers x (a fetch and a couple of redirects) fits well inside 60.
 REQUEST_SAFETY_MARGIN = 60
 
+# The self-contained results viewer, written under both names.
+VIEWER_FILES = ("index.html", "report.html")
+
 # Companies in flight at once. Research is network-bound (waiting on many different
 # company sites), so this sets wall-clock time far more than CPU does.
 DEFAULT_CONCURRENCY = 10
@@ -354,18 +357,26 @@ def main() -> None:
         # the newest ads.
         "nav_job_index": aggregate.get("nav_job_index"),
     }
+    run_report["viewer"] = {
+        "files": list(VIEWER_FILES),
+        "how_to_use": "Open index.html in any browser (no server needed): search by name or org. number, "
+                      "tick companies and press Compare, press Evidence on any fact for its source.",
+    }
     (args.out / "run-report.json").write_text(json.dumps(run_report, indent=2), encoding="utf-8")
 
     # Decision-useful synthesis + a legible desktop/mobile results view --
     # see src/synthesis.py / src/reporting.py.
     html_report = render_html_report(profiles, generated_at=datetime.now(timezone.utc), envelopes=envelopes, search_keys=key_status)
-    (args.out / "report.html").write_text(html_report, encoding="utf-8")
+    # The viewer is one self-contained file (data embedded, works offline from disk). It is
+    # written twice, as report.html and as index.html, the file a reviewer opens by default.
+    for viewer_name in VIEWER_FILES:
+        (args.out / viewer_name).write_text(html_report, encoding="utf-8")
 
     print(f"Produced {len(profiles)} profiles for {len(org_numbers)} inputs.")
     print(f"  envelopes: {args.out / 'envelopes.jsonl'}")
     print(f"  manifest:  {args.out / 'manifest.txt'}")
     print(f"  report:    {args.out / 'run-report.json'}")
-    print(f"  html view: {args.out / 'report.html'}")
+    print(f"  viewer:    {args.out / 'index.html'} (same as report.html; open it in a browser to find, compare and verify)")
 
     # Loud, last, and impossible to scroll past: a quiet key exhaustion looks
     # exactly like "this batch just had fewer discoverable websites", which
