@@ -357,12 +357,11 @@ DNS server could in principle answer differently the second time.
 Builderr scores the agent on companies it supplies at run time, not on precomputed
 profiles, so the corpus demonstrates scale; it is not a submission requirement. The hosted
 corpus (`corpus/` on the site, with its raw envelopes, run report and manifest to download)
-was generated keyless on 2026-10-07 by the submitted code with
+was generated keyless on 2026-10-16 by the previous commit (6d698b7; the final commit adds
+per-filing account citations, registry-only roles and verbatim receipts) with
 `python -m src.run_batch --input results/manifest.txt --out <dir>`: 1,000 / 1,000 profiles,
-8,720 real requests across 10 chunks, 42.5 minutes, $0; output audit clean. Websites 161,
-company-owned social profiles 62, hiring signals 15, site news 60, registered activity 973,
-roles for 997 companies, workplaces for all 1,000 (most companies in a random sample have no
-website). `results/` in this repository is the earlier 2026-10-04 run of the same companies,
+8,727 real requests across 10 chunks, 23 minutes, $0; output audit clean. The hosted smoke
+test is from the final commit. `results/` in this repository is the earlier 2026-10-04 run of the same companies,
 kept unchanged as history.
 
 ## Submitting
