@@ -250,7 +250,8 @@ All permissive; no copyleft (GPL-style) obligations.
 ## Known limits added 2026-10-14
 
 - **A registered website that is someone else's lends no content.** If a company's registered
-  site neither names it (org number or name) nor carries its name in the domain, its pages are
+  site neither names it (org number or name) nor carries its name in the domain (or, outside
+  housing co-ops, its initials: nkl.no for Norske Kokkers Landsforening), its pages are
   not used; a genuine site under an unrelated brand that never names the company therefore
   contributes nothing beyond the registry's own statement of the website.
 - **Roles are read from static HTML.** Job lists drawn by script (ReachMee, some Teamtailor and

@@ -113,7 +113,13 @@ def domain_resembles_name(site: Optional[str], legal_name: str) -> bool:
         joined = "".join(folded)
         if joined in label or (len(label) >= 4 and label in joined) or any(len(w) >= 4 and w in label for w in folded):
             return True
-    return False
+    # A domain spelling the name's initials (nkl.no for NORSKE KOKKERS LANDSFORENING, lmi-as.no for
+    # LUSTER MEKANISKE INDUSTRI AS): three letters or more, exactly, or with the legal form after.
+    # Never for a housing co-op, whose registered site is so often its manager's (obos.no, bob.no).
+    if is_housing_coop(legal_name):
+        return False
+    initials = "".join(w[0] for w in words if w[0].isalpha())
+    return len(initials) >= 3 and label in (initials, initials + "as", initials + "sa")
 
 
 def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[ConfirmedFact]) -> Claim:

@@ -266,7 +266,8 @@ Fifth revision (2026-10-14), after Builderr's C300 estimate (74.59: recall 32.19
 role title, direct URL, and company match"; a USBL article attributed to STRANDVEGEN BOLIGPARK AS):
 
 - **Only the company's own site lends content.** When a company registers a website that neither
-  names it nor carries its name in the domain (an owner's, a housing manager's or a chain's site),
+  names it nor carries its name (or, outside housing co-ops, its initials: nkl.no for Norske
+  Kokkers Landsforening) in the domain (an owner's, a housing manager's or a chain's site),
   the registered website is still reported, cited to the registry, but nothing read from its pages
   is attributed to the company. On Builderr's 100-company sample this removed content for 3
   companies, all of that kind.

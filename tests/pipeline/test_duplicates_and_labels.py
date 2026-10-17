@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import httpx
 
 from src.orchestrator.budget import BudgetGovernor
-from src.pipeline.assemble import assemble
+from src.pipeline.assemble import assemble, domain_resembles_name
 from src.pipeline.careers import careers_page_facts, careers_page_key, clean_page_url
 from src.pipeline.crawl import FetchedPage
 from src.models.profile import EvidenceState
@@ -132,6 +132,35 @@ def test_a_housing_coops_registered_manager_website_is_ambiguous_not_its_own():
     assert manager.online_presence.official_site.state == EvidenceState.AMBIGUOUS
     assert manager.online_presence.official_site.value is None
     assert own.online_presence.official_site.value == "https://st-olav.no"
+
+
+def test_a_domain_spelling_the_names_initials_resembles_it_but_never_for_a_housing_coop():
+    """NORSKE KOKKERS LANDSFORENING registers nkl.no, its own site: its content was dropped
+    because the domain did not resemble the name. Initials count (3+ letters, exact or with the
+    legal form after); the someone-else's-site cases the rule was built for stay rejected."""
+    own = [
+        ("https://www.nkl.no", "NORSKE KOKKERS LANDSFORENING"),
+        ("https://www.nsp.no", "NORDIC SUPPLY PARTNER AS"),
+        ("https://www.rbjas.no", "R B JOHANNESSEN AS"),
+        ("https://www.lmi-as.no", "LUSTER MEKANISKE INDUSTRI AS"),
+    ]
+    someone_elses = [
+        ("https://usbl.no", "STRANDVEGEN BOLIGPARK AS"),
+        ("https://www.vestbo.no", "SIVLESGATE 14 AS"),
+        ("https://www.vestbo.no", "STIFTELSEN HAVNAHUSET BU- OG SERVICESENTER"),
+        ("https://www.norskflid.no/butikker/holmestrand/", "HUSFLIDEN HOLMESTRAND SA"),
+        ("https://thon.no", "HUSTADGÅRDEN ANS"),
+        ("https://www.ragde.no", "RANDABERGVEIEN 312 AS"),
+        ("https://www.7-eleven.no", "BUTIKKDRIFT UMAZABAL GUERRA AS"),
+        ("https://www.bate.no", "SAMEIET ST OLAV"),
+        ("https://www.nkla.no", "NORSKE KOKKERS LANDSFORENING"),  # more than the initials
+        ("https://www.sb.no", "SOLBAKKEN BIL AS"),  # two letters
+        ("https://www.bob.no", "BERGEN OMEGN BOLIGSAMEIE"),  # a co-op: its manager's site
+        ("https://www.obos.no", "OLE BULLS OPPGANG SAMEIET"),
+    ]
+
+    assert all(domain_resembles_name(site, name) for site, name in own)
+    assert not any(domain_resembles_name(site, name) for site, name in someone_elses)
 
 
 def test_a_coop_whose_manager_site_names_it_keeps_the_website():
