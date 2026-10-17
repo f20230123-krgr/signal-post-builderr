@@ -24,6 +24,7 @@ from src.pipeline.registry_extras import (
     universe_identity_facts,
 )
 from src.pipeline.resolve import ResolvedEntity
+from tests.conftest import brreg_accounts_response
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "registry"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -55,8 +56,10 @@ def _client_for(org_number: str) -> httpx.Client:
         url = str(request.url)
         if url == f"{base}/roller":
             return httpx.Response(roller["status"], json=roller["body"]) if roller["body"] is not None else httpx.Response(roller["status"])
-        if url == f"https://data.brreg.no/regnskapsregisteret/regnskap/{org_number}":
-            return httpx.Response(regnskap["status"], json=regnskap["body"]) if regnskap["body"] is not None else httpx.Response(regnskap["status"])
+        if url.split("?")[0] == f"https://data.brreg.no/regnskapsregisteret/regnskap/{org_number}":
+            if regnskap["body"] is None or regnskap["status"] != 200:
+                return httpx.Response(regnskap["status"])
+            return brreg_accounts_response(request, regnskap["body"])
         if url == f"https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org_number}":
             return httpx.Response(underenheter["status"], json=underenheter["body"]) if underenheter["body"] is not None else httpx.Response(underenheter["status"])
         return httpx.Response(404)

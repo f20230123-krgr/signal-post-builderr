@@ -33,7 +33,7 @@ import hashlib
 import json
 import re
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -319,17 +319,30 @@ def _metric_facts(
 
 
 def _accounts_facts(
-    entity: ResolvedEntity, client: httpx.Client, sleep: Callable[[float], None], now: datetime
+    entity: ResolvedEntity,
+    client: httpx.Client,
+    sleep: Callable[[float], None],
+    now: datetime,
+    budget: Optional[BudgetGovernor] = None,
 ) -> tuple[list[ConfirmedFact], EvidenceState]:
-    """Returns (facts, state) instead of a bare list -- real evaluator
-    feedback: "a temporary source error was also recorded as information
-    being unavailable." A transport failure or exhausted-retry 5xx must be
-    distinguishable from Brreg genuinely having no accounts on file (404, or
-    a 200 with an empty list), so the caller (assemble.py) can honestly mark
-    a fetch problem as FAILED rather than a confirmed NOT_AVAILABLE, and can
-    optionally carry forward the last known good value on refresh."""
-    url = ACCOUNTS_URL.format(org=entity.org_number)
-    response = _get(client, url, sleep)
+    """Annual accounts, each figure cited to the one filing it comes from.
+
+    Official C300 feedback: for MOWI ASA, our FY2025 revenue (EUR 1.887bn, its own accounts)
+    was cited to the registry address that returns six filings at once (the company's and the
+    group's, three years), so the review "could not establish the exact year or whether the
+    figures referred to the company or a group". Now:
+      - only the company's own accounts are read (`?regnskapstype=SELSKAP`): group accounts
+        never enter, so every figure and every trend is the company's, like with like;
+      - the newest MAX_FILINGS_WITH_METRICS filings are fetched from their own address
+        (`?år=<year the period ends>&regnskapstype=SELSKAP`, exactly one filing), and their
+        figures, spans and content hash come from that response;
+      - older filings, or a filing whose own fetch failed or would overrun the request budget,
+        are cited to the company-only list.
+
+    Returns (facts, state): FAILED for a transport failure or 5xx (assemble.py can then carry
+    the last known value forward), NOT_AVAILABLE for a confirmed absence (404, empty list)."""
+    list_url = ACCOUNTS_URL.format(org=entity.org_number) + "?regnskapstype=SELSKAP"
+    response = _get(client, list_url, sleep)
 
     if response is None or response.status_code >= 500:
         return [], EvidenceState.FAILED
@@ -337,57 +350,75 @@ def _accounts_facts(
         return [], EvidenceState.NOT_AVAILABLE
     if response.status_code != 200:
         return [], EvidenceState.FAILED
-
-    entries = response.json()
+    try:
+        entries = response.json()
+    except ValueError:
+        return [], EvidenceState.FAILED
     if not isinstance(entries, list) or not entries:
         return [], EvidenceState.NOT_AVAILABLE
 
-    content_hash = _content_hash(response)
-    raw_slices = _entry_slices(response.text)
-    metric_facts = _metric_facts(
-        [e for e in entries if isinstance(e, dict)], raw_slices, entity.org_number, url, content_hash, now
-    ) if len(raw_slices) == len(entries) else []
-    # Newest first and, within a period, the company's own accounts before its group's: the
-    # "latest" claim must be the same filing the discrete figures come from. A group filing
-    # is still published, labelled as the group's (sources policy: group and parent
-    # relationships are labelled, not collapsed).
-    def is_group(entry: dict) -> bool:
-        return entry.get("regnskapstype") == "KONSERN"
+    list_hash = _content_hash(response)
+    list_slices = _entry_slices(response.text)
+    indexed = [
+        (i, e) for i, e in enumerate(entries)
+        if isinstance(e, dict) and e.get("regnskapstype", "SELSKAP") != "KONSERN" and (e.get("regnskapsperiode") or {}).get("tilDato")
+    ]
+    indexed.sort(key=lambda ie: ie[1]["regnskapsperiode"]["tilDato"], reverse=True)
 
-    entries = sorted(
-        entries,
-        key=lambda e: ((e.get("regnskapsperiode") or {}).get("tilDato") or "", not is_group(e)),
-        reverse=True,
-    )
+    facts: list[ConfirmedFact] = []
+    seen_periods: set[str] = set()
+    for rank, (index, entry) in enumerate(indexed):
+        period_end = entry["regnskapsperiode"]["tilDato"]
+        if period_end in seen_periods:
+            continue
+        seen_periods.add(period_end)
 
-    def period_end(entry: dict) -> str:
-        return (entry.get("regnskapsperiode") or {}).get("tilDato") or ""
+        # Default: the company-only list, this filing's own slice of it.
+        source_url, source_text, source_hash = list_url, response.text, list_hash
+        filing, slices = entry, ([list_slices[index]] if len(list_slices) == len(entries) else [])
 
-    own_periods = {period_end(e) for e in entries if not is_group(e)}
-    facts = list(metric_facts)
-    latest_done = False
-    for entry in entries:
-        value = _format_accounts_value(entry)
+        newest = len(seen_periods) <= MAX_FILINGS_WITH_METRICS
+        if newest and (budget is None or (budget.can_spend_request() and not budget.should_degrade())):
+            year_url = ACCOUNTS_URL.format(org=entity.org_number) + "?" + urlencode(
+                {"år": period_end[:4], "regnskapstype": "SELSKAP"}
+            )
+            year_response = _get(client, year_url, sleep)
+            if budget is not None:
+                budget.record_request()
+            year_entries = None
+            if year_response is not None and year_response.status_code == 200:
+                try:
+                    year_entries = year_response.json()
+                except ValueError:
+                    year_entries = None
+            if isinstance(year_entries, list):
+                match = [
+                    e for e in year_entries
+                    if isinstance(e, dict) and (e.get("regnskapsperiode") or {}).get("tilDato") == period_end
+                    and e.get("regnskapstype", "SELSKAP") != "KONSERN"
+                ]
+                if len(match) == 1:
+                    year_slices = _entry_slices(year_response.text)
+                    source_url, source_text, source_hash = year_url, year_response.text, _content_hash(year_response)
+                    filing = match[0]
+                    slices = year_slices if len(year_slices) == len(year_entries) == 1 else []
+
+        if newest:
+            facts.extend(_metric_facts([filing], slices or [None], entity.org_number, source_url, source_hash, now))
+
+        value = _format_accounts_value(filing)
         if not value:
             continue
-        if is_group(entry):
-            value = f"Group accounts (konsern): {value}"
-        # A group filing is "latest" only when the company has no own filing for that period.
-        set_aside = is_group(entry) and period_end(entry) in own_periods
-        field_name = "annual_accounts_history" if latest_done or set_aside else "annual_accounts_latest"
-        latest_done = latest_done or field_name == "annual_accounts_latest"
-        # The filing's own figure, as written (the revenue, or the result when there is none).
-        revenue = _dig(entry, ACCOUNT_METRICS[0][1])
-        result = _dig(entry, ("resultatregnskapResultat", "aarsresultat"))
-        span = (_quote_number(response.text, "sumDriftsinntekter", revenue) if revenue is not None else None) or (
-            _quote_number(response.text, "aarsresultat", result) if result is not None else None
+        revenue = _dig(filing, ACCOUNT_METRICS[0][1])
+        result = _dig(filing, ("resultatregnskapResultat", "aarsresultat"))
+        span = (_quote_number(source_text, "sumDriftsinntekter", revenue) if revenue is not None else None) or (
+            _quote_number(source_text, "aarsresultat", result) if result is not None else None
         )
         facts.append(
             ConfirmedFact(
-                field_name, value, url, 100.0, now,
-                reporting_period=_reporting_period(entry),
-                effective_date=(entry.get("regnskapsperiode") or {}).get("tilDato"),
-                content_hash=content_hash, extraction_method="registry", source_class="official_registry",
+                "annual_accounts_latest" if rank == 0 else "annual_accounts_history", value, source_url, 100.0, now,
+                reporting_period=_reporting_period(filing), effective_date=period_end,
+                content_hash=source_hash, extraction_method="registry", source_class="official_registry",
                 evidence_span=span,
             )
         )
@@ -1029,7 +1060,7 @@ def fetch_registry_extras(
 
         if not budget.can_spend_request():
             return facts, accounts_state
-        accounts_facts, accounts_state = _accounts_facts(entity, client, sleep, retrieved_at)
+        accounts_facts, accounts_state = _accounts_facts(entity, client, sleep, retrieved_at, budget)
         budget.record_request()
         facts.extend(accounts_facts)
 

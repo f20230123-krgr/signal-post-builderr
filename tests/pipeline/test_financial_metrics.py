@@ -19,6 +19,7 @@ from src.pipeline.registry_extras import (
     _metric_span,
     fetch_registry_extras,
 )
+from tests.conftest import brreg_accounts_response
 from tests.pipeline.test_registry_extras import _client_for, _entity
 
 NOW = datetime(2026, 10, 3, tzinfo=timezone.utc)
@@ -43,7 +44,7 @@ def _facts_for(filings):
     body = json.dumps(filings)
 
     def handler(request):
-        return httpx.Response(200, text=body) if "regnskapsregisteret" in str(request.url) else httpx.Response(404)
+        return brreg_accounts_response(request, filings) if "regnskapsregisteret" in str(request.url) else httpx.Response(404)
 
     facts, _ = fetch_registry_extras(_entity(), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)))
     return facts, body
@@ -111,10 +112,15 @@ def test_the_companys_own_accounts_are_preferred_over_the_groups_for_the_same_ye
     assert _metrics(facts)[("revenue", "FY2025")].value == "111 NOK"
 
 
-def test_a_group_filing_is_used_when_it_is_the_only_one():
-    facts, _ = _facts_for([_filing(2025, revenue=999.0, kind="KONSERN")])
+def test_only_the_companys_own_accounts_are_published_never_the_groups():
+    """Official C300 feedback: figures cited to a response holding both the company's and the
+    group's filings could not be tied to one or the other. Group accounts are not read."""
+    facts, _ = _facts_for([_filing(2025, revenue=999.0, kind="KONSERN"), _filing(2025, revenue=555.0)])
+    group_only, _ = _facts_for([_filing(2025, revenue=999.0, kind="KONSERN")])
 
-    assert _metrics(facts)[("revenue", "FY2025")].value == "999 NOK"
+    assert _metrics(facts)[("revenue", "FY2025")].value == "555 NOK"
+    assert not [f for f in facts if "999" in f.value]
+    assert not _metrics(group_only)
 
 
 def test_the_legacy_combined_value_is_still_published_with_its_end_date():

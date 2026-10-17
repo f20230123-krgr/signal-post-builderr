@@ -73,7 +73,7 @@ def test_the_summary_is_short_dated_and_covers_company_figures_people_web_and_ch
     )
     assert "registry status Active, 21000 employees" in text
     assert (
-        "In FY2025 (year to 2025-12-31), revenue grew 7.2% on FY2024 to 107.17 bn USD and the company made "
+        "In FY2025 (company accounts, year to 2025-12-31), revenue grew 7.2% on FY2024 to 107.17 bn USD and the company made "
         "a net profit of 11.90 bn USD (11.1% of revenue); equity was 48.50 bn USD." in text
     )
     assert "Led by Anders Opedal (managing director) and Jon Erik Reinhardsen (chair of the board), with 1 more registered role holder." in text
@@ -149,7 +149,7 @@ def test_the_financial_trend_is_explained_in_words_not_listed():
     assert "equity was negative (-10 k NOK)" in into_loss
 
     smaller_loss = acme(annual_result={"FY2025": "-30,000 NOK", "FY2024": "-90,000 NOK"})
-    assert "In FY2025 (year to 2025-12-31), the company made a net loss of 30 k NOK, a smaller loss than the 90 k NOK of FY2024." in smaller_loss
+    assert "In FY2025 (company accounts, year to 2025-12-31), the company made a net loss of 30 k NOK, a smaller loss than the 90 k NOK of FY2024." in smaller_loss
 
     lower_profit = acme(annual_result={"FY2025": "60,000 NOK", "FY2024": "90,000 NOK"}, total_equity={"FY2025": "100,000 NOK", "FY2024": "120,000 NOK"})
     assert "a net profit of 60 k NOK, down from 90 k NOK in FY2024; equity fell to 100 k NOK." in lower_profit

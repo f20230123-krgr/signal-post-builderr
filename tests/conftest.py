@@ -99,3 +99,27 @@ def no_live_dns(monkeypatch):
     """Tests never touch the network, DNS included: no name resolves unless a test
     passes its own resolver to keyless_candidates."""
     monkeypatch.setattr("src.pipeline.keyless_sites.dns_resolves", lambda host: False)
+
+
+def brreg_accounts_response(request, filings):
+    """What Regnskapsregisteret answers for `request`, given all of a company's `filings`:
+    it filters by the `regnskapstype` and `år` (year the period ends) query parameters, and
+    answers 404 when a filter matches nothing -- as the live API does."""
+    import json as _json
+    from urllib.parse import parse_qs, urlsplit
+
+    import httpx as _httpx
+
+    if isinstance(filings, str):
+        filings = _json.loads(filings)
+    query = parse_qs(urlsplit(str(request.url)).query)
+    kind = query.get("regnskapstype", [None])[0]
+    year = query.get("år", [None])[0]
+    matching = [
+        f for f in filings
+        if (kind is None or f.get("regnskapstype", "SELSKAP") == kind)
+        and (year is None or str((f.get("regnskapsperiode") or {}).get("tilDato", ""))[:4] == year)
+    ]
+    if not matching and (kind or year):
+        return _httpx.Response(404)
+    return _httpx.Response(200, text=_json.dumps(matching))

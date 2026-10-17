@@ -8,6 +8,8 @@ from pathlib import Path
 
 import httpx
 
+from tests.conftest import brreg_accounts_response
+
 from src.models.profile import EvidenceState
 from src.orchestrator.budget import BudgetGovernor, BudgetLimits
 from src.pipeline.assemble import assemble
@@ -57,8 +59,10 @@ def _client_for(org_number: str) -> httpx.Client:
             return _respond(registry_fixture)
         if roller_fixture and url == f"{registry_url}/roller":
             return _respond(roller_fixture)
-        if regnskap_fixture and url == f"https://data.brreg.no/regnskapsregisteret/regnskap/{org_number}":
-            return _respond(regnskap_fixture)
+        if regnskap_fixture and url.split("?")[0] == f"https://data.brreg.no/regnskapsregisteret/regnskap/{org_number}":
+            if regnskap_fixture.get("body") is None or regnskap_fixture.get("status") != 200:
+                return _respond(regnskap_fixture)
+            return brreg_accounts_response(request, regnskap_fixture["body"])
         if underenheter_fixture and url == f"https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org_number}":
             return _respond(underenheter_fixture)
         # Real fixture data for 923609016 has genuine pagination

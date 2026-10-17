@@ -19,6 +19,7 @@ from src.pipeline.extract import extract
 from src.pipeline.registry_extras import fetch_live_registry_details
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact
+from tests.conftest import brreg_accounts_response
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -179,32 +180,41 @@ def test_a_dated_line_on_a_page_reads_headline_then_date_in_plain_text():
     assert fact.evidence_span and fact.evidence_span.startswith("2026-09-15 Building")
 
 
-def test_the_latest_accounts_are_the_companys_own_and_group_accounts_are_labelled():
-    """EQUINOR ASA files its own and its group's accounts for each year. The 'latest' claim was
-    the group's (revenue 106.5 bn) while every discrete figure was the company's own (68.0 bn)."""
+def test_each_figure_cites_its_own_filing_and_group_accounts_are_not_read():
+    """Official C300 feedback (MOWI ASA): figures cited to the registry address that returns the
+    company's and the group's filings for three years could not be tied to one year or scope.
+    Each figure now cites the address that returns exactly that one company filing."""
+    from urllib.parse import parse_qs, urlsplit
+
     from src.pipeline.registry_extras import fetch_registry_extras
+    from tests.conftest import brreg_accounts_response
 
     def filing(kind, revenue, year):
         return {
-            "regnskapstype": kind, "valuta": "USD",
+            "regnskapstype": kind, "valuta": "EUR",
             "regnskapsperiode": {"fraDato": f"{year}-01-01", "tilDato": f"{year}-12-31"},
-            "resultatregnskapResultat": {"aarsresultat": 1.0, "driftsresultat": {"driftsinntekter": {"sumDriftsinntekter": revenue}}},
+            "resultatregnskapResultat": {"aarsresultat": 64000000.0, "driftsresultat": {"driftsinntekter": {"sumDriftsinntekter": revenue}}},
         }
 
-    body = [filing("KONSERN", 106462000000.0, 2025), filing("SELSKAP", 67956000000.0, 2025), filing("SELSKAP", 72000000000.0, 2024)]
+    body = [filing("KONSERN", 6146000000.0, 2025), filing("SELSKAP", 1887000000.0, 2025),
+            filing("KONSERN", 5604000000.0, 2024), filing("SELSKAP", 1931000000.0, 2024), filing("SELSKAP", 1913000000.0, 2023)]
 
     def handler(request):
         if "regnskapsregisteret" in str(request.url):
-            return httpx.Response(200, json=body)
+            return brreg_accounts_response(request, body)
         return httpx.Response(404)
 
     facts, _ = fetch_registry_extras(_entity(), BudgetGovernor(), client=httpx.Client(transport=httpx.MockTransport(handler)))
 
     [latest] = [f for f in facts if f.field_name == "annual_accounts_latest"]
-    history = [f.value for f in facts if f.field_name == "annual_accounts_history"]
-    assert "67,956,000,000" in latest.value and latest.reporting_period == "FY2025"
-    assert any(v.startswith("Group accounts (konsern): ") and "106,462,000,000" in v for v in history)
-
+    assert "1,887,000,000" in latest.value and latest.reporting_period == "FY2025"
+    query = parse_qs(urlsplit(latest.source_url).query)
+    assert query == {"år": ["2025"], "regnskapstype": ["SELSKAP"]}  # exactly one filing
+    revenue_2024 = next(f for f in facts if f.field_name == "revenue" and f.reporting_period == "FY2024")
+    assert parse_qs(urlsplit(revenue_2024.source_url).query)["år"] == ["2024"]
+    oldest = next(f for f in facts if f.field_name == "annual_accounts_history" and f.reporting_period == "FY2023")
+    assert parse_qs(urlsplit(oldest.source_url).query) == {"regnskapstype": ["SELSKAP"]}  # company-only list
+    assert not [f for f in facts if "6,146" in f.value or "5,604" in f.value or "Group" in f.value]
 
 def test_every_registry_claim_quotes_text_that_is_in_the_response_it_cites():
     """Builderr checks that a claim's span can be found in its source. Workplaces, accounts,
@@ -240,11 +250,16 @@ def test_every_registry_claim_quotes_text_that_is_in_the_response_it_cites():
     served = {}
 
     def handler(request):
-        body = bodies.get(str(request.url))
-        if body is None:
-            return httpx.Response(404)
-        response = httpx.Response(200, json=body)
-        served[str(request.url)] = response.text
+        url = str(request.url)
+        accounts = f"https://data.brreg.no/regnskapsregisteret/regnskap/{org}"
+        if url.split("?")[0] == accounts:
+            response = brreg_accounts_response(request, bodies[accounts])
+        else:
+            body = bodies.get(url)
+            if body is None:
+                return httpx.Response(404)
+            response = httpx.Response(200, json=body)
+        served[url] = response.text
         return response
 
     client = httpx.Client(transport=httpx.MockTransport(handler))

@@ -572,7 +572,8 @@ def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         if not segments:
             return None
         end = claims[0].effective_date[:10] if claims[0].effective_date else None
-        text = f"In {period}{f' (year to {end})' if end else ''}, " + "; ".join(segments)
+        # The company's own filing, never its group's (registry_extras reads only those).
+        text = f"In {period} (company accounts{f', year to {end}' if end else ''}), " + "; ".join(segments)
         return SummarySentence(text + ".", list(_SUMMARY_METRICS), claims)
 
     claim = profile.annual_accounts.latest
