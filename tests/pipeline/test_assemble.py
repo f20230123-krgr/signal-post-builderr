@@ -144,7 +144,8 @@ def test_full_data_populates_all_sections():
     entity = _entity()
     facts = [
         _fact("organization_name", "Equinor ASA"),
-        _fact("leader", "Anders Opedal (President and CEO)"),
+        _fact("leader", "Anders Opedal (Daglig leder)", source_class="official_registry"),
+        _fact("leader", "Anna Hansen (Senior Engineer)"),  # a company page's staff list: not a role
         _fact("company_profile", "https://www.linkedin.com/company/equinor/"),
         _fact("hiring_signal", "Kahoot! AS is hiring: Senior Backend Engineer"),
         _fact("dated_activity", "2026-08-01: Senior Reservoir Engineer, Stavanger"),

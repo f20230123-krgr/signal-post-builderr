@@ -274,7 +274,12 @@ def assemble(
     brand_fact = _first_matching(confirmed_facts, "organization_name")
     public_brand_claim = _confirmed_claim(brand_fact) if brand_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)
 
-    leader_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "leader")])
+    # Roles are statutory facts: only the registry's own role records are published as roles.
+    # People a company's website lists (a clinic's staff page, a JSON-LD employee list) cannot be
+    # matched to an official role record (official C300 feedback), so they are not roles.
+    leader_claims = _dedup_claims([
+        _confirmed_claim(f) for f in _all_matching(confirmed_facts, "leader") if f.source_class == "official_registry"
+    ])
     company_profile_claims = _dedup_profiles(
         [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "company_profile")]
     )
