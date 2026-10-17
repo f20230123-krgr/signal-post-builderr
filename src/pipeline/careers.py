@@ -398,16 +398,21 @@ def careers_page_facts(
     off_site = [r for r in roles if _base_domain(_domain(r[1])) != _base_domain(_domain(page_url))]
     if len(roles) >= MIN_ROLE_LINKS or off_site:
         page = clean_page_url(page_url)
+        # Spans are one text node as the page writes it: a card's title read across several
+        # elements is not in the source as one string (official C300 feedback on receipts).
+        from src.pipeline.spans import span_for_text
+
         facts = [RawFact(
             "hiring_signal", f"{CAREERS_VALUE_PREFIX} lists {len(roles)} open role{'s' if len(roles) != 1 else ''}: {page}",
-            page_url, "text", extracted_at, context_name=context_name, evidence_span=roles[0][0],
+            page_url, "text", extracted_at, context_name=context_name,
+            evidence_span=span_for_text(html, roles[0][0]) or roles[0][0],
         )]
         # Each role on its own: title and direct link, sourced to the company's careers page
         # that lists it (the company match).
         for title, url in roles[:MAX_ROLE_CLAIMS]:
             facts.append(RawFact(
                 "hiring_signal", f"{ROLE_VALUE_PREFIX}: {title} - {clean_page_url(url)}", page_url, "text", extracted_at,
-                context_name=context_name, evidence_span=title,
+                context_name=context_name, evidence_span=span_for_text(html, title) or title,
             ))
         return facts
 

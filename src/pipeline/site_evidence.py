@@ -35,6 +35,7 @@ from src.models.profile import EvidenceState
 from src.pipeline.careers import page_heading
 from src.pipeline.crawl import FetchedPage
 from src.pipeline.extract import _CANONICAL_LINK_RE, _CANONICAL_LINK_RE_ALT, _page_organization_name_from_html, _visible_lines
+from src.pipeline.spans import node_span
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact, name_similarity
 
@@ -62,7 +63,19 @@ def _canonical_link(html: str) -> Optional[str]:
 
 def org_number_span(html: str, org_number: str) -> Optional[str]:
     """The text around this organisation number, quoted as it reads on the page
-    ("Org.nr. 918 965 556"), or None when the page never states it."""
+    ("Org.nr. 918 965 556"), or None when the page never states it.
+
+    Taken from the one text node that shows the number, as the source writes it (a quote
+    joined across tags is not in the page source; official C300 feedback). Falls back to the
+    visible line only when no single node holds it."""
+    def shows_it(text: str) -> bool:
+        return any("".join(m.groups()) == org_number for m in _ORG_NUMBER_RE.finditer(text))
+
+    sep = r"(?:\s|&nbsp;|&#160;|&#xa0;|\.)?"
+    anchor = re.compile(sep.join((org_number[:3], org_number[3:6], org_number[6:])), re.IGNORECASE)
+    node = node_span(html, shows_it, anchor)
+    if node:
+        return node
     for line in _visible_lines(html):
         for match in _ORG_NUMBER_RE.finditer(line):
             if "".join(match.groups()) != org_number:

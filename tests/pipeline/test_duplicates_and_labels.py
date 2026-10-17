@@ -169,17 +169,6 @@ def test_feed_and_page_headlines_read_as_plain_text_with_the_raw_text_as_span():
     assert "&amp;#8217;" in fact.evidence_span
 
 
-def test_a_dated_line_on_a_page_reads_headline_then_date_in_plain_text():
-    html = "<html><body><p>2026-09-15 Building Healthcare Solutions Together: Kitron &amp; CellaVision</p></body></html>"
-    page = FetchedPage(url="https://www.kitron.com", raw_html=html, fetched_at=NOW, fetch_state=EvidenceState.AVAILABLE)
-
-    [fact] = [f for f in extract(page) if f.field_name == "dated_activity" and f.extraction_method == "text"]
-
-    assert fact.value == "Building Healthcare Solutions Together: Kitron & CellaVision (2026-09-15)"
-    assert fact.effective_date == "2026-09-15"
-    assert fact.evidence_span and fact.evidence_span.startswith("2026-09-15 Building")
-
-
 def test_each_figure_cites_its_own_filing_and_group_accounts_are_not_read():
     """Official C300 feedback (MOWI ASA): figures cited to the registry address that returns the
     company's and the group's filings for three years could not be tied to one year or scope.

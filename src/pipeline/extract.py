@@ -218,6 +218,16 @@ def _as_str(value: object) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+def _as_written(page: str, link: str) -> Optional[str]:
+    """The link exactly as the page source writes it (a profile is published in a cleaned form:
+    no tracking, a canonical host), so a checker finds the quote verbatim; None when the page
+    only has it in another form (then the envelope quotes the value)."""
+    if link in page:
+        return link
+    escaped = link.replace("/", "\\/")  # JSON-LD often writes https:\/\/...
+    return escaped if escaped in page else None
+
+
 def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:
     try:
         data = extruct.extract(html, syntaxes=["json-ld"], errors="ignore")
@@ -317,7 +327,10 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
             for link in same_as:
                 found = social_profile_link(link) if isinstance(link, str) and link and not _SOCIAL_NON_PROFILE_RE.search(link) else None
                 if found:
-                    facts.append(RawFact("company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name))
+                    facts.append(RawFact(
+                        "company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name,
+                        evidence_span=_as_written(html, link),
+                    ))
     return facts
 
 
@@ -478,7 +491,10 @@ def social_profile_facts(
             continue
         seen.add(found[1])
         facts.append(
-            RawFact("company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name)
+            RawFact(
+                "company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name,
+                evidence_span=_as_written(html, link),
+            )
         )
         if len(facts) >= MAX_SOCIAL_PROFILE_LINKS:
             break
@@ -640,7 +656,8 @@ def extract(
     page_context_name = _page_organization_name_from_html(page.raw_html)
 
     facts += _meta_tag_facts(page.raw_html, page.url, extracted_at)
-    facts += _activity_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
+    # (Free-text "any line with a date" scanning was removed: on 100 real companies it yielded
+    # 68 lines, nearly all menus and timestamps, against 253 dated article blocks below.)
     facts += social_profile_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
     facts += news_item_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
     if is_careers_url(page.url, DEFAULT_ATS_DOMAINS):

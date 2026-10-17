@@ -36,9 +36,10 @@ def test_uses_structured_path_when_json_ld_present():
     assert all(f.content_hash for f in facts)
     assert len({f.content_hash for f in facts}) == 1  # same page -> same hash
 
-    # Careers section isn't in the JSON-LD -- activity scanning must still run.
+    # A dated line in a careers section is not news: free-text "any line with a date" scanning
+    # was removed (on 100 real companies it yielded 68 lines, nearly all menus and timestamps).
     dated = [f for f in facts if f.field_name == "dated_activity"]
-    assert any("Reservoir Engineer" in f.value for f in dated)
+    assert not any("Reservoir Engineer" in f.value for f in dated)
 
     # Structured data was found for identity fields -- no need for a raw
     # page_text fallback fact.
@@ -278,10 +279,10 @@ def test_structured_dated_activity_carries_the_pages_own_organization_name():
     assert dated and all(f.context_name == "USBL" for f in dated)
 
 
-def test_freetext_dated_activity_carries_the_pages_own_organization_name():
-    """Same shared-domain gap as above, but for the free-text date-line scan
-    path (_activity_facts) rather than the structured JSON-LD path -- both
-    producers of dated_activity must attach the page's own org identity."""
+def test_a_bare_line_with_a_date_is_not_published_as_dated_activity():
+    """Free-text date-line scanning was removed: on 100 real companies it yielded 68 lines,
+    nearly all menu items and timestamps ("Ly Forsikring T13:25:45+01:00", "Meld skade"),
+    against 253 dated article blocks found by the news extractor."""
     html = """<html><head>
     <script type="application/ld+json">
     {"@context":"https://schema.org","@type":"Organization","name":"USBL"}
@@ -290,10 +291,7 @@ def test_freetext_dated_activity_carries_the_pages_own_organization_name():
 
     facts = extract(_inline_page(html))
 
-    dated = [f for f in facts if f.field_name == "dated_activity" and f.extraction_method == "text"]
-    assert dated and all(f.context_name == "USBL" for f in dated)
-
-
+    assert not [f for f in facts if f.field_name == "dated_activity" and f.extraction_method == "text"]
 def test_page_organization_name_falls_back_to_opengraph_site_name():
     """Real-world regression, suggested by independent review: a site with
     no JSON-LD Organization block at all but a real og:site_name meta tag
@@ -338,15 +336,6 @@ def test_an_abnormally_long_free_text_line_is_rejected_as_dated_activity():
     facts = extract(_inline_page(html))
 
     assert not any(f.field_name == "dated_activity" and f.extraction_method == "text" for f in facts)
-
-
-def test_a_normal_length_dated_activity_line_is_still_accepted():
-    html = "<html><body><p>Company wins innovation award 2026-07-01</p></body></html>"
-
-    facts = extract(_inline_page(html))
-
-    dated = [f for f in facts if f.field_name == "dated_activity" and f.extraction_method == "text"]
-    assert len(dated) == 1
 
 
 def test_bare_careers_heading_is_not_a_hiring_signal():

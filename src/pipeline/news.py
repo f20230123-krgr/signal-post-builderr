@@ -259,7 +259,7 @@ def wp_post_facts(
         facts.append(
             RawFact(
                 "dated_activity", f"{title} ({iso})", page_url, "structured", extracted_at,
-                context_name=context_name, evidence_span=raw_title, effective_date=iso,
+                context_name=context_name, evidence_span=_json_written(body, raw_title), effective_date=iso,
             )
         )
     return facts
@@ -297,3 +297,17 @@ def plain_headline(raw: str) -> str:
         text = unescape(text)
     text = _LEADING_DATE_RE.sub("", text, count=1)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _json_written(body: str, value: str) -> str:
+    r"""`value` as the JSON response writes it. WordPress escapes non-ASCII letters (på),
+    dashes (–) and slashes (\/), so the decoded title is not in the response text, and the
+    span must be (official C300 feedback on receipts). Falls back to the decoded value."""
+    import json
+
+    for ensure_ascii in (True, False):
+        encoded = json.dumps(value, ensure_ascii=ensure_ascii)[1:-1]
+        for candidate in (encoded, encoded.replace("/", "\\/")):
+            if candidate in body:
+                return candidate
+    return value

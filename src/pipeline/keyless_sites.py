@@ -187,7 +187,23 @@ def contact_span(text: str, hints: SiteHints) -> Optional[str]:
     its postcode) the company registered, quoted as the page writes it; None when
     the page shows neither. Either is specific to this company; a bare postcode or
     a short number is not enough."""
+    # The one text node that shows it, as the source writes it, when there is one: a quote
+    # joined across tags is not in the page source (official C300 feedback on receipts).
+    from src.pipeline.spans import node_span
+
+    def shows_phone(node: str) -> bool:
+        return any(re.sub(r"\D", "", m.group(1)) in hints.phones for m in _PHONE_ON_PAGE_RE.finditer(node))
+
+    street = " ".join(hints.street.split()).lower() if hints.street else None
     flattened = " ".join(re.sub(r"<[^>]+>", " ", text).split())
+    if hints.phones:
+        node = node_span(text, shows_phone)
+        if node:
+            return node
+    if street and hints.postcode and hints.postcode in flattened:
+        node = node_span(text, lambda n: street in n.lower())
+        if node:
+            return node
     if hints.phones:
         # Whole eight-digit numbers only (optionally +47 and spaced), never eight
         # digits lifted out of the middle of a longer run such as an org number.
