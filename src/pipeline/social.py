@@ -201,6 +201,18 @@ _FOREIGN_FORM_RE = re.compile(
 _GROUP_WORD_RE = re.compile(r"gruppen|group|konsern|holding", re.IGNORECASE)
 
 
+_LEGAL_FORM_WORDS = {"as", "asa", "sa", "ans", "da", "ba", "enk", "nuf", "norge", "norway"}
+
+
+def _is_the_group(account: str, legal_name: str) -> bool:
+    """The company is the group itself: its name is exactly the brand before the group word
+    (KITRON ASA -> "kitrongroup", CONSTO AS -> "constokonsern"), not the brand plus more
+    ("AUTOIN BILSKADE AS" -> "autoin-gruppen" is the group's, not this company's)."""
+    words = [w for w in re.sub(r"[^a-z0-9æøå ]", " ", _fold(legal_name)).split() if w not in _LEGAL_FORM_WORDS]
+    brand = _GROUP_WORD_RE.sub("", _fold(account))
+    return bool(words) and brand == "".join(words)
+
+
 def _fold(text: str) -> str:
     return text.lower().translate(str.maketrans({"æ": "ae", "ø": "o", "å": "a"}))
 
@@ -237,7 +249,7 @@ def plausibly_own_profile(canonical: str, legal_name: str, site_url: str, home: 
     raw_account = segments[-1] if segments else ""
     if _FOREIGN_FORM_RE.search(raw_account) and not _FOREIGN_FORM_RE.search(legal_name):
         return False
-    if _GROUP_WORD_RE.search(account) and not _GROUP_WORD_RE.search(legal_name):
+    if _GROUP_WORD_RE.search(account) and not _GROUP_WORD_RE.search(legal_name) and not _is_the_group(account, legal_name):
         return False
     # A chain's branch ("uniteperformancelarvik", NKL's "...Trondheim" page) is not the company.
     if _branch_town(account, legal_name, site_url, home):

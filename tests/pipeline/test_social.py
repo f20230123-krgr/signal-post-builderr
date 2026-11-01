@@ -195,3 +195,21 @@ def test_facebook_feed_posts_are_not_profiles_and_youtube_tabs_are_dropped():
     assert social_profile_link("https://www.youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw/featured")[0] == (
         "https://www.youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw"
     )
+
+
+def test_a_foreign_parents_group_or_branch_account_is_not_the_companys_own():
+    """Official audit (23 Oct): social accounts belonging to other companies. Hand-checked on
+    200 never-seen companies: the UK parent's "epsco-ltd", the Danish "stema-shipping-a-s",
+    the group's "autoin-gruppen" and a chain's "uniteperformancelarvik" were linked from the
+    company's site but are not its own. A company that is itself the group keeps its account."""
+    from src.pipeline.social import plausibly_own_profile
+
+    assert not plausibly_own_profile("https://www.linkedin.com/company/epsco-ltd", "EPSCO NORGE AS", "https://www.epsco.no")
+    assert not plausibly_own_profile("https://dk.linkedin.com/company/stema-shipping-a-s", "MIBAU STEMA NORGE AS", "https://www.mibau-stema.com")
+    assert not plausibly_own_profile("https://www.linkedin.com/company/autoin-gruppen", "AUTOIN BILSKADE AS", "https://www.autoin.no")
+    assert not plausibly_own_profile(
+        "https://www.instagram.com/uniteperformancelarvik/", "UNITE PERFORMANCE AS", "https://uniteperformance.no", "Storgata 1, 3126 TØNSBERG"
+    )
+    assert plausibly_own_profile("https://www.facebook.com/kitrongroup", "KITRON ASA", "https://www.kitron.com")
+    assert plausibly_own_profile("https://www.linkedin.com/company/tormatic-as", "TORMATIC AS", "https://www.tormatic.no")
+    assert plausibly_own_profile("https://www.facebook.com/byggmesterolaisenbodo", "BYGGMESTER OLAISEN AS", "https://byggmesterolaisen.no", "Gata 2, 8006 BODØ")
