@@ -960,3 +960,40 @@ def test_a_registered_site_named_by_the_companys_initials_lends_its_content():
     profile = _default_process_one("976088719", BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
     assert [c for c in profile.activity.dated_activity if c.value and "Kokkenes dag" in c.value]
+
+
+def _registered_site_profile(org, name, site, search_units):
+    record = {"organisasjonsnummer": org, "navn": name, "hjemmeside": site, "historiskeNavn": []}
+    page = "<html><head><title>Velkommen</title></head><body><p>Eiendom og utvikling.</p></body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}":
+            return httpx.Response(200, json=record)
+        if request.url.path == "/enhetsregisteret/api/enheter" and request.url.params.get("navn"):
+            return httpx.Response(200, json={"_embedded": {"enheter": search_units}})
+        if request.url.host.endswith(site.removeprefix("www.")):
+            return httpx.Response(200, text=page)
+        return httpx.Response(404)
+
+    return _default_process_one(org, BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_a_registered_website_another_entity_holds_as_its_own_is_not_published_as_this_companys():
+    """Official audit (23 Oct): websites belonging to other companies. VERKSTEDVEIEN 3 AS
+    registers www.entra.no; ENTRA ASA lists the same site and the domain is its name."""
+    profile = _registered_site_profile(
+        "923609016", "VERKSTEDVEIEN 3 AS", "www.entra.no",
+        [{"organisasjonsnummer": "999296432", "navn": "ENTRA ASA", "hjemmeside": "www.entra.no"}],
+    )
+
+    assert profile.online_presence.official_site.state == EvidenceState.AMBIGUOUS
+    assert profile.online_presence.official_site.value is None
+
+
+def test_a_brand_website_no_other_entity_holds_stays_the_companys():
+    """SEABIT AS registers easyfish.no, its product brand: nobody else lists it."""
+    profile = _registered_site_profile("923609016", "SEABIT AS", "www.easyfish.no", [])
+
+    assert profile.online_presence.official_site.state == EvidenceState.AVAILABLE
+    assert "easyfish.no" in profile.online_presence.official_site.value

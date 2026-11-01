@@ -141,6 +141,11 @@ def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[Confirmed
         from_site = _first_matching(confirmed_facts, "official_site_evidence")
         if from_site:
             return _confirmed_claim(from_site)
+        # Another registered entity lists this same site as its own and the domain is its name
+        # (VERKSTEDVEIEN 3 AS registers entra.no: ENTRA ASA's). Not published as this
+        # company's website (official audit, 23 Oct): say we cannot be sure.
+        if _first_matching(confirmed_facts, "official_site_held_by"):
+            return Claim(value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None)
         # A housing co-op often registers its property manager's website as its own
         # (SAMEIET ST OLAV -> bate.no). That domain belongs to another company: unless the
         # site itself names the co-op (handled above), say we cannot be sure.

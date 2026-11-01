@@ -992,6 +992,53 @@ def name_is_held_by_another_entity(
             client.close()
 
 
+def website_held_by_another_entity(
+    site: str,
+    org_number: str,
+    budget: BudgetGovernor,
+    client: Optional[httpx.Client] = None,
+) -> Optional[tuple[str, str]]:
+    """(name, org number) of a DIFFERENT registered entity that lists this same website as its
+    own and whose name the domain spells (entra.no: ENTRA ASA), else None.
+
+    Official audit (23 Oct): websites belonging to other companies. A property company
+    (VERKSTEDVEIEN 3 AS) often registers its owner's site; Brønnøysund itself shows whose site
+    it is. Only a bare domain is checked: a registered page about the company on another
+    site (solhagen.no/Breivik-Gartneri...) is its own page. Any failure answers None, leaving
+    the registry's statement as it is."""
+    from src.pipeline.assemble import domain_resembles_name  # deferred: assemble imports this module's peers
+
+    parts = urlsplit(site if "://" in site else f"https://{site}")
+    host = parts.netloc.lower().removeprefix("www.")
+    label = host.split(".")[0]
+    if not label or parts.path.strip("/") or not budget.can_spend_request():
+        return None
+    owns_client = client is None
+    client = client or new_client()
+    try:
+        try:
+            response = client.get(NAME_SEARCH_URL, params={"navn": label, "size": 50}, timeout=10.0)
+        except httpx.HTTPError:
+            response = None
+        budget.record_request()
+        if response is None or response.status_code != 200:
+            return None
+        try:
+            units = (response.json().get("_embedded") or {}).get("enheter", [])
+        except ValueError:
+            return None
+        for unit in units:
+            other_site = _registered_website(unit.get("hjemmeside"))
+            other_host = urlsplit(other_site).netloc.lower().removeprefix("www.") if other_site else ""
+            name, number = str(unit.get("navn") or ""), str(unit.get("organisasjonsnummer") or "")
+            if number != org_number and other_host == host and domain_resembles_name(site, name):
+                return name, number
+        return None
+    finally:
+        if owns_client:
+            client.close()
+
+
 def fetch_leadership_only(
     entity: ResolvedEntity,
     budget: BudgetGovernor,

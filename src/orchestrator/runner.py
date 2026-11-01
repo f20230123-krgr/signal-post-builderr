@@ -56,6 +56,7 @@ from src.pipeline.registry_extras import (
     name_is_held_by_another_entity,
     subunit_org_numbers,
     universe_identity_facts,
+    website_held_by_another_entity,
 )
 from src.pipeline.resolve import ResolvedEntity, resolve
 from src.pipeline.verify import ConfirmedFact, verify
@@ -349,6 +350,16 @@ def _default_process_one(
             # statement of the website stands; nothing read from that site's pages is
             # attributed to this company.
             confirmed_facts = []
+            # When another registered entity lists the same site as its own and the domain is
+            # its name (VERKSTEDVEIEN 3 AS registers entra.no: ENTRA ASA's), the website is
+            # not published as this company's either (official audit, 23 Oct).
+            holder = website_held_by_another_entity(crawl_entity.official_site_candidate, org_number, budget, client=client)
+            if holder:
+                confirmed_facts.append(ConfirmedFact(
+                    field_name="official_site_held_by", value=f"{holder[0]} ({holder[1]})",
+                    source_url=f"https://data.brreg.no/enhetsregisteret/api/enheter/{holder[1]}", match_confidence=100.0,
+                    retrieved_at=now(), source_class="official_registry", extraction_method="registry",
+                ))
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
     confirmed_facts += registry_facts

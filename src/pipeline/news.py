@@ -168,6 +168,12 @@ _NOT_A_POST_PATH_RE = re.compile(
 )
 
 
+_PRESS_RELEASE_HOSTS = (
+    "eurolandir.com", "newsweb.oslobors.no", "newsweb.no", "globenewswire.com", "cision.com", "news.cision.com",
+    "mynewsdesk.com", "prnewswire.com", "businesswire.com", "ntbinfo.no", "kommunikasjon.ntb.no", "notified.com",
+)
+
+
 def is_post_link(url: str, page_url: str) -> bool:
     """`url` can be a news post's own page: same site as `page_url`, not the site root or
     the listing page itself, and not a contact, legal, careers, shop or listing path."""
@@ -175,7 +181,13 @@ def is_post_link(url: str, page_url: str) -> bool:
         parts, page = urlsplit(url), urlsplit(page_url)
     except ValueError:
         return False
-    if parts.scheme not in ("http", "https") or not _same_site(_domain(url), _domain(page_url)):
+    if parts.scheme not in ("http", "https"):
+        return False
+    # A listed company's own press releases often live on its newswire or investor-relations
+    # service (Kitron's on tools.eurolandir.com): still that company's post, linked from its site.
+    if any(_domain(url) == host or _domain(url).endswith("." + host) for host in _PRESS_RELEASE_HOSTS):
+        return bool(parts.path.strip("/"))
+    if not _same_site(_domain(url), _domain(page_url)):
         return False
     path = parts.path.rstrip("/")
     if not path or path == page.path.rstrip("/") or path.lower().endswith((".jpg", ".png", ".gif", ".zip")):
