@@ -143,6 +143,64 @@ def is_headline(title: str) -> bool:
     return len(letters) >= 8
 
 
+# Official audit feedback (23 Oct): "news" included product, listing and navigation pages
+# ("Kontakt oss", a shop's new-arrivals feed). Only a dated post with its own page is news.
+_NAV_TITLE_RE = re.compile(
+    r"^(?:hjem|home|forside|kontakt(?:\s+oss)?|contact(?:\s+us)?|om\s+oss|about(?:\s+us)?|personvern\w*|privacy(?:\s+policy)?|"
+    r"cookies?(?:\s*-?\s*(?:policy|erklæring|innstillinger))?|vilkår\w*|salgsbetingelser|terms(?:\s+\w+)*|faq|"
+    r"logg\s+inn|login|log\s+in|min\s+side|my\s+page|meld\s+skade|ledige\s+stillinger|karriere|careers?|jobs?|jobb(?:\s+hos\s+oss)?|"
+    r"priser|prices|produkter|products|tjenester|services|butikk(?:er)?|nettbutikk|shop|handlekurv|cart|søk|search)$",
+    re.IGNORECASE,
+)
+# Paths that are never a news post: contact/about/legal pages, careers, shop products and
+# collections, category/tag listings, search and account pages.
+_NOT_A_POST_PATH_RE = re.compile(
+    # Legal and contact pages, in any spelling (/kontakt-oss, /personvernerklaering, /cookie-policy).
+    r"/(?:kontakt|contact|personvern|privacy|cookie|vilkar|terms|career)[\w-]*(?:/|$|\.|\?)"
+    # Everything else only as a whole path segment, so a story slug that merely starts with
+    # the word (/nyheter/butikk-apner-i-bergen) is still a post.
+    r"|/(?:om-oss|about|about-us|karriere|jobb|jobs?|jobb-hos-oss|ledige-stillinger|stillinger|login|logg-inn|"
+    r"min-side|my-page|produkt|produkter|products?|collections?|shop|nettbutikk|butikk|handlekurv|cart|checkout|"
+    r"kategori|category|categories|tag|tags|search|sok|page|"
+    # Project references and case studies are a portfolio, not news.
+    r"prosjekt|prosjekter|projects?|referanser|referanse|references?|cases?|portfolio)(?:/|$|\.|\?)",
+    re.IGNORECASE,
+)
+
+
+def is_post_link(url: str, page_url: str) -> bool:
+    """`url` can be a news post's own page: same site as `page_url`, not the site root or
+    the listing page itself, and not a contact, legal, careers, shop or listing path."""
+    try:
+        parts, page = urlsplit(url), urlsplit(page_url)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not _same_site(_domain(url), _domain(page_url)):
+        return False
+    path = parts.path.rstrip("/")
+    if not path or path == page.path.rstrip("/") or path.lower().endswith((".jpg", ".png", ".gif", ".zip")):
+        return False
+    return not _NOT_A_POST_PATH_RE.search(parts.path + ("?" + parts.query if parts.query else ""))
+
+
+def is_news_title(title: str) -> bool:
+    """A headline that is not a navigation label ("Kontakt oss", "Personvern"). A single word
+    ("Historie", "Nyheter") is a page or section name, not a headline."""
+    words = re.findall(r"[^\W\d_]{2,}", title)
+    return (
+        is_headline(title) and len(words) >= 2
+        and not _NAV_TITLE_RE.match(title.strip(" .:-–|")) and not _PLACEHOLDER_TITLE_RE.search(title)
+    )
+
+
+# A website builder's sample post, never edited ("Hello world!" on 1 in 10 WordPress sites).
+_PLACEHOLDER_TITLE_RE = re.compile(
+    r"^\s*(?:hello\s+world|hei,?\s+verden|hallo,?\s+verden|welcome\s+to\s+(?:flatsome|wordpress|your\s+(?:site|blog))|"
+    r"a\s+simple\s+blog\s+post|just\s+another\s+post|sample\s+(?:post|page)|eksempelside|blog\s+post\s+title)\b",
+    re.IGNORECASE,
+)
+
+
 def _blocks(html: str) -> list[str]:
     """The page cut into article / list-item chunks."""
     cleaned = _SCRIPT_STYLE_RE.sub(" ", html)
@@ -161,8 +219,10 @@ def _title(block: str) -> Optional[str]:
     return None
 
 
-def news_items(html: str, today: Optional[date] = None) -> list[tuple[str, str]]:
-    """(headline, ISO date) for each dated article or list item on the page."""
+def news_items(html: str, today: Optional[date] = None, page_url: Optional[str] = None) -> list[tuple[str, str]]:
+    """(headline, ISO date) for each dated article or list item on the page. Given the page's
+    address, an item counts only when it links to its own post page on the same site (a dated
+    post, not a product, listing or navigation entry)."""
     items: list[tuple[str, str]] = []
     seen: set[str] = set()
     for block in _blocks(html):
@@ -175,7 +235,9 @@ def news_items(html: str, today: Optional[date] = None) -> list[tuple[str, str]]
         title = _title(block) if iso else None
         if not iso or not title or title.lower() in seen or parse_date(title):
             continue
-        if not is_headline(title) or iso == (today or datetime.now().date()).isoformat():
+        if not is_news_title(title) or iso == (today or datetime.now().date()).isoformat():
+            continue
+        if page_url and not any(is_post_link(url, page_url) for url, _ in _anchors(block, page_url)):
             continue
         seen.add(title.lower())
         items.append((title, iso))
@@ -183,7 +245,7 @@ def news_items(html: str, today: Optional[date] = None) -> list[tuple[str, str]]
             break
     if not items:
         today_iso = (today or datetime.now().date()).isoformat()
-        items = [(t, d) for t, d in _time_tag_items(html, today) if is_headline(t) and d != today_iso][:MAX_NEWS_ITEMS_PER_PAGE]
+        items = [(t, d) for t, d in _time_tag_items(html, today, page_url) if is_news_title(t) and d != today_iso][:MAX_NEWS_ITEMS_PER_PAGE]
     return items
 
 
@@ -191,7 +253,7 @@ _NEARBY_HEADING_RE = re.compile(r"<(?:h[1-4]|a)\b[^>]*>(.*?)</(?:h[1-4]|a)>", re
 _NEARBY_CHARS = 400
 
 
-def _time_tag_items(html: str, today: Optional[date]) -> list[tuple[str, str]]:
+def _time_tag_items(html: str, today: Optional[date], page_url: Optional[str] = None) -> list[tuple[str, str]]:
     """Fallback for layouts with no article/list/card wrapper: each <time datetime> is paired
     with the nearest headline or link text right after it (or just before it)."""
     cleaned = _SCRIPT_STYLE_RE.sub(" ", html)
@@ -205,6 +267,8 @@ def _time_tag_items(html: str, today: Optional[date]) -> list[tuple[str, str]]:
         for window in (cleaned[match.end() : match.end() + _NEARBY_CHARS], cleaned[max(0, match.start() - _NEARBY_CHARS) : match.start()]):
             titles = [_text(m.group(1)) for m in _NEARBY_HEADING_RE.finditer(window)]
             title = next((t for t in titles if _MIN_TITLE_LEN <= len(t) <= _MAX_TITLE_LEN and not parse_date(t)), None)
+            if title and page_url and not any(is_post_link(url, page_url) for url, _ in _anchors(window, page_url)):
+                title = None
             if title:
                 break
         if not title or title.lower() in seen:
@@ -254,7 +318,10 @@ def wp_post_facts(
         if not isinstance(raw_title, str) or not iso:
             continue
         title = _text(unescape(raw_title))
-        if not is_headline(title) or iso == extracted_at.date().isoformat():
+        if not is_news_title(title) or iso == extracted_at.date().isoformat():
+            continue
+        link = post.get("link")
+        if isinstance(link, str) and link and not is_post_link(link, page_url):
             continue
         facts.append(
             RawFact(
@@ -277,7 +344,7 @@ def news_item_facts(
             "dated_activity", f"{plain_headline(title)} ({iso})", page_url, "text", extracted_at,
             context_name=context_name, evidence_span=title, effective_date=iso,
         )
-        for title, iso in news_items(html, extracted_at.date())
+        for title, iso in news_items(html, extracted_at.date(), page_url)
         if plain_headline(title)
     ]
 

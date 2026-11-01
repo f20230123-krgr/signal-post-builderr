@@ -190,7 +190,7 @@ def test_feed_and_page_headlines_read_as_plain_text_with_the_raw_text_as_span():
     from src.pipeline.extract import feed_activity_facts
 
     feed = """<rss><channel><item><title>World&amp;#8217;s largest Pio installation</title>
-    <pubDate>Thu, 18 Sep 2026 08:00:00 GMT</pubDate></item></channel></rss>"""
+    <link>https://www.strongpoint.com/news/pio-installation/</link><pubDate>Thu, 18 Sep 2026 08:00:00 GMT</pubDate></item></channel></rss>"""
 
     [fact] = feed_activity_facts(feed, "https://www.strongpoint.com/news/feed/", NOW)
 

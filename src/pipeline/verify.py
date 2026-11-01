@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from rapidfuzz import fuzz
 
-from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX
+from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, ROLE_VALUE_PREFIX
 from src.pipeline.extract import RawFact
 from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.social import canonical_social_profile_url, plausibly_own_profile
@@ -173,7 +173,7 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     # larger organisation's hiring page, not this company's: skip it.
     if (
         fact.field_name == "hiring_signal"
-        and fact.value.startswith((CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX))
+        and fact.value.startswith((CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, ROLE_VALUE_PREFIX))
         and _site_is_a_page_of_a_larger_site(entity.official_site_candidate)
     ):
         return None
@@ -208,7 +208,9 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     # owner's personal brand, or a supplier's channel embedded in an article.
     if fact.field_name == "company_profile":
         canonical = canonical_social_profile_url(fact.value)
-        if canonical and not plausibly_own_profile(canonical, entity.legal_name or "", entity.official_site_candidate or ""):
+        if canonical and not plausibly_own_profile(
+            canonical, entity.legal_name or "", entity.official_site_candidate or "", entity.registered_address or ""
+        ):
             return None
 
     # Real-world regression, confirmed live: a site's own on-page JSON-LD can

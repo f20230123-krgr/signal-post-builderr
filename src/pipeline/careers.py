@@ -402,13 +402,10 @@ def careers_page_facts(
         # elements is not in the source as one string (official C300 feedback on receipts).
         from src.pipeline.spans import span_for_text
 
-        facts = [RawFact(
-            "hiring_signal", f"{CAREERS_VALUE_PREFIX} lists {len(roles)} open role{'s' if len(roles) != 1 else ''}: {page}",
-            page_url, "text", extracted_at, context_name=context_name,
-            evidence_span=span_for_text(html, roles[0][0]) or roles[0][0],
-        )]
+        # Official audit (23 Oct): only single job ads, not the careers page that lists them.
         # Each role on its own: title and direct link, sourced to the company's careers page
         # that lists it (the company match).
+        facts = []
         for title, url in roles[:MAX_ROLE_CLAIMS]:
             facts.append(RawFact(
                 "hiring_signal", f"{ROLE_VALUE_PREFIX}: {title} - {clean_page_url(url)}", page_url, "text", extracted_at,
@@ -420,11 +417,16 @@ def careers_page_facts(
     # published from that (title and posting date); without it, the claim says what it is.
     if _JOB_POSTING_RE.search(html):
         return []
+    # A careers landing page is not a job (official audit, 23 Oct: "Careers page: <url>" was
+    # published as hiring). A single ad's own page, reached from the company's site, is one.
     on_ats = bool(ats_domains and _on_any(_domain(page_url), ats_domains))
-    if is_careers_url(page_url, ats_domains) and (on_ats or CAREERS_HEADING_RE.search(heading)):
-        prefix = JOB_AD_VALUE_PREFIX if _JOB_DETAIL_RE.search(page_url) else CAREERS_VALUE_PREFIX
+    if (
+        _JOB_DETAIL_RE.search(page_url)
+        and is_careers_url(page_url, ats_domains)
+        and (on_ats or CAREERS_HEADING_RE.search(heading))
+    ):
         return [RawFact(
-            "hiring_signal", f"{prefix}: {clean_page_url(page_url)}", page_url, "text", extracted_at,
+            "hiring_signal", f"{JOB_AD_VALUE_PREFIX}: {clean_page_url(page_url)}", page_url, "text", extracted_at,
             context_name=context_name, evidence_span=heading,
         )]
     return []

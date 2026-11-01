@@ -30,7 +30,7 @@ import trafilatura
 
 from src.pipeline.careers import careers_page_facts, is_careers_url
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
-from src.pipeline.news import is_headline, news_item_facts, plain_headline, wp_post_facts
+from src.pipeline.news import is_headline, is_news_title, is_post_link, news_item_facts, plain_headline, wp_post_facts
 from src.pipeline.social import social_profile_link
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -278,6 +278,12 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
         elif any(t in _EVENT_TYPES for t in obj_types):
             activity_date = obj.get("startDate")
 
+        # "Article" mark-up on a home, contact or product page is a page template, not a news
+        # post (official audit, 23 Oct): the page itself must be a post page.
+        if activity_date and any(t in _DATED_ACTIVITY_TYPES for t in obj_types) and not (
+            _is_post_page(source_url) and is_news_title(headline)
+        ):
+            activity_date = None
         if activity_date:
             # "2023-04-13T15:12:07.000Z" -> the day; the time of day is not part of the fact.
             day = re.match(r"\s*(\d{4}-\d{2}-\d{2})", str(activity_date))
@@ -512,6 +518,19 @@ MAX_FEED_ACTIVITY_ENTRIES = 5
 
 _FEED_ITEM_RE = re.compile(r"<(?:item|entry)\b[^>]*>(.*?)</(?:item|entry)>", re.IGNORECASE | re.DOTALL)
 _FEED_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+# An entry's own page: RSS <link>url</link>, or Atom <link href="url"/> (the alternate link).
+_FEED_LINK_RE = re.compile(
+    r"""<link\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>|<link\b[^>]*>\s*([^<\s][^<]*?)\s*</link>""", re.IGNORECASE
+)
+def _is_post_page(url: str) -> bool:
+    """`url` is a page of its own below the site root that is not a contact, legal, careers,
+    shop or listing page (see news.is_post_link)."""
+    parts = urlsplit(url)
+    return is_post_link(url, f"{parts.scheme}://{parts.netloc}/")
+
+
+# A shop's product feed (/collections/nyheter.atom is "new arrivals"), not news.
+_FEED_OF_PRODUCTS_RE = re.compile(r"/(?:collections?|products?|produkt|produkter|shop|butikk)(?:/|$)", re.IGNORECASE)
 _FEED_DATE_RE = re.compile(
     r"<(?:pubDate|published|updated|dc:date)\b[^>]*>(.*?)</(?:pubDate|published|updated|dc:date)>",
     re.IGNORECASE | re.DOTALL,
@@ -547,15 +566,23 @@ def feed_activity_facts(content: str, source_url: str, extracted_at: datetime) -
     if not looks_like_feed(content):
         return []
 
+    # Official audit (23 Oct): only dated news posts. Not a shop's product feed, and not an
+    # entry whose own link is a product, contact or listing page.
+    if _FEED_OF_PRODUCTS_RE.search(urlsplit(source_url).path):
+        return []
     facts: list[RawFact] = []
     for raw_item in _FEED_ITEM_RE.findall(content):
         date_match = _FEED_DATE_RE.search(raw_item)
         if not date_match:
             continue
         title_match = _FEED_TITLE_RE.search(raw_item)
-        title = _feed_text(title_match.group(1)) if title_match else "activity"
+        title = _feed_text(title_match.group(1)) if title_match else ""
         published = _feed_text(date_match.group(1))
-        if not title or not published:
+        if not title or not published or not is_news_title(plain_headline(title)):
+            continue
+        link_match = _FEED_LINK_RE.search(raw_item)
+        link = _feed_text(link_match.group(1) or link_match.group(2)) if link_match else ""
+        if not link or not is_post_link(link, source_url):
             continue
         iso = _feed_iso_date(published)
         facts.append(

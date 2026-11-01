@@ -946,7 +946,7 @@ def test_a_registered_site_named_by_the_companys_initials_lends_its_content():
     nor the full name, but the domain is the name's initials: the site's news is its own."""
     record = {"organisasjonsnummer": "976088719", "navn": "NORSKE KOKKERS LANDSFORENING", "hjemmeside": "www.nkl.no", "historiskeNavn": []}
     own_page = """<html><head><title>NKL</title></head><body>
-      <article><h2>Kokkenes dag 2026</h2><time datetime="2026-09-01">1. september 2026</time></article>
+      <article><h2><a href="/kokkenes-dag-2026/">Kokkenes dag 2026</a></h2><time datetime="2026-09-01">1. september 2026</time></article>
       </body></html>"""
 
     def handler(request: httpx.Request) -> httpx.Response:

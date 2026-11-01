@@ -86,10 +86,10 @@ def test_a_page_listing_open_roles_is_a_role_level_signal_with_the_title_as_span
         '<a href="/stillinger/">Se alle stillinger</a>'
     )
 
-    page, *roles = careers_page_facts(html, "https://www.example.no/karriere", NOW)
+    roles = careers_page_facts(html, "https://www.example.no/karriere", NOW)
 
-    assert page.field_name == "hiring_signal"
-    assert page.value == f"{CAREERS_VALUE_PREFIX} lists 2 open roles: https://www.example.no/karriere"
+    # Official audit (23 Oct): the careers page itself is not a job; only the single ads are.
+    assert not any(r.value.startswith(CAREERS_VALUE_PREFIX) for r in roles)
     # Each role on its own (official feedback: "capture role title, direct URL, and company match").
     assert [r.value for r in roles] == [
         "Open role: Backend-utvikler - https://www.example.no/stillinger/backend-utvikler",
@@ -104,14 +104,10 @@ def test_navigation_links_are_not_counted_as_roles():
     assert role_links(html, "https://www.example.no/karriere") == []
 
 
-def test_a_careers_page_without_visible_listings_claims_only_that_the_page_exists():
-    """Listings loaded by script leave no roles in the static HTML. The claim is
-    the page, never that a role is open."""
-    [fact] = careers_page_facts(_page("<div id='app'></div>"), "https://www.example.no/karriere", NOW)
-
-    assert fact.value == f"{CAREERS_VALUE_PREFIX}: https://www.example.no/karriere"
-    assert "open role" not in fact.value and "hiring" not in fact.value.lower()
-    assert fact.evidence_span == "Karriere - Example AS"
+def test_a_careers_page_without_visible_listings_publishes_nothing():
+    """Listings loaded by script leave no roles in the static HTML. Official audit (23 Oct):
+    a careers landing page ("Careers page: <url>") is not a job, so nothing is published."""
+    assert careers_page_facts(_page("<div id='app'></div>"), "https://www.example.no/karriere", NOW) == []
 
 
 def test_a_page_that_says_there_are_no_openings_publishes_nothing():
@@ -128,14 +124,14 @@ def test_a_page_that_is_not_a_careers_url_and_lists_no_roles_publishes_nothing()
     assert careers_page_facts(_page("<p>Hello</p>", title="Karriere"), "https://www.example.no/om-oss", NOW) == []
 
 
-def test_an_ats_page_is_accepted_even_when_its_title_is_generic():
+def test_an_ats_landing_page_with_no_listed_ads_is_not_a_job():
     facts = careers_page_facts(_page("<div></div>", title="Example AS"), "https://acme.recman.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
 
-    assert [f.value for f in facts] == [f"{CAREERS_VALUE_PREFIX}: https://acme.recman.no/"]
+    assert facts == []
 
 
 def test_extract_runs_the_careers_check_only_on_careers_urls():
-    body = '<a href="/jobs/a-role">A role</a><a href="/jobs/b-role">B role</a>'
+    body = '<a href="/jobs/7116722-a-role">A role here</a><a href="/jobs/7116723-b-role">B role here</a>'
 
     on_careers = extract(FetchedPage("https://www.example.no/karriere", _page(body), NOW, EvidenceState.AVAILABLE), now=lambda: NOW)
     elsewhere = extract(FetchedPage("https://www.example.no/blog", _page(body), NOW, EvidenceState.AVAILABLE), now=lambda: NOW)
@@ -277,10 +273,9 @@ def test_a_card_link_takes_its_heading_as_the_title_not_the_whole_teaser():
         "<p>Bli med og form fremtidens byggebransje sammen med oss i sommer, med spennende oppgaver og god oppfølging hele veien.</p></a>"
     )
 
-    page, role = careers_page_facts(html, "https://backe.no/ledige-stillinger", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
+    [role] = careers_page_facts(html, "https://backe.no/ledige-stillinger", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
 
     assert role.value == "Open role: Sommerstudenter - https://23392300.webcruiter.no/Main/Recruit/Public/5173322543"
-    assert page.value == "Careers page lists 1 open role: https://backe.no/ledige-stillinger"
 
 
 def test_roles_on_a_known_ats_count_for_the_companys_careers_page():
@@ -352,9 +347,9 @@ def test_a_listing_at_the_root_of_a_careers_subdomain_counts_roles_under_its_own
         title="Careers - ORS",
     )
 
-    page, *roles = careers_page_facts(html, "https://career.example.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
+    roles = careers_page_facts(html, "https://career.example.no/", NOW, ats_domains=DEFAULT_ATS_DOMAINS)
 
-    assert "lists 2 open roles" in page.value and len(roles) == 2
+    assert len(roles) == 2 and all(r.value.startswith("Open role: Senior") for r in roles)
 
 
 def test_malformed_links_on_a_real_page_are_skipped_not_fatal():
@@ -376,8 +371,7 @@ def test_team_introductions_and_testimonials_under_a_jobs_path_are_not_open_role
     html = _page('<a href="/jobb/mot-anna-og-lars">Møt Anna og Lars</a><a href="/jobb/jon-bratberg">Jon Bratberg Produktsjef</a>')
 
     assert role_links(html, "https://www.example.no/jobb/") == []
-    [fact] = careers_page_facts(html, "https://www.example.no/jobb/", NOW)
-    assert fact.value == f"{CAREERS_VALUE_PREFIX}: https://www.example.no/jobb/"  # the page, not invented roles
+    assert careers_page_facts(html, "https://www.example.no/jobb/", NOW) == []  # neither invented roles nor the page
 
 
 def test_a_job_path_with_a_numeric_id_or_an_ad_word_is_an_ad():

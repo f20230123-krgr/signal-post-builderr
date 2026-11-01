@@ -212,11 +212,22 @@ def test_a_site_proven_by_the_registered_phone_quotes_that_phone_not_template_te
     page = "<html><head><title>Your Site Title (Copy)</title></head><body><p>Kontakt oss: tlf 23 22 66 66 eller epost</p></body></html>"
     hints = SiteHints(phones=["23226666"])
 
-    fact = _verify(page, hints, name="ANOTHER WORLD ENTERTAINMENT NORWAY AS", url="https://vme.no/")
+    fact = _verify(page, hints, name="ANOTHER WORLD ENTERTAINMENT NORWAY AS", url="https://anotherworld.no/")
 
     assert fact is not None
     assert "23 22 66 66" in fact.evidence_span and "Your Site Title" not in fact.evidence_span
     assert contact_span("<p>no number here</p>", hints) is None
+
+
+def test_a_shared_phone_number_alone_does_not_prove_an_unrelated_domain():
+    """Official audit (23 Oct): hagland.com was published for SLETTESTRANDVEIEN 4 AS because
+    the group's switchboard number is also the company's. Phone or address proves a site only
+    with the name in the domain or on the page; the org number alone still does."""
+    page = "<html><head><title>Hagland</title></head><body><p>Sentralbord +47 52 70 12 00</p></body></html>"
+    hints = SiteHints(phones=["52701200"])
+
+    assert _verify(page, hints, name="SLETTESTRANDVEIEN 4 AS", url="https://www.hagland.com/") is None
+    assert _verify(page, hints, name="HAGLAND EIENDOM AS", url="https://www.hagland.com/") is not None
 
 
 def test_a_site_proven_by_the_registered_address_quotes_the_address():

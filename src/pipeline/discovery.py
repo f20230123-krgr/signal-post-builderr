@@ -1017,6 +1017,14 @@ def verify_discovered_site(
     best_score = max(
         (name_similarity(name, c) for name in identity_names for c in name_candidates), default=0.0
     )
+    # A phone number or street address is shared by a parent, a sister company or everyone in
+    # the building (official audit, 23 Oct: hagland.com published for SLETTESTRANDVEIEN 4 AS on
+    # the switchboard number). It proves the site only alongside the name: in the domain or on
+    # the page. The org number alone still proves it.
+    if confirmed_by_contact and best_score < NAME_MATCH_THRESHOLD:
+        from src.pipeline.assemble import domain_resembles_name  # deferred: assemble imports this module's peers
+
+        confirmed_by_contact = any(domain_resembles_name(url, name) for name in identity_names)
     identity_proven = confirmed_by_org_number or confirmed_by_contact
     # A name-derived guess needs more than the name: proof of identity, or at
     # least the registered postcode and town on the page alongside the name match.

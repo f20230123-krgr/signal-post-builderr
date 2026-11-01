@@ -103,7 +103,7 @@ def test_datepublished_json_ld_becomes_dated_activity():
      "datePublished":"2026-07-01"}
     </script></head><body></body></html>"""
 
-    facts = extract(_inline_page(html))
+    facts = extract(_inline_page(html, "https://example.com/nyheter/company-wins-award"))
 
     dated = [f for f in facts if f.field_name == "dated_activity"]
     assert len(dated) == 1
@@ -273,9 +273,13 @@ def test_structured_dated_activity_carries_the_pages_own_organization_name():
     </script>
     </head></html>"""
 
-    facts = extract(_inline_page(html))
+    facts = extract(_inline_page(html, "https://example.com/om-oss"))
 
-    dated = [f for f in facts if f.field_name == "dated_activity"]
+    # Official audit (23 Oct): an "Om oss" page is navigation, not news, whoever's it is.
+    assert not [f for f in facts if f.field_name == "dated_activity"]
+    # On a real post page the item still carries the page's own organisation name.
+    post = html.replace('"name":"Om oss"', '"name":"Nye boliger i Trondheim"')
+    dated = [f for f in extract(_inline_page(post, "https://example.com/nyheter/nye-boliger")) if f.field_name == "dated_activity"]
     assert dated and all(f.context_name == "USBL" for f in dated)
 
 
@@ -484,8 +488,11 @@ def test_rss_feed_entries_become_dated_activity():
     xml = """<?xml version="1.0"?>
     <rss version="2.0"><channel>
       <title>Acme Nyheter</title>
-      <item><title>Acme opens Bergen office</title><pubDate>Mon, 01 Sep 2026 09:00:00 GMT</pubDate></item>
-      <item><title>Acme wins contract</title><pubDate>Tue, 12 Aug 2026 09:00:00 GMT</pubDate></item>
+      <item><title>Acme opens Bergen office</title><link>https://acme.no/news/bergen-office</link><pubDate>Mon, 01 Sep 2026 09:00:00 GMT</pubDate></item>
+      <item><title>Acme wins contract</title><link>https://acme.no/news/contract</link><pubDate>Tue, 12 Aug 2026 09:00:00 GMT</pubDate></item>
+      <item><title>Kontakt oss</title><link>https://acme.no/kontakt-oss</link><pubDate>Tue, 12 Aug 2026 09:00:00 GMT</pubDate></item>
+      <item><title>Acme Hoodie</title><link>https://acme.no/products/hoodie</link><pubDate>Tue, 12 Aug 2026 09:00:00 GMT</pubDate></item>
+      <item><title>An entry with no link</title><pubDate>Tue, 12 Aug 2026 09:00:00 GMT</pubDate></item>
     </channel></rss>"""
 
     facts = feed_activity_facts(xml, "https://acme.no/feed", datetime(2026, 1, 1, tzinfo=timezone.utc))
@@ -493,6 +500,9 @@ def test_rss_feed_entries_become_dated_activity():
 
     assert any("Acme opens Bergen office" in v and "2026" in v for v in values)
     assert all(f.field_name == "dated_activity" for f in facts)
+    # Only dated posts with their own page (official audit, 23 Oct): not a contact page, a
+    # product or an entry without a link.
+    assert len(facts) == 2
     first = next(f for f in facts if "Bergen" in f.value)
     assert first.value == "Acme opens Bergen office (2026-09-01)"
     assert first.effective_date == "2026-09-01" and first.evidence_span == "Acme opens Bergen office"
@@ -501,7 +511,7 @@ def test_rss_feed_entries_become_dated_activity():
 def test_atom_feed_entries_become_dated_activity():
     xml = """<?xml version="1.0"?>
     <feed xmlns="http://www.w3.org/2005/Atom">
-      <entry><title>Ny avdeling i Troms</title><updated>2026-07-04T10:00:00Z</updated></entry>
+      <entry><title>Ny avdeling i Troms</title><link rel="alternate" href="https://acme.no/nyheter/troms"/><updated>2026-07-04T10:00:00Z</updated></entry>
     </feed>"""
 
     facts = feed_activity_facts(xml, "https://acme.no/atom.xml", datetime(2026, 1, 1, tzinfo=timezone.utc))
@@ -514,7 +524,7 @@ def test_atom_feed_entries_become_dated_activity():
 def test_feed_entries_without_a_date_are_skipped_and_output_is_capped():
     """Undated entries aren't dated activity, and a feed can carry hundreds --
     same capping discipline as every other list section."""
-    items = "".join(f"<item><title>Post {i}</title><pubDate>2026-08-0{i%9+1}</pubDate></item>" for i in range(30))
+    items = "".join(f"<item><title>Post number {i}</title><link>https://acme.no/news/{i}</link><pubDate>2026-08-0{i%9+1}</pubDate></item>" for i in range(30))
     xml = f"<rss><channel><item><title>No date here</title></item>{items}</channel></rss>"
 
     facts = feed_activity_facts(xml, "https://acme.no/feed", datetime(2026, 1, 1, tzinfo=timezone.utc))

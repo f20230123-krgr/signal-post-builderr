@@ -116,6 +116,8 @@ def social_profile_link(url: str) -> Optional[tuple[str, str]]:
     trailing slash or a country subdomain survives) minus the query string and
     fragment, which only carry tracking. The key is the canonical form, so the
     same profile linked three ways is one claim."""
+    # A link read from a feed's text can carry the CDATA close ("/steinerskolenioslo/]]").
+    url = re.sub(r"[\]\[)>'\"]+$", "", url.strip())
     key = canonical_social_profile_url(url)
     if key is None:
         return None
@@ -189,7 +191,35 @@ def resembles_company(canonical: str, tokens: set[str]) -> bool:
 _ID_LIKE_RE = re.compile(r"^(?:uc[\w-]{15,}|\d+|profilephpid\d+)$")
 
 
-def plausibly_own_profile(canonical: str, legal_name: str, site_url: str) -> bool:
+_FOREIGN_FORM_RE = re.compile(
+    r"(?:^|[\W_])(?:ltd|limited|gmbh|ab|oy|oyj|aps|a[-_.]s|inc|llc|bv|plc|srl|sarl|spa|ag|corp|pty)(?:$|[\W_])", re.IGNORECASE
+)
+
+
+# A group or parent's account ("autoin-gruppen", "strommengroup") linked from a member company's
+# site is the group's, unless the company is itself the group.
+_GROUP_WORD_RE = re.compile(r"gruppen|group|konsern|holding", re.IGNORECASE)
+
+
+def _fold(text: str) -> str:
+    return text.lower().translate(str.maketrans({"æ": "ae", "ø": "o", "å": "a"}))
+
+
+def _branch_town(account: str, legal_name: str, site_url: str, home: str) -> Optional[str]:
+    """The town a branch account is named after ("uniteperformancelarvik" -> "larvik"), when
+    that town is not part of the company's own name, address or domain."""
+    from src.pipeline.places import MUNICIPALITIES
+
+    own = _fold(f"{legal_name} {site_url} {home}")
+    folded = _fold(account)
+    for town in MUNICIPALITIES:
+        plain = _fold(town)
+        if folded.endswith(plain) and len(folded) > len(plain) + 3 and plain not in re.sub(r"[^a-z0-9]", "", own):
+            return town
+    return None
+
+
+def plausibly_own_profile(canonical: str, legal_name: str, site_url: str, home: str = "") -> bool:
     """Whether a profile a company's site links can be published as the company's OWN.
 
     A site also links its parent group's accounts, an owner's personal brand, a supplier's
@@ -200,6 +230,18 @@ def plausibly_own_profile(canonical: str, legal_name: str, site_url: str) -> boo
     account = _account_name(canonical)
     if not account or _ID_LIKE_RE.match(account) or "profile.php" in canonical:
         return True
+    # An account named with another country's company form ("epsco-ltd" linked from EPSCO
+    # NORGE AS's site) is the foreign parent or sister company's, not this Norwegian one's
+    # (official audit, 23 Oct: social accounts belonging to other companies).
+    segments = [s for s in urlsplit(canonical).path.split("/") if s]
+    raw_account = segments[-1] if segments else ""
+    if _FOREIGN_FORM_RE.search(raw_account) and not _FOREIGN_FORM_RE.search(legal_name):
+        return False
+    if _GROUP_WORD_RE.search(account) and not _GROUP_WORD_RE.search(legal_name):
+        return False
+    # A chain's branch ("uniteperformancelarvik", NKL's "...Trondheim" page) is not the company.
+    if _branch_town(account, legal_name, site_url, home):
+        return False
     if resembles_company(canonical, identity_tokens(legal_name, site_url)):
         return True
     # A short domain label ("nsp" for nsp.no) is too short to be a token on its own, but an

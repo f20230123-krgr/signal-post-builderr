@@ -65,7 +65,7 @@ def test_a_script_or_style_block_is_never_read_as_news():
 
 def test_the_fact_carries_headline_span_and_effective_date():
     [fact] = news_item_facts(
-        "<article><time datetime='2026-09-24'></time><h2>Vi åpner nytt kontor</h2></article>", "https://example.no/nyheter", NOW
+        "<article><time datetime='2026-09-24'></time><h2><a href='/nyheter/nytt-kontor'>Vi åpner nytt kontor</a></h2></article>", "https://example.no/nyheter", NOW
     )
 
     assert fact.field_name == "dated_activity"
@@ -75,7 +75,7 @@ def test_the_fact_carries_headline_span_and_effective_date():
 
 
 def test_extract_and_verify_carry_the_effective_date_through():
-    html = "<html><body><article><time datetime='2026-09-24'></time><h2>Vi åpner nytt kontor</h2></article></body></html>"
+    html = "<html><body><article><time datetime='2026-09-24'></time><h2><a href='/nyheter/kontor'>Vi åpner nytt kontor</a></h2></article></body></html>"
     facts = [f for f in extract(FetchedPage("https://example.com/nyheter", html, NOW, EvidenceState.AVAILABLE), now=lambda: NOW)
              if f.evidence_span == "Vi åpner nytt kontor"]
 
