@@ -261,6 +261,31 @@ company recall 100%, external precision 100%.
 Use `/self-score` to re-run the harness and quote fresh numbers, and
 `/guard-check` before any PR to confirm no standard has regressed.
 
+Sixth revision (2026-11), after Builderr's audit of 40 never-seen companies (23 October: "7 social
+accounts, 11 news items and 4 websites were someone else's"; "many 'news' items were not news";
+"careers landing pages were published as jobs"). Measured on 300 never-seen companies (100 random,
+100 with a website, 100 held back until the end) plus Builderr's sample, every removed item
+hand-checked against v5:
+
+- **News is a dated post with its own page.** An item counts only when it links to its own post
+  on the company's site (or the company's press-release service: Oslo Børs NewsWeb, Cision,
+  GlobeNewswire, Mynewsdesk, NTB, Euroland). Not a shop's product or "new arrivals" feed, not a
+  contact, cookie, careers, project or listing page, not a one-word label ("Historie"), not a
+  website builder's "Hello world!" post, and not "Article" mark-up on a page that is not a post.
+- **Hiring is a single job ad.** "Careers page: <url>" is no longer published; open roles with
+  their own link, single ad pages and posted job ads are. A role on a larger organisation's
+  careers site is not this company's.
+- **Ownership.** A phone number or street address proves a site we found ourselves only with the
+  company's name in the domain or on the page (a parent's switchboard number had put hagland.com
+  under SLETTESTRANDVEIEN 4 AS); the org number alone still does. A social account named with a
+  foreign company form ("epsco-ltd"), a group's account for a member company ("autoin-gruppen")
+  or a branch's account ("uniteperformancelarvik") is not the company's own. A registered website
+  that another registered entity lists as its own, and whose domain is that entity's name
+  (VERKSTEDVEIEN 3 AS registers entra.no: ENTRA ASA's), is reported as ambiguous.
+- **Same registry data, same budget.** Every registry figure and role is unchanged; on Builderr's
+  sample site news went 267 -> 219 items and hiring 38 -> 34 claims, all removals junk or another
+  company's; 0 material changes on refresh; viewer tasks pass on laptop and phone.
+
 Fifth revision (2026-10-14), after Builderr's C300 estimate (74.59: recall 32.19, precision
 30.00, synthesis 8.40, UX 4.00; "5 of 43 verified hiring-bearing companies matched ... capture
 role title, direct URL, and company match"; a USBL article attributed to STRANDVEGEN BOLIGPARK AS):

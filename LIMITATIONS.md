@@ -247,6 +247,21 @@ All permissive; no copyleft (GPL-style) obligations.
 - **Spans are verbatim.** A claim's span is text found in the cited response; where none can
   be found, the envelope falls back to the value, as before.
 
+## Known limits added 2026-11 (sixth revision)
+
+- **Only posts with their own page are news.** A dated item without a link to its own post (an
+  event card on the homepage, a notice in a status widget) is no longer published, and a news
+  widget linking to another organisation's site (a magazine the company publishes elsewhere) is
+  not the company's own news.
+- **A careers page without readable ads publishes nothing.** Job lists drawn by script are not
+  seen, and since a careers landing page is not a job, such companies show no hiring signal.
+- **A registered website is marked ambiguous only on hard proof.** Brønnøysund must show another
+  entity listing the same site whose name the domain spells (entra.no: ENTRA ASA). A site that is
+  someone else's but listed by nobody else (a county's site, a subsidiary's site) is still
+  reported as the registry states it, with nothing read from its pages.
+- **Branch accounts are recognised by municipality names** at the end of the account name
+  ("...larvik"); a branch named after a district or a shorter town name is not caught.
+
 ## Known limits added 2026-10-14
 
 - **A registered website that is someone else's lends no content.** If a company's registered
@@ -255,7 +270,7 @@ All permissive; no copyleft (GPL-style) obligations.
   not used; a genuine site under an unrelated brand that never names the company therefore
   contributes nothing beyond the registry's own statement of the website.
 - **Roles are read from static HTML.** Job lists drawn by script (ReachMee, some Teamtailor and
-  Webcruiter embeds) are not seen; the careers page itself is still reported. Job-board ads are
+  Webcruiter embeds) are not seen (since v6 the bare careers page is not reported). Job-board ads are
   counted only when the company's own careers page links the individual ad; the ad page itself is
   not fetched, so its employer field is not checked (a staffing company may list a client's ad).
 - **The homepage description is the company's own wording**, quoted as published (Norwegian or
