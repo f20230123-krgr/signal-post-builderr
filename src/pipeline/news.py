@@ -183,10 +183,33 @@ def is_post_link(url: str, page_url: str) -> bool:
     return not _NOT_A_POST_PATH_RE.search(parts.path + ("?" + parts.query if parts.query else ""))
 
 
+def _slug(text: str) -> str:
+    folded = text.lower().translate(str.maketrans({"æ": "ae", "ø": "o", "å": "a"}))
+    return re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+
+
+def _post_links(html: str, page_url: str) -> list[tuple[str, str]]:
+    """(url, text) of every link on the page that can be a post's own page."""
+    return [(url, text) for url, text in _anchors(html, page_url) if is_post_link(url, page_url)]
+
+
+def _links_to_its_post(block: str, title: str, page_url: str, post_links: list[tuple[str, str]]) -> bool:
+    """The item links to its own post page: a post link inside the item, or one anywhere on the
+    page whose text or address is this headline (layouts that put the link outside the dated
+    part of the card)."""
+    if any(is_post_link(url, page_url) for url, _ in _anchors(block, page_url)):
+        return True
+    key, slug = title.strip().lower(), _slug(title)[:40]
+    return any(
+        (text and (text.strip().lower() == key or key in text.lower())) or (len(slug) >= 12 and slug in _slug(url))
+        for url, text in post_links
+    )
+
+
 def is_news_title(title: str) -> bool:
     """A headline that is not a navigation label ("Kontakt oss", "Personvern"). A single word
     ("Historie", "Nyheter") is a page or section name, not a headline."""
-    words = re.findall(r"[^\W\d_]{2,}", title)
+    words = [t for t in title.split() if re.search(r"\w", t)]
     return (
         is_headline(title) and len(words) >= 2
         and not _NAV_TITLE_RE.match(title.strip(" .:-–|")) and not _PLACEHOLDER_TITLE_RE.search(title)
@@ -225,6 +248,7 @@ def news_items(html: str, today: Optional[date] = None, page_url: Optional[str] 
     post, not a product, listing or navigation entry)."""
     items: list[tuple[str, str]] = []
     seen: set[str] = set()
+    post_links = _post_links(html, page_url) if page_url else []
     for block in _blocks(html):
         iso = None
         time_tag = _TIME_TAG_RE.search(block)
@@ -237,7 +261,7 @@ def news_items(html: str, today: Optional[date] = None, page_url: Optional[str] 
             continue
         if not is_news_title(title) or iso == (today or datetime.now().date()).isoformat():
             continue
-        if page_url and not any(is_post_link(url, page_url) for url, _ in _anchors(block, page_url)):
+        if page_url and not _links_to_its_post(block, title, page_url, post_links):
             continue
         seen.add(title.lower())
         items.append((title, iso))

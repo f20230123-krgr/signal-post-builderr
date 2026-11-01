@@ -216,3 +216,38 @@ def test_a_site_that_is_not_wordpress_is_never_asked_for_a_post_list():
     pages = crawl(_entity("https://example.com/"), BudgetGovernor(), client=_client({"https://example.com/": "<html>x</html>"}), follow_news=True)
 
     assert [p.url for p in pages] == ["https://example.com/"]
+
+
+# --- only dated posts with their own page (official audit, 23 Oct) -------------------------
+
+
+def test_an_item_counts_only_when_it_links_to_its_own_post_page():
+    """Not "Kontakt oss", not an undated or unlinked line, not a link to another site."""
+    html = (
+        "<ul><li><time datetime='2026-10-01'></time><h3><a href='/nyheter/ny-avtale'>Ny avtale med Equinor</a></h3></li>"
+        "<li><time datetime='2026-10-02'></time><h3><a href='/kontakt-oss'>Kontakt oss</a></h3></li>"
+        "<li><time datetime='2026-10-03'></time><h3>Et innlegg uten lenke</h3></li>"
+        "<li><time datetime='2026-10-04'></time><h3><a href='https://annen.no/sak'>En sak hos noen andre</a></h3></li></ul>"
+    )
+
+    assert news_items(html, TODAY, "https://example.no/nyheter") == [("Ny avtale med Equinor", "2026-10-01")]
+
+
+def test_a_card_whose_link_sits_outside_its_dated_part_still_counts():
+    """salmongroup.no/nyheter/ puts the post link in the card's heading and the date in a
+    separate "post-date" div: the headline's own link elsewhere on the page proves the post."""
+    html = (
+        "<div class='card'><h3><a href='/nytt-styre-i-salmon-group/'>Nytt styre i Salmon Group</a></h3></div>"
+        "<div class='post-date'>9. juni 2024</div><span><h3>Nytt styre i Salmon Group</h3></span>"
+    )
+
+    assert ("Nytt styre i Salmon Group", "2024-06-09") in news_items(html, TODAY, "https://salmongroup.no/nyheter/")
+
+
+def test_template_posts_section_labels_and_one_word_titles_are_not_news():
+    from src.pipeline.news import is_news_title
+
+    for title in ("Hello world!", "Hei, verden!", "Welcome to Flatsome", "Kontakt oss", "Personvern", "Historie", "Bendiksen"):
+        assert not is_news_title(title), title
+    for title in ("Strategisamling i K8", "Lederkonferansen 2026", "Ny avtale med Equinor"):
+        assert is_news_title(title), title
