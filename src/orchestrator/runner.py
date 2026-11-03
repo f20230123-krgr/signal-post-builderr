@@ -37,7 +37,7 @@ from src.pipeline.assemble import assemble, domain_resembles_name
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
 from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.render import active_renderer
-from src.pipeline.site_evidence import official_site_evidence
+from src.pipeline.site_evidence import NOT_READABLE, NOT_SHOWN, _is_owner_page, site_ownership
 from src.pipeline.social import identity_tokens, script_social_candidates, social_profile_link
 from src.pipeline.discovery import (
     ProviderHealth,
@@ -340,26 +340,43 @@ def _default_process_one(
         confirmed_facts.insert(0, discovered_site_fact)
     elif crawl_entity.resolution_state == EvidenceState.AVAILABLE and crawl_entity.official_site_candidate:
         # A registered website: back the claim with the site's own page.
-        site_evidence = official_site_evidence(pages, crawl_entity)
+        site_evidence, unproven_reason = site_ownership(pages, crawl_entity)
         if site_evidence:
             confirmed_facts.append(site_evidence)
-        elif not domain_resembles_name(crawl_entity.official_site_candidate, crawl_entity.legal_name or ""):
-            # The company registered a site that neither names it nor carries its name in the
-            # domain: often its owner's or manager's site (STRANDVEGEN BOLIGPARK AS registers
-            # usbl.no, and a USBL article was published as its news). The registry's own
-            # statement of the website stands; nothing read from that site's pages is
-            # attributed to this company.
+        elif unproven_reason in (NOT_READABLE, NOT_SHOWN) and domain_resembles_name(
+            crawl_entity.official_site_candidate, crawl_entity.legal_name or ""
+        ):
+            # The domain itself spells the company's name (gulvbetong.no, nkl.no for NORSKE
+            # KOKKERS LANDSFORENING) and the site states no other organisation's number: the
+            # registry's own statement of the website stands. It does not count as proven for
+            # social pages (below).
+            pass
+        else:
+            # Official feedback (Nov): wrong websites "were mostly a parent or a builder" --
+            # "check that the page shows the company's own name or number". A registered site
+            # that does not (thon.no for VIDDA AS, entra.no for VERKSTEDVEIEN 3 AS) is not
+            # published as this company's, and nothing read from it is attributed to it; the
+            # field is left blank with the reason ("can't tell").
             confirmed_facts = []
-            # When another registered entity lists the same site as its own and the domain is
-            # its name (VERKSTEDVEIEN 3 AS registers entra.no: ENTRA ASA's), the website is
-            # not published as this company's either (official audit, 23 Oct).
-            holder = website_held_by_another_entity(crawl_entity.official_site_candidate, org_number, budget, client=client)
+            reason = unproven_reason or NOT_SHOWN
+            holder = None
+            if not domain_resembles_name(crawl_entity.official_site_candidate, crawl_entity.legal_name or ""):
+                holder = website_held_by_another_entity(crawl_entity.official_site_candidate, org_number, budget, client=client)
             if holder:
-                confirmed_facts.append(ConfirmedFact(
-                    field_name="official_site_held_by", value=f"{holder[0]} ({holder[1]})",
-                    source_url=f"https://data.brreg.no/enhetsregisteret/api/enheter/{holder[1]}", match_confidence=100.0,
-                    retrieved_at=now(), source_class="official_registry", extraction_method="registry",
-                ))
+                reason = f"Brønnøysund lists the same website for {holder[0]} ({holder[1]})"
+            confirmed_facts.append(ConfirmedFact(
+                field_name="official_site_unproven", value=f"Registered website {crawl_entity.official_site_candidate}: {reason}",
+                source_url=crawl_entity.source or "", match_confidence=0.0,
+                retrieved_at=now(), source_class="official_registry", extraction_method="registry",
+            ))
+    # Social pages only from a site proven to be the company's, and only the ones its home or
+    # contact page links (its header and footer), not an article's or a careers page's
+    # (official feedback, Nov: "take them from the footer of each confirmed site").
+    site_proven = bool(discovered_site_fact) or any(f.field_name == "official_site_evidence" for f in confirmed_facts)
+    confirmed_facts = [
+        f for f in confirmed_facts
+        if f.field_name != "company_profile" or (site_proven and _is_owner_page(f.source_url))
+    ]
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
     confirmed_facts += registry_facts

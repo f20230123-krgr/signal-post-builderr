@@ -275,6 +275,11 @@ class Summary:
     unknowns: list[str]
     changes: list[str]
     headline: str = ""
+    # Fields left blank because we cannot tell, each with its one-line reason (official
+    # feedback, Nov: "a wrong match costs more than a visible 'can't tell'").
+    cant_tell: list[str] = field(default_factory=list)
+    # How sure we are that the facts published belong to this company: (level, why).
+    confidence: tuple[str, str] = ("high", "")
 
     @property
     def text(self) -> str:
@@ -826,7 +831,11 @@ def build_summary(profile: CompanyProfile) -> Summary:
     sentences = [s for s in (build(profile) for build in builders) if s is not None]
 
     unknowns: list[str] = []
-    if _value_or_none(profile.online_presence.official_site) is None:
+    cant_tell: list[str] = []
+    site = profile.online_presence.official_site
+    if site.state == EvidenceState.AMBIGUOUS:
+        cant_tell.append(f"official website ({_lower_first(site.reason) if site.reason else 'the company match is uncertain'})")
+    elif _value_or_none(site) is None:
         unknowns.append("official website")
     if not profile.online_presence.company_profiles:
         unknowns.append("company-owned social profiles")
@@ -866,12 +875,41 @@ def build_summary(profile: CompanyProfile) -> Summary:
             ))
         else:
             sentences.append(SummarySentence(f"No material change since the previous run{previous}.", []))
+    if cant_tell:
+        sentences.append(SummarySentence("Can't tell: " + "; ".join(cant_tell) + ".", []))
     if unknowns:
         sentences.append(SummarySentence("Not found: " + ", ".join(unknowns) + ".", []))
 
     if sentences:
         sentences[0].text = f"As of {as_of}: {sentences[0].text}"
-    return Summary(as_of=as_of, sentences=sentences, unknowns=unknowns, changes=changes, headline=_headline(profile))
+    return Summary(
+        as_of=as_of, sentences=sentences, unknowns=unknowns, changes=changes, headline=_headline(profile),
+        cant_tell=cant_tell, confidence=identity_confidence(profile),
+    )
+
+
+def _lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:]
+
+
+def identity_confidence(profile: CompanyProfile) -> tuple[str, str]:
+    """How sure we are that what is published belongs to this company, as (level, why):
+    high when everything rests on Brønnøysund or on a website that states the company's
+    organisation number; medium when the website is the company's by its name; low when we
+    could not tell which website is the company's (official feedback, Nov: "add a small
+    confidence mark per company")."""
+    site = profile.online_presence.official_site
+    if site.state == EvidenceState.AMBIGUOUS:
+        return "low", "can't tell which website is the company's; only registry facts are published"
+    if site.state != EvidenceState.AVAILABLE or not site.value:
+        return "high", "every fact is from Brønnøysund's registers (no website found)"
+    digits = re.sub(r"\D", "", site.evidence_span or "")
+    if profile.org_number in digits:
+        return "high", "the website states the company's organisation number"
+    if site.source_class == "official_registry":
+        return "medium", "the registered website's address spells the company's name; the site does not state its number"
+    return "medium", "the website names the company but does not state its organisation number"
+
 
 
 def _headline(profile: CompanyProfile) -> str:

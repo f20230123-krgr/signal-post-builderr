@@ -105,11 +105,61 @@ def name_span(html: str, legal_name: str) -> Optional[str]:
     return best if name_similarity(legal_name, best) >= MIN_NAME_SPAN_SIMILARITY else None
 
 
+# Official feedback (Nov): wrong websites "were mostly a parent or a builder" (olsenbygg.com
+# lists Kaldvellfjorden Eiendom AS as a project; appelx.no redirects to a site showing a
+# different org number). "Check that the page shows the company's own name or number."
+NOT_READABLE = "the website could not be read"
+NOT_SHOWN = "the website does not show this company's name or organisation number"
+
+
+def other_org_reason(number: str) -> str:
+    return f"the website shows another organisation's number ({number[:3]} {number[3:6]} {number[6:]}), not this company's"
+
+
+# The pages where a site names its own owner: the home page and its contact/about pages. A
+# name on a deeper page (a builder's project page, a customer story) is somebody else's.
+_OWNER_PAGE_RE = re.compile(
+    r"^/?(?:[a-z]{2}(?:-[a-z]{2})?(?:/|$))?(?:(?:kontakt|contact|om-?oss|om|about|about-us|firma|selskapet|company|impressum)[\w-]*/?)?$",
+    re.IGNORECASE,
+)
+# An organisation number the page states as one ("Org.nr. 999 296 432", "Org: NO 990 859 671 MVA").
+_STATED_ORG_RE = re.compile(
+    r"org(?:anisasjons)?\.?\s*-?\s*(?:nr|nummer|no)?\.?\s*:?\s*(?:NO\s*)?(\d{3})[\s. ]?(\d{3})[\s. ]?(\d{3})",
+    re.IGNORECASE,
+)
+
+
+def _valid_org_number(number: str) -> bool:
+    """Brønnøysund's modulus-11 check digit, so a phone or account number is not read as one."""
+    if len(number) != 9 or not number.isdigit():
+        return False
+    total = sum(int(d) * w for d, w in zip(number[:8], (3, 2, 7, 6, 5, 4, 3, 2)))
+    check = 11 - total % 11
+    return (0 if check == 11 else check) == int(number[8]) and check != 10
+
+
+def stated_org_numbers(html: str) -> set[str]:
+    text = re.sub(r"<[^>]+>", " ", html).replace("&nbsp;", " ").replace("&#160;", " ")
+    return {"".join(m.groups()) for m in _STATED_ORG_RE.finditer(text) if _valid_org_number("".join(m.groups()))}
+
+
+def _is_owner_page(url: str) -> bool:
+    return bool(_OWNER_PAGE_RE.match(urlsplit(url).path or "/"))
+
+
 def official_site_evidence(
     pages: list[FetchedPage], entity: ResolvedEntity, now: Optional[datetime] = None
 ) -> Optional[ConfirmedFact]:
+    return site_ownership(pages, entity, now)[0]
+
+
+def site_ownership(
+    pages: list[FetchedPage], entity: ResolvedEntity, now: Optional[datetime] = None
+) -> tuple[Optional[ConfirmedFact], Optional[str]]:
+    """The proof that the registered website is this company's (its org number on the site,
+    or its own name as the site's name on the home or contact page), or None and why not."""
     if not entity.official_site_candidate or not entity.legal_name:
-        return None
+        return None, None
     official_domain = _domain(entity.official_site_candidate)
     # Pages we REQUESTED on the registered domain; where they landed may differ.
     requested = [
@@ -118,7 +168,7 @@ def official_site_evidence(
         and _same_site(p.url, official_domain)
     ]
     if not requested:
-        return None
+        return None, NOT_READABLE
 
     homepage = requested[0]
     landed = homepage.final_url or homepage.url
@@ -143,13 +193,20 @@ def official_site_evidence(
             evidence_page, span = page, found
             break
     if span is None:
+        # A site stating another organisation's number, and never this one's, is that
+        # organisation's site whatever names it shows.
+        others = set().union(*(stated_org_numbers(p.raw_html) for p in own)) - {entity.org_number}
+        if others:
+            return None, other_org_reason(sorted(others)[0])
         for page in own:
+            if not _is_owner_page(page.final_url or page.url):
+                continue
             found = name_span(page.raw_html, entity.legal_name)
             if found:
                 evidence_page, span = page, found
                 break
     if evidence_page is None or span is None:
-        return None
+        return None, NOT_SHOWN
 
     return ConfirmedFact(
         field_name=FIELD_NAME,
@@ -161,4 +218,4 @@ def official_site_evidence(
         extraction_method="text",
         source_class="company_owned",
         evidence_span=span,
-    )
+    ), None

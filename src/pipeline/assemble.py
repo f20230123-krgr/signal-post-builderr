@@ -141,18 +141,21 @@ def _official_site_claim(entity: ResolvedEntity, confirmed_facts: list[Confirmed
         from_site = _first_matching(confirmed_facts, "official_site_evidence")
         if from_site:
             return _confirmed_claim(from_site)
-        # Another registered entity lists this same site as its own and the domain is its name
-        # (VERKSTEDVEIEN 3 AS registers entra.no: ENTRA ASA's). Not published as this
-        # company's website (official audit, 23 Oct): say we cannot be sure.
-        if _first_matching(confirmed_facts, "official_site_held_by"):
-            return Claim(value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None)
+        # The registered site does not show this company's name or number (a parent's or a
+        # builder's site, official feedback Nov): left blank with the reason, "can't tell".
+        unproven = _first_matching(confirmed_facts, "official_site_unproven")
+        if unproven:
+            return Claim(value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None, reason=unproven.value)
         # A housing co-op often registers its property manager's website as its own
         # (SAMEIET ST OLAV -> bate.no). That domain belongs to another company: unless the
         # site itself names the co-op (handled above), say we cannot be sure.
         if entity.legal_name and is_housing_coop(entity.legal_name) and not domain_resembles_name(
             entity.official_site_candidate, entity.legal_name
         ):
-            return Claim(value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None)
+            return Claim(
+                value=None, state=EvidenceState.AMBIGUOUS, source=entity.source, retrieved_at=None,
+                reason=f"Registered website {entity.official_site_candidate}: a housing co-op's registered site is usually its property manager's",
+            )
         # A website the LIVE registry record states (the universe snapshot lacks it for
         # most companies that have one) is cited to that record, not to the snapshot.
         live = _first_matching(confirmed_facts, "official_site_registry")

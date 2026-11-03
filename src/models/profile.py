@@ -68,6 +68,10 @@ class Claim(BaseModel):
     # this is the text a checker can actually find. None -> envelope falls back
     # to the value.
     evidence_span: Optional[str] = None
+    # One line saying why a field is left blank when we cannot tell ("the registered website
+    # shows another organisation's number"). Official feedback (Nov): "leave a field blank with
+    # a one-line reason when you are not sure. A wrong match costs more than a visible 'can't tell'."
+    reason: Optional[str] = None
 
     @model_validator(mode="after")
     def _value_only_when_available(self) -> "Claim":

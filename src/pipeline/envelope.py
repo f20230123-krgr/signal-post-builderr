@@ -144,11 +144,13 @@ def to_envelope(
                 "reporting_period": claim.reporting_period,
                 "effective_at": claim.effective_date,
                 "evidence_ids": evidence_ids,
+                # Why the field is blank when we cannot tell (None otherwise).
+                "reason": claim.reason,
             }
         )
 
         if claim.state in _ERROR_STATES:
-            errors.append({"field": field_name, "state": claim.state.value})
+            errors.append({"field": field_name, "state": claim.state.value, **({"reason": claim.reason} if claim.reason else {})})
 
     summary = build_summary(profile)
     return {
@@ -187,5 +189,7 @@ def to_envelope(
             ],
             "changes": summary.changes,
             "unknowns": summary.unknowns,
+            "cant_tell": summary.cant_tell,
+            "confidence": {"level": summary.confidence[0], "why": summary.confidence[1]},
         },
     }

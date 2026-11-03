@@ -404,7 +404,7 @@ _FRAMEWORK_MARKER_RE = re.compile(
     r"""window\.__INITIAL_STATE__|<app-root|data-server-rendered|id=["']___gatsby["']""",
     re.IGNORECASE,
 )
-_SCRIPT_TAG_RE = re.compile(r"<script", re.IGNORECASE)
+_SCRIPT_TAG_RE = re.compile(r"<script\b", re.IGNORECASE)
 
 
 def looks_script_built(html: str) -> bool:

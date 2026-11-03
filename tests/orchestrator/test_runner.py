@@ -936,7 +936,10 @@ def test_a_registered_site_that_is_someone_elses_lends_no_content_to_the_company
 
     profile = _default_process_one("923609016", BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
-    assert profile.online_presence.official_site.value in ("https://usbl.no", "http://usbl.no", "usbl.no")
+    # Official feedback (Nov): a site that does not show the company's own name or number is
+    # not published as its website; the field is blank with the reason ("can't tell").
+    assert profile.online_presence.official_site.state == EvidenceState.AMBIGUOUS
+    assert "does not show this company's name or organisation number" in profile.online_presence.official_site.reason
     assert profile.online_presence.company_profiles == []
     assert not [c for c in profile.activity.dated_activity if c.value and "Nye boliger" in c.value]
 
@@ -989,11 +992,88 @@ def test_a_registered_website_another_entity_holds_as_its_own_is_not_published_a
 
     assert profile.online_presence.official_site.state == EvidenceState.AMBIGUOUS
     assert profile.online_presence.official_site.value is None
+    assert "ENTRA ASA (999296432)" in profile.online_presence.official_site.reason
 
 
-def test_a_brand_website_no_other_entity_holds_stays_the_companys():
-    """SEABIT AS registers easyfish.no, its product brand: nobody else lists it."""
-    profile = _registered_site_profile("923609016", "SEABIT AS", "www.easyfish.no", [])
+def test_a_brand_website_stays_the_companys_only_when_it_shows_the_companys_number():
+    """SEABIT AS registers easyfish.no, its product brand. Official feedback (Nov): "check
+    that the page shows the company's own name or number"."""
+    unproven = _registered_site_profile("923609016", "SEABIT AS", "www.easyfish.no", [])
+    assert unproven.online_presence.official_site.state == EvidenceState.AMBIGUOUS
 
-    assert profile.online_presence.official_site.state == EvidenceState.AVAILABLE
-    assert "easyfish.no" in profile.online_presence.official_site.value
+    record = {"organisasjonsnummer": "923609016", "navn": "SEABIT AS", "hjemmeside": "www.easyfish.no", "historiskeNavn": []}
+    page = "<html><head><title>Easyfish</title></head><body><footer>Seabit AS, org.nr. 923 609 016</footer></body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(200, json=record)
+        if request.url.host.endswith("easyfish.no"):
+            return httpx.Response(200, text=page)
+        return httpx.Response(404)
+
+    proven = _default_process_one("923609016", BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert proven.online_presence.official_site.state == EvidenceState.AVAILABLE
+    assert "easyfish.no" in proven.online_presence.official_site.value
+
+
+def test_a_registered_website_stating_another_organisations_number_is_not_this_companys():
+    """appelx.no redirected to a site showing a different org number (official feedback, Nov)."""
+    record = {"organisasjonsnummer": "923609016", "navn": "APPELX AS", "hjemmeside": "www.appelx.no", "historiskeNavn": []}
+    page = "<html><head><title>Appelx AS</title></head><body><footer>Annet Selskap AS, org.nr. 999 296 432</footer></body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+            return httpx.Response(200, json=record)
+        if request.url.host.endswith("appelx.no"):
+            return httpx.Response(200, text=page)
+        return httpx.Response(404)
+
+    profile = _default_process_one("923609016", BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert profile.online_presence.official_site.state == EvidenceState.AMBIGUOUS
+    assert "999 296 432" in profile.online_presence.official_site.reason
+
+
+def test_a_builders_project_page_naming_the_company_does_not_prove_the_builders_site():
+    """olsenbygg.com lists Kaldvellfjorden Eiendom AS as a project (official feedback, Nov): a
+    name on a deeper page is not the site naming its own owner."""
+    from src.pipeline.site_evidence import site_ownership
+    from src.pipeline.crawl import FetchedPage
+    from src.pipeline.resolve import ResolvedEntity
+
+    entity = ResolvedEntity(
+        org_number="923609016", legal_name="KALDVELLFJORDEN EIENDOM AS", registered_address=None,
+        official_site_candidate="https://olsenbygg.com", resolution_state=EvidenceState.AVAILABLE,
+        source="https://data.brreg.no/enhetsregisteret/api/enheter/923609016", retrieved_at=datetime(2026, 11, 3, tzinfo=timezone.utc), content_hash="h",
+    )
+    now = datetime(2026, 11, 3, tzinfo=timezone.utc)
+    pages = [
+        FetchedPage("https://olsenbygg.com/", "<html><head><title>Olsen Bygg</title></head><body>Entreprenør</body></html>", now, EvidenceState.AVAILABLE),
+        FetchedPage("https://olsenbygg.com/prosjekter/kaldvellfjorden", "<html><head><title>Kaldvellfjorden Eiendom AS</title></head></html>", now, EvidenceState.AVAILABLE),
+    ]
+
+    fact, reason = site_ownership(pages, entity)
+    assert fact is None and "does not show this company's name" in reason
+
+
+def test_social_pages_come_only_from_a_site_proven_to_be_the_companys():
+    """Official feedback (Nov): "take them from the footer of each confirmed site". The same
+    footer link counts when the site shows the company's number, not when it shows nothing."""
+    def profile_for(footer):
+        record = {"organisasjonsnummer": "923609016", "navn": "GULVBETONG AS", "hjemmeside": "gulvbetong.no", "historiskeNavn": []}
+        page = f"<html><head><title>Velkommen</title></head><body><footer>{footer} <a href='https://www.facebook.com/gulvbetong'>Facebook</a></footer></body></html>"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
+                return httpx.Response(200, json=record)
+            if request.url.host.endswith("gulvbetong.no") and request.url.path in ("", "/"):
+                return httpx.Response(200, text=page)
+            return httpx.Response(404)
+
+        return _default_process_one("923609016", BudgetGovernor(), universe_entry=None, client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    proven = profile_for("Org.nr. 923 609 016")
+    unproven = profile_for("Ring oss")
+
+    assert [c.value for c in proven.online_presence.company_profiles if c.value] == ["https://www.facebook.com/gulvbetong"]
+    assert unproven.online_presence.official_site.state == EvidenceState.AVAILABLE  # the domain spells the name
+    assert [c for c in unproven.online_presence.company_profiles if c.value] == []

@@ -26,6 +26,7 @@ from typing import Callable, Optional
 import httpx
 
 from src.models.profile import EvidenceState
+from src.pipeline.brreg_throttle import MAX_THROTTLE_RETRIES, is_throttle, note_throttle, wait_if_paused
 from src.pipeline.net import new_client
 
 REGISTRY_BASE_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/"
@@ -135,9 +136,21 @@ def resolve(
     try:
         response = None
         last_error: Optional[Exception] = None
-        for attempt in range(MAX_RETRIES):
+        throttled = 0
+        attempt = -1
+        while attempt < MAX_RETRIES - 1:
+            attempt += 1
+            wait_if_paused(sleep)
             try:
                 response = client.get(url, timeout=10.0)
+                # Brønnøysund said "slow down": wait the shared pause and retry without using
+                # up an attempt, a bounded number of times (src/pipeline/brreg_throttle.py).
+                if is_throttle(response) and throttled < MAX_THROTTLE_RETRIES:
+                    throttled += 1
+                    note_throttle(response)
+                    attempt -= 1
+                    response = None
+                    continue
                 if response.status_code >= 500:
                     last_error = httpx.HTTPStatusError(
                         f"server error {response.status_code}", request=response.request, response=response

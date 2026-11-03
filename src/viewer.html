@@ -109,6 +109,12 @@ main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60p
 .cite:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .gaps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; color: var(--muted); font-size: .88rem; }
 .gaps .pill { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.gaps.cant .pill { background: var(--bad-soft); color: var(--bad); }
+.conf { display: inline-block; border-radius: 999px; padding: 0 8px; font-size: .7rem; font-weight: 650; letter-spacing: .02em; border: 1px solid transparent; }
+.conf.high { background: var(--ok-soft); color: var(--ok); }
+.conf.medium { background: var(--warn-soft); color: var(--warn); }
+.conf.low { background: var(--bad-soft); color: var(--bad); }
+.confline { margin: 6px 0 0; font-size: .86rem; color: var(--muted); }
 .changes { margin-top: 10px; font-size: .9rem; color: var(--muted); }
 
 .facts h3 { margin: 18px 0 4px; font-size: .95rem; }
@@ -372,6 +378,9 @@ function prep(env) {
   c.area = AREAS.map(a => !!a[2](c));
   c.areas = c.area.filter(Boolean).length;
   c.changed = (env.changes || []).length > 0;
+  // How sure we are that what is published belongs to this company, and what we could not tell.
+  c.conf = (env.summary || {}).confidence || null;
+  c.cant = (env.summary || {}).cant_tell || [];
   c.hay = [c.name, c.org, c.industry, c.site && host(c.site), one("public_brand")].filter(Boolean).join(" ").toLowerCase();
   return c;
 }
@@ -384,7 +393,8 @@ const FILTERS = {
   all5: ["All five areas", c => c.areas === AREAS.length],
   site: ["Website", c => c.flags.site], social: ["Social", c => c.flags.social], hiring: ["Hiring", c => c.flags.hiring],
   news: ["News", c => c.flags.news], leaders: ["Leadership", c => c.flags.leaders], financials: ["Financials", c => c.flags.financials],
-  active: ["Active only", c => (c.status || "").toLowerCase() === "active"], changed: ["Changed", c => c.changed]
+  active: ["Active only", c => (c.status || "").toLowerCase() === "active"], changed: ["Changed", c => c.changed],
+  cant: ["Can't tell", c => c.cant.length > 0]
 };
 const SORTS = {
   most: ["Most data found", (a, b) => b.areas - a.areas || b.score - a.score || a.name.localeCompare(b.name, "nb")],
@@ -419,6 +429,10 @@ function filtered() {
   rows.sort(SORTS[state.sort][1]);
   return rows;
 }
+const CONF_LABEL = { high: "High", medium: "Medium", low: "Low" };
+function confBadge(c) {
+  return '<span class="conf ' + esc(c.conf.level) + '" title="' + esc("Identity confidence: " + c.conf.why) + '">' + esc(CONF_LABEL[c.conf.level] || c.conf.level) + "</span>";
+}
 function renderList() {
   const rows = filtered();
   $("#count").textContent = fmt(rows.length) + " of " + fmt(companies.length) + " companies";
@@ -427,7 +441,7 @@ function renderList() {
     '<li class="row' + (state.open === c.org ? " sel" : "") + '">' +
     '<input class="pick" type="checkbox" data-o="' + c.org + '" aria-label="Compare ' + esc(c.name) + '"' + (state.picked.includes(c.org) ? " checked" : "") + ">" +
     '<button class="item" type="button" data-o="' + c.org + '"' + (state.open === c.org ? ' aria-current="true"' : "") + ">" +
-    '<span class="nm">' + esc(c.name) + "</span>" +
+    '<span class="nm">' + esc(c.name) + (c.conf ? " " + confBadge(c) : "") + "</span>" +
     '<span class="sub"><span class="mono">' + esc(c.org) + "</span>" + (c.industry ? " &middot; " + esc(c.industry.replace(/^\d+\.\d+\s*/, "")) : "") + "</span>" +
     (c.headline ? '<span class="sub hl">' + esc(c.headline) + "</span>" : "") +
     '<span class="dots" title="' + esc(AREAS.map((a, i) => a[1] + (c.area[i] ? ": found" : ": not found")).join("; ")) + '">' + c.area.map(on => '<i class="' + (on ? "on" : "") + '"></i>').join("") +
@@ -574,7 +588,7 @@ function identityHtml(c) {
   const site = c.ok("official_website")[0];
   const missing = c.all("official_website").find(x => x.availability !== "available");
   if (!site) {
-    if (missing && missing.availability === "ambiguous") return '<div class="card identity"><h2>Website identity</h2><p class="why">A website is registered for this company, but it belongs to another organisation (for example a property manager), so it is not published as this company\'s own.</p></div>';
+    if (missing && missing.availability === "ambiguous") return '<div class="card identity"><h2>Website identity</h2><p class="why">Can\'t tell: ' + esc(missing.reason || "a website is registered for this company, but it could not be confirmed as the company\'s own") + '. It is not published as this company\'s website, and nothing from it is used.</p></div>';
     return "";
   }
   const e = c.ev[(site.evidence_ids || [])[0]] || {};
@@ -603,17 +617,20 @@ function renderCompany(c) {
   const story = (s.sentences || []).map((x, i, a) =>
     '<div class="sent"><span class="topic">' + esc(topicOf(x, i, a.length)) + "</span><span>" + esc(x.text.replace(/^As of \d{4}-\d{2}-\d{2}: /, "")) + citeButtons(c, x.evidence_ids) + "</span></div>").join("");
   const gaps = (s.unknowns || []).length ? '<div class="gaps">Not found:' + s.unknowns.map(u => '<span class="pill">' + esc(u) + "</span>").join("") + "</div>" : "";
+  const cant = (s.cant_tell || []).length ? '<div class="gaps cant">Can\'t tell:' + s.cant_tell.map(u => '<span class="pill">' + esc(u) + "</span>").join("") + "</div>" : "";
   const st = (c.status || "").toLowerCase();
   $("#main").innerHTML = '<div class="wrap">' +
     '<div class="card"><div class="head"><div class="ttl">' +
     '<button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
     '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\"><span class=\"mono\">org. " + esc(c.org) + "</span>" +
     (c.form ? "<span>" + esc(c.form) + "</span>" : "") + (c.status ? '<span class="pill ' + esc(st) + '">' + esc(c.status) + "</span>" : "") +
-    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") + "</div>" +
-    (headlineFacts(c) ? '<p class="headline">' + esc(headlineFacts(c)) + "</p>" : "") + "</div>" +
+    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") +
+    (c.conf ? confBadge(c) : "") + "</div>" +
+    (headlineFacts(c) ? '<p class="headline">' + esc(headlineFacts(c)) + "</p>" : "") +
+    (c.conf ? '<p class="confline">Confidence ' + esc(c.conf.level) + ": " + esc(c.conf.why) + "</p>" : "") + "</div>" +
     '<div class="actions"><button class="btn" id="pickBtn" type="button">' + (state.picked.includes(c.org) ? "Remove from compare" : "Add to compare") + "</button>" +
     '<button class="btn" id="jsonBtn" type="button">Envelope JSON</button><button class="btn" id="linkBtn" type="button">Copy link</button></div></div></div>' +
-    '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + gaps +
+    '<div class="card"><h2>Summary as of ' + esc(s.as_of || DATA.as_of) + '</h2><div class="story">' + story + "</div>" + cant + gaps +
     ((s.changes || []).length ? '<div class="changes">Changes since the last run: ' + esc(s.changes.join("; ")) + "</div>" : "") + "</div>" +
     identityHtml(c) +
     '<div class="card facts"><h2>Every fact, with its source</h2><div class="legend">' +
@@ -680,7 +697,7 @@ function openClaim(c, ci) {
   const claim = c.claims[ci], st = claim.availability || "available";
   const evs = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean);
   openDrawer("<h3>" + esc(LABEL[claim.field] || claim.field) + '</h3><p>' + valueHtml(claim.value || "Not found") + '</p><p><span class="pill ' + esc(st) + '">' + esc(st.replace("_", " ")) + "</span> " +
-    (claim.confidence != null ? '<span class="sub">identity confidence ' + Math.round(claim.confidence * 100) + "%</span>" : "") + '</p><p class="sub">' + esc(STATE_HELP[st] || "") + "</p>" +
+    (claim.confidence != null ? '<span class="sub">identity confidence ' + Math.round(claim.confidence * 100) + "%</span>" : "") + '</p><p class="sub">' + esc(STATE_HELP[st] || "") + "</p>" + (claim.reason ? "<p><b>Can't tell:</b> " + esc(claim.reason) + "</p>" : "") +
     (evs.length ? evs.map(evidenceHtml).join("") : '<p class="sub">No source recorded: nothing is published without one.</p>'));
 }
 function openEv(c, id) {

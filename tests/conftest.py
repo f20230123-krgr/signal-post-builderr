@@ -123,3 +123,13 @@ def brreg_accounts_response(request, filings):
     if not matching and (kind or year):
         return _httpx.Response(404)
     return _httpx.Response(200, text=_json.dumps(matching))
+
+
+@pytest.fixture(autouse=True)
+def _clear_registry_pause():
+    """The registry "slow down" pause is shared process-wide: never let one test's pause leak."""
+    from src.pipeline import brreg_throttle
+
+    brreg_throttle.reset()
+    yield
+    brreg_throttle.reset()

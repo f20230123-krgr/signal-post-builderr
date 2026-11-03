@@ -41,6 +41,7 @@ from typing import Callable, Optional
 import httpx
 
 from src.orchestrator.budget import BudgetGovernor
+from src.pipeline.brreg_throttle import MAX_THROTTLE_RETRIES, is_throttle, note_throttle, wait_if_paused
 from src.pipeline.keyless_sites import SiteHints, hints_from_registry_record
 from src.pipeline.net import new_client
 from src.pipeline.resolve import ResolvedEntity
@@ -65,17 +66,28 @@ EXCLUDED_ROLE_TYPES: set[str] = set()
 
 
 def _get(client: httpx.Client, url: str, sleep: Callable[[float], None]) -> Optional[httpx.Response]:
-    for attempt in range(MAX_RETRIES):
+    throttled = 0
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        wait_if_paused(sleep)
         try:
             response = client.get(url, timeout=10.0)
+            # The registry said "slow down": wait the shared pause and try again, a bounded
+            # number of extra times that do not use up an attempt (src/pipeline/brreg_throttle.py).
+            if is_throttle(response) and throttled < MAX_THROTTLE_RETRIES:
+                throttled += 1
+                note_throttle(response)
+                continue
             if response.status_code >= 500:
                 if attempt < MAX_RETRIES - 1:
                     sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+                attempt += 1
                 continue
             return response
         except httpx.TransportError:
             if attempt < MAX_RETRIES - 1:
                 sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+            attempt += 1
     return None
 
 
@@ -971,6 +983,7 @@ def name_is_held_by_another_entity(
     client = client or new_client()
     try:
         try:
+            wait_if_paused(time.sleep)
             response = client.get(NAME_SEARCH_URL, params={"navn": name, "size": 20}, timeout=10.0)
         except httpx.HTTPError:
             response = None
@@ -1017,6 +1030,7 @@ def website_held_by_another_entity(
     client = client or new_client()
     try:
         try:
+            wait_if_paused(time.sleep)
             response = client.get(NAME_SEARCH_URL, params={"navn": label, "size": 50}, timeout=10.0)
         except httpx.HTTPError:
             response = None
