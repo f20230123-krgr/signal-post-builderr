@@ -6,6 +6,7 @@ from src.models.profile import EvidenceState
 from src.pipeline.assemble import assemble
 from src.pipeline.crawl import FetchedPage
 from src.pipeline.site_evidence import FIELD_NAME, name_span, official_site_evidence, org_number_span
+from src.pipeline.resolve import ResolvedEntity
 from src.pipeline.verify import ConfirmedFact
 from tests.pipeline.test_crawl import _entity
 
@@ -173,3 +174,25 @@ def test_the_envelope_cites_the_site_page_and_quotes_the_span():
     evidence = next(e for e in envelope["evidence"] if e["id"] == claim["evidence_ids"][0])
     assert evidence["source_url"] == "https://example.com/kontakt"
     assert evidence["claim_span"] == "EQUINOR ASA, Org.nr. 923 609 016"
+
+
+def test_a_groups_own_site_printing_its_subsidiarys_number_is_still_its_own():
+    """afgruppen.no names AF Gruppen and prints AF Gruppen Norge AS's number: the company's own
+    name on its home page proves the site; another number only counts against a site that does
+    not name the company at all (appelx.no, official feedback Nov)."""
+    from src.pipeline.site_evidence import site_ownership
+
+    now = datetime(2026, 11, 3, tzinfo=timezone.utc)
+    entity = ResolvedEntity(
+        org_number="938702675", legal_name="AF GRUPPEN ASA", registered_address=None,
+        official_site_candidate="https://www.afgruppen.no", resolution_state=EvidenceState.AVAILABLE,
+        source="https://data.brreg.no/enhetsregisteret/api/enheter/938702675", retrieved_at=now, content_hash="h",
+    )
+    home = "<html><head><title>AF Gruppen</title></head><body><footer>AF Gruppen Norge AS, org.nr. 938 333 572</footer></body></html>"
+
+    fact, reason = site_ownership([FetchedPage("https://www.afgruppen.no/", home, now, EvidenceState.AVAILABLE)], entity)
+    assert fact is not None and reason is None
+
+    other = home.replace("AF Gruppen</title>", "Velkommen</title>")
+    fact, reason = site_ownership([FetchedPage("https://www.afgruppen.no/", other, now, EvidenceState.AVAILABLE)], entity)
+    assert fact is None and "938 333 572" in reason

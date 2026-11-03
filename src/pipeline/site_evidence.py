@@ -193,11 +193,6 @@ def site_ownership(
             evidence_page, span = page, found
             break
     if span is None:
-        # A site stating another organisation's number, and never this one's, is that
-        # organisation's site whatever names it shows.
-        others = set().union(*(stated_org_numbers(p.raw_html) for p in own)) - {entity.org_number}
-        if others:
-            return None, other_org_reason(sorted(others)[0])
         for page in own:
             if not _is_owner_page(page.final_url or page.url):
                 continue
@@ -206,6 +201,12 @@ def site_ownership(
                 evidence_page, span = page, found
                 break
     if evidence_page is None or span is None:
+        # A site that neither names this company nor states its number, but states another
+        # organisation's, is that organisation's site. (A group's own site naming the group
+        # while printing its operating subsidiary's number, afgruppen.no, is proven above.)
+        others = set().union(*(stated_org_numbers(p.raw_html) for p in own)) - {entity.org_number}
+        if others:
+            return None, other_org_reason(sorted(others)[0])
         return None, NOT_SHOWN
 
     return ConfirmedFact(

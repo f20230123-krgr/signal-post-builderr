@@ -1017,9 +1017,10 @@ def test_a_brand_website_stays_the_companys_only_when_it_shows_the_companys_numb
 
 
 def test_a_registered_website_stating_another_organisations_number_is_not_this_companys():
-    """appelx.no redirected to a site showing a different org number (official feedback, Nov)."""
+    """appelx.no redirected to a site showing a different org number (official feedback, Nov): a
+    site that does not name the company and states another organisation's number is theirs."""
     record = {"organisasjonsnummer": "923609016", "navn": "APPELX AS", "hjemmeside": "www.appelx.no", "historiskeNavn": []}
-    page = "<html><head><title>Appelx AS</title></head><body><footer>Annet Selskap AS, org.nr. 999 296 432</footer></body></html>"
+    page = "<html><head><title>Annet Selskap</title></head><body><footer>Annet Selskap AS, org.nr. 999 296 432</footer></body></html>"
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016":
