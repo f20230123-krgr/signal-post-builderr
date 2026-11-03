@@ -255,10 +255,10 @@ All permissive; no copyleft (GPL-style) obligations.
   not the company's own news.
 - **A careers page without readable ads publishes nothing.** Job lists drawn by script are not
   seen, and since a careers landing page is not a job, such companies show no hiring signal.
-- **A registered website is marked ambiguous only on hard proof.** Brønnøysund must show another
-  entity listing the same site whose name the domain spells (entra.no: ENTRA ASA). A site that is
-  someone else's but listed by nobody else (a county's site, a subsidiary's site) is still
-  reported as the registry states it, with nothing read from its pages.
+- **A website that cannot be read, or never names the company, is "can't tell".** A genuine site
+  under an unrelated brand that never states the company's name or number, or that our crawl
+  could not read (robots rules, script-only pages), is left blank with the reason rather than
+  published; only a domain that spells the company's name stands without that proof.
 - **Branch accounts are recognised by municipality names** at the end of the account name
   ("...larvik"); a branch named after a district or a shorter town name is not caught.
 

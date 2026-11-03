@@ -261,7 +261,8 @@ company recall 100%, external precision 100%.
 Use `/self-score` to re-run the harness and quote fresh numbers, and
 `/guard-check` before any PR to confirm no standard has regressed.
 
-Sixth revision (2026-11), after Builderr's audit of 40 never-seen companies (23 October: "7 social
+Sixth revision (2026-11), after Builderr's November feedback on 300 companies (38 of 46 websites
+right; the rest a parent's or a builder's) and its audit of 40 never-seen companies (23 October: "7 social
 accounts, 11 news items and 4 websites were someone else's"; "many 'news' items were not news";
 "careers landing pages were published as jobs"). Measured on 300 never-seen companies (100 random,
 100 with a website, 100 held back until the end) plus Builderr's sample, every removed item
@@ -282,6 +283,21 @@ hand-checked against v5:
   or a branch's account ("uniteperformancelarvik") is not the company's own. A registered website
   that another registered entity lists as its own, and whose domain is that entity's name
   (VERKSTEDVEIEN 3 AS registers entra.no: ENTRA ASA's), is reported as ambiguous.
+- **A website must show the company's own name or number** (official feedback, Nov: the wrong
+  websites "were mostly a parent or a builder"). A registered or found site counts as the
+  company's when a page states its organisation number, or the home or contact page names it as
+  the site's own (a builder's project page naming the company does not). A site that names
+  another organisation's number instead, or neither, is left blank as "can't tell" with the
+  reason, and nothing from it is used; a domain that spells the name stands when the site states
+  no other number. Social pages come only from a proven site's home or contact page.
+- **Confidence and "can't tell".** Every profile carries `summary.confidence` (high: registry
+  only, or the site states the org number; medium: the site names the company; low: we could
+  not tell which website is the company's) and `summary.cant_tell`; a blank claim carries its
+  one-line `reason`. The viewer shows the mark on every company, a "Can't tell" filter, and the
+  reason on the field.
+- **Registry "slow down".** A 429 (or 503 with Retry-After) from Brønnøysund starts one shared
+  pause (what it asks for, at most 5 s) and the request is retried up to twice, instead of that
+  company's registry data being lost.
 - **Same registry data, same budget.** Every registry figure and role is unchanged; on Builderr's
   sample site news went 267 -> 219 items and hiring 38 -> 34 claims, all removals junk or another
   company's; 0 material changes on refresh; viewer tasks pass on laptop and phone.
