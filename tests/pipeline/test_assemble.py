@@ -337,3 +337,11 @@ def test_schema_violation_raises_loudly(monkeypatch):
 
     with pytest.raises(ValidationError):
         assemble(_entity(), confirmed_facts=[], previous_snapshot=None)
+
+
+def test_a_domain_spelling_aa_for_a_and_o_for_o_slash_resembles_the_name():
+    """skaatoy.com for BYGGMESTER SKÅTØY AS: å written "aa", ø written "o" in the same domain."""
+    from src.pipeline.assemble import domain_resembles_name
+
+    assert domain_resembles_name("https://www.skaatoy.com", "BYGGMESTER SKÅTØY AS")
+    assert not domain_resembles_name("https://thon.no", "HUSTADGÅRDEN ANS")

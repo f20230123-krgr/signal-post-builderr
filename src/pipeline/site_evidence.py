@@ -94,15 +94,42 @@ def org_number_span(html: str, org_number: str) -> Optional[str]:
 MIN_NAME_SPAN_SIMILARITY = 80
 
 
+_TITLE_PART_RE = re.compile(r"\s+[–—|·:-]\s+")
+
+
 def name_span(html: str, legal_name: str) -> Optional[str]:
     """The page's own name for the company, verbatim: the best-matching of its
     site name / JSON-LD name and its title or heading, provided that it actually
     reads like the company's name."""
     candidates = [c for c in (_page_organization_name_from_html(html), page_heading(html)) if c]
-    if not candidates:
-        return None
-    best = max(candidates, key=lambda c: name_similarity(legal_name, c))
-    return best if name_similarity(legal_name, best) >= MIN_NAME_SPAN_SIMILARITY else None
+    if candidates:
+        best = max(candidates, key=lambda c: name_similarity(legal_name, c))
+        if name_similarity(legal_name, best) >= MIN_NAME_SPAN_SIMILARITY:
+            return best
+    # A title is often "Brand – tagline" or "Page – Brand" ("ipeople – Det handler om å finne de
+    # riktige hodene"). A part counts only when it holds every distinctive word of the name: a
+    # fuzzy score would let "Bergen" stand for BERGEN BIL AS.
+    for title in candidates:
+        for part in _TITLE_PART_RE.split(title):
+            if _holds_the_whole_name(part.strip(), legal_name):
+                return part.strip()
+    return None
+
+
+_FORM_WORDS = {"as", "asa", "sa", "ans", "da", "ba", "enk", "nuf", "norge", "norway", "norsk"}
+
+
+def _words(text: str) -> list[str]:
+    folded = text.lower().translate(str.maketrans({"æ": "ae", "ø": "o", "å": "a"}))
+    return re.findall(r"[a-z0-9]+", folded)
+
+
+def _holds_the_whole_name(part: str, legal_name: str) -> bool:
+    core = [w for w in _words(legal_name) if w not in _FORM_WORDS]
+    words = _words(part)
+    if not core or not words:
+        return False
+    return "".join(core) == "".join(w for w in words if w not in _FORM_WORDS) or all(w in words for w in core)
 
 
 # Official feedback (Nov): wrong websites "were mostly a parent or a builder" (olsenbygg.com

@@ -196,3 +196,14 @@ def test_a_groups_own_site_printing_its_subsidiarys_number_is_still_its_own():
     other = home.replace("AF Gruppen</title>", "Velkommen</title>")
     fact, reason = site_ownership([FetchedPage("https://www.afgruppen.no/", other, now, EvidenceState.AVAILABLE)], entity)
     assert fact is None and "938 333 572" in reason
+
+
+def test_the_brand_part_of_a_brand_and_tagline_title_names_the_company():
+    """ipeople.no's title is "ipeople – Det handler om å finne de riktige hodene": the whole
+    title reads 44% like IPEOPLE AS, its brand part is the name."""
+    assert name_span("<html><head><title>ipeople – Det handler om å finne de riktige hodene</title></head></html>", "IPEOPLE AS") == "ipeople"
+    assert name_span("<html><head><title>Olsen Bygg – Entreprenør</title></head></html>", "KALDVELLFJORDEN EIENDOM AS") is None
+    # A part only counts when it holds every distinctive word of the name: "Bergen" is not BERGEN BIL AS.
+    assert name_span("<html><head><title>Bergen – Velkommen</title></head></html>", "BERGEN BIL AS") is None
+    assert name_span("<html><head><title>Nordic | Hjem</title></head></html>", "NORDIC DOOR AS") is None
+    assert name_span("<html><head><title>Epsco – Home</title></head></html>", "EPSCO NORGE AS") == "Epsco"

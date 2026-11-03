@@ -107,8 +107,12 @@ def domain_resembles_name(site: Optional[str], legal_name: str) -> bool:
     words = [w for w in words if w and w not in _COOP_WORDS]
     if not label or not words:
         return False
-    # Domains spell æ, ø and å as ae/oe/aa or e/o/a: try both spellings.
-    for table in (str.maketrans({"æ": "ae", "ø": "o", "å": "a"}), str.maketrans({"æ": "ae", "ø": "oe", "å": "aa"})):
+    # Domains spell æ, ø and å as ae/oe/aa or e/o/a, sometimes mixed (skaatoy.com for
+    # BYGGMESTER SKÅTØY AS: å as "aa", ø as "o"): try each spelling.
+    for table in (
+        str.maketrans({"æ": "ae", "ø": "o", "å": "a"}), str.maketrans({"æ": "ae", "ø": "oe", "å": "aa"}),
+        str.maketrans({"æ": "ae", "ø": "o", "å": "aa"}), str.maketrans({"æ": "e", "ø": "oe", "å": "a"}),
+    ):
         folded = [w.translate(table) for w in words]
         joined = "".join(folded)
         if joined in label or (len(label) >= 4 and label in joined) or any(len(w) >= 4 and w in label for w in folded):
