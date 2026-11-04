@@ -579,6 +579,9 @@ def _accounts_sentence(profile: CompanyProfile) -> Optional[SummarySentence]:
         end = claims[0].effective_date[:10] if claims[0].effective_date else None
         # The company's own filing, never its group's (registry_extras reads only those).
         text = f"In {period} (company accounts{f', year to {end}' if end else ''}), " + "; ".join(segments)
+        # A percentage is ours, worked out from the cited figures; no source states it.
+        if "%" in text:
+            text += " (percentages calculated)"
         return SummarySentence(text + ".", list(_SUMMARY_METRICS), claims)
 
     claim = profile.annual_accounts.latest

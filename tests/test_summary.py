@@ -74,7 +74,7 @@ def test_the_summary_is_short_dated_and_covers_company_figures_people_web_and_ch
     assert "registry status Active, 21000 employees" in text
     assert (
         "In FY2025 (company accounts, year to 2025-12-31), revenue grew 7.2% on FY2024 to 107.17 bn USD and the company made "
-        "a net profit of 11.90 bn USD (11.1% of revenue); equity was 48.50 bn USD." in text
+        "a net profit of 11.90 bn USD (11.1% of revenue); equity was 48.50 bn USD (percentages calculated)." in text
     )
     assert "Led by Anders Opedal (managing director) and Jon Erik Reinhardsen (chair of the board), with 1 more registered role holder." in text
     assert "2 registered sites, including Stavanger, Sandsli." in text
@@ -137,7 +137,7 @@ def test_the_financial_trend_is_explained_in_words_not_listed():
     )
     assert (
         "revenue grew 10.0% on FY2024 to 1.1 m NOK and the company made a net profit of 50 k NOK (4.5% of revenue), "
-        "turning round from a loss of 80 k NOK in FY2024; equity rose to 400 k NOK." in turnaround
+        "turning round from a loss of 80 k NOK in FY2024; equity rose to 400 k NOK (percentages calculated)." in turnaround
     )
 
     into_loss = acme(

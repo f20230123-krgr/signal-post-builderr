@@ -251,3 +251,24 @@ def test_template_posts_section_labels_and_one_word_titles_are_not_news():
         assert not is_news_title(title), title
     for title in ("Strategisamling i K8", "Lederkonferansen 2026", "Ny avtale med Equinor"):
         assert is_news_title(title), title
+
+
+def test_an_about_heading_and_a_job_ads_dates_are_not_news():
+    """1,000-company check, 3 Nov: "Om AF Anlegg (2026-11-08)" came from a job ad on
+    afgruppen.no, dated by its application deadline."""
+    from src.pipeline.news import is_news_title
+
+    for title in ("Om AF Anlegg", "Om oss", "About the company"):
+        assert not is_news_title(title), title
+    assert is_news_title("Omsetningen økte kraftig i 2025")
+
+    html = (
+        "<html><body><article><h2>Om AF Anlegg</h2><time datetime='2026-11-08'>8. november 2026</time>"
+        "<a href='/karriere/ledige-stillinger/2026/09/sommerjobb/'>Les mer</a></article></body></html>"
+    )
+    page = FetchedPage(
+        url="https://www.afgruppen.no/karriere/ledige-stillinger/2026/09/sommerjobb/", raw_html=html,
+        fetched_at=datetime(2026, 11, 3, tzinfo=timezone.utc), fetch_state=EvidenceState.AVAILABLE,
+    )
+
+    assert [f for f in extract(page) if f.field_name == "dated_activity"] == []

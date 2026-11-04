@@ -72,7 +72,72 @@ def _claim_entries(profile: CompanyProfile) -> list[tuple[str, Claim]]:
     entries += [("company_profile", c) for c in profile.online_presence.company_profiles]
     entries += [("hiring_signal", c) for c in profile.activity.hiring_signals]
     entries += [("dated_activity", c) for c in profile.activity.dated_activity]
-    return entries
+    entries += _checked_and_not_found(profile)
+    return [(name, _with_reason(name, claim, profile)) for name, claim in entries]
+
+
+# --- what we looked for and did not find, said in the claims themselves -----------------
+#
+# The brief asks the summary to explain "the company, changes and unknowns", and Builderr's
+# starter kit records a state for every area it checks. A family we searched and found empty
+# used to be simply absent from the claims (named only in summary.unknowns), so the standard
+# fields never said it had been looked for. Each now gets one not_available claim with a
+# one-line reason (official feedback, Nov: "leave a field blank with a one-line reason").
+
+def _site_state(profile: CompanyProfile) -> str:
+    site = profile.online_presence.official_site
+    if site.state == EvidenceState.AVAILABLE and site.value:
+        return "confirmed"
+    return "ambiguous" if site.state == EvidenceState.AMBIGUOUS else "none"
+
+
+def _checked_and_not_found(profile: CompanyProfile) -> list[tuple[str, Claim]]:
+    missing = []
+    if not profile.online_presence.company_profiles:
+        missing.append("company_profile")
+    if not profile.activity.hiring_signals:
+        missing.append("hiring_signal")
+    # The registry record was read (its legal form is there) and carries no head count.
+    if profile.legal_identity.employee_count is None and profile.legal_identity.legal_form is not None:
+        missing.append("employee_count")
+    return [(name, Claim(state=EvidenceState.NOT_AVAILABLE)) for name in missing]
+
+
+_NO_SITE = {
+    "none": "no website is registered with Brønnøysund or was found under the company's name",
+    "ambiguous": "the registered website could not be confirmed as the company's own",
+}
+
+
+def _default_reason(field_name: str, profile: CompanyProfile) -> Optional[str]:
+    site = _site_state(profile)
+    if field_name == "company_profile":
+        return "the company's website links no social profile of its own" if site == "confirmed" else (
+            _NO_SITE[site] + ", so there are no company-owned profiles to read"
+        )
+    if field_name == "hiring_signal":
+        return "no single job ad was found on the company's website" if site == "confirmed" else (
+            _NO_SITE[site] + ", so there is no careers page to read"
+        )
+    if field_name == "employee_count":
+        return "Brønnøysund's register gives no employee count for this company"
+    if field_name == "official_website" and site == "none":
+        return _NO_SITE["none"]
+    if field_name == "public_brand":
+        return "the company's website states no name other than the registered one" if site == "confirmed" else (
+            "no confirmed website to state a trading name"
+        )
+    if field_name == "annual_accounts_latest" and profile.annual_accounts.latest.state == EvidenceState.NOT_AVAILABLE:
+        return "no annual accounts are filed in Brønnøysund's accounts register"
+    return None
+
+
+def _with_reason(field_name: str, claim: Claim, profile: CompanyProfile) -> Claim:
+    """`claim` with a one-line reason when it is blank and has none of its own."""
+    if claim.state == EvidenceState.AVAILABLE or claim.reason:
+        return claim
+    reason = _default_reason(field_name, profile)
+    return claim.model_copy(update={"reason": reason}) if reason else claim
 
 
 def to_envelope(

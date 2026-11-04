@@ -67,5 +67,5 @@ def test_a_social_link_is_quoted_as_the_page_writes_it():
 
     [fact] = [f for f in extract(page) if f.field_name == "company_profile"]
 
-    assert fact.value == "https://www.youtube.com/user/energisenteret"
+    assert fact.value == "https://youtube.com/user/energisenteret"
     assert fact.evidence_span in html

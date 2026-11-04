@@ -325,8 +325,19 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
                     emp_title = _as_str(emp.get("jobTitle"))
                     value = f"{emp_name} ({emp_title})" if emp_title else emp_name
                     facts.append(RawFact("leader", value, source_url, "structured", extracted_at, context_name=context_name))
-        same_as = obj.get("sameAs")
-        if isinstance(same_as, list):
+        # A WebSite object often names its owner as a nested publisher/founder Organization
+        # that carries the sameAs list (siguna.no). A parentOrganization is another company.
+        owners = [(obj, context_name)] + [
+            (owner, _as_str(owner.get("name")))
+            for owner in (obj.get(key) for key in ("publisher", "founder", "provider"))
+            if isinstance(owner, dict)
+        ]
+        for owner, owner_name in owners:
+            same_as = owner.get("sameAs")
+            if isinstance(same_as, str):
+                same_as = [same_as]
+            if not isinstance(same_as, list):
+                continue
             # Same filter as every other social-link source (see
             # _is_acceptable_social_profile_url): sameAs used to publish any
             # string verbatim, with no host check and no share/intent filter.
@@ -334,7 +345,7 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
                 found = social_profile_link(link) if isinstance(link, str) and link and not _SOCIAL_NON_PROFILE_RE.search(link) else None
                 if found:
                     facts.append(RawFact(
-                        "company_profile", found[0], source_url, "structured", extracted_at, context_name=context_name,
+                        "company_profile", found[0], source_url, "structured", extracted_at, context_name=owner_name,
                         evidence_span=_as_written(html, link),
                     ))
     return facts
@@ -686,7 +697,9 @@ def extract(
     # (Free-text "any line with a date" scanning was removed: on 100 real companies it yielded
     # 68 lines, nearly all menus and timestamps, against 253 dated article blocks below.)
     facts += social_profile_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
-    facts += news_item_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
+    # A job ad's dated lines are its deadline and start date, not news ("Om AF Anlegg (2026-11-08)").
+    if not is_careers_url(page.url, DEFAULT_ATS_DOMAINS):
+        facts += news_item_facts(page.raw_html, page.url, extracted_at, context_name=page_context_name)
     if is_careers_url(page.url, DEFAULT_ATS_DOMAINS):
         facts += careers_page_facts(
             page.raw_html, page.url, extracted_at, context_name=page_context_name, ats_domains=DEFAULT_ATS_DOMAINS

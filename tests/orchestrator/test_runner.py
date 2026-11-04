@@ -1075,6 +1075,6 @@ def test_social_pages_come_only_from_a_site_proven_to_be_the_companys():
     proven = profile_for("Org.nr. 923 609 016")
     unproven = profile_for("Ring oss")
 
-    assert [c.value for c in proven.online_presence.company_profiles if c.value] == ["https://www.facebook.com/gulvbetong"]
+    assert [c.value for c in proven.online_presence.company_profiles if c.value] == ["https://facebook.com/gulvbetong"]
     assert unproven.online_presence.official_site.state == EvidenceState.AVAILABLE  # the domain spells the name
     assert [c for c in unproven.online_presence.company_profiles if c.value] == []

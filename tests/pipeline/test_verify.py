@@ -182,6 +182,20 @@ def test_shared_domain_fact_is_accepted_when_context_name_matches():
     assert confirmed.value == "https://www.facebook.com/obosmedlem"
 
 
+def test_an_account_named_after_the_company_is_kept_when_the_page_calls_itself_something_else():
+    """1,000-company run, 3 Nov: HMH CEMENT OSLO AS's site calls itself "HMHcement.no" and
+    MESTERMUR AS's "Mestra Entrepenør AS", so their own footer accounts (facebook.com/hmhcement,
+    facebook.com/mestermur) were dropped. An account holding the registered name is the company's;
+    the manager's own account above still is not."""
+    hmh = _entity(legal_name="HMH CEMENT OSLO AS", official_site="https://hmhcement.no/")
+    mestermur = _entity(legal_name="MESTERMUR AS", official_site="https://www.mestra.as/")
+
+    assert verify(_fact("company_profile", "https://facebook.com/hmhcement", "https://hmhcement.no", context_name="HMHcement.no"), hmh)
+    assert verify(_fact("company_profile", "https://facebook.com/mestermur", "https://www.mestra.as/", context_name="Mestra Entrepenør AS"), mestermur)
+    assert verify(_fact("company_profile", "https://facebook.com/mestra", "https://www.mestra.as/", context_name="Mestra Entrepenør AS"), mestermur) is None
+    assert verify(_fact("dated_activity", "Nyhet (2026-01-01)", "https://www.mestra.as/", context_name="Mestra Entrepenør AS"), mestermur) is None
+
+
 def test_housing_coop_shared_manager_domain_fact_rejected_even_without_a_context_name():
     """Real-world regression, confirmed in the real 1,000-company submission
     batch (51 leaked claims): the context_name check above only fires when a

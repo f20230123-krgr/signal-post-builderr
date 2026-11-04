@@ -109,36 +109,31 @@ def canonical_social_profile_url(url: str) -> Optional[str]:
     return None
 
 
+def published_form(canonical: str) -> str:
+    """The profile written the way Builderr's reference data writes it: https, the platform's
+    bare host (no www., country or mobile prefix; twitter.com as x.com) and no trailing slash
+    ("https://facebook.com/afgruppen"). Only 2 of our 90 links on Builderr's 100-company sample
+    matched its links letter for letter while 65 were the same profile written another way."""
+    parts = urlsplit(canonical)
+    host = parts.netloc.lower().removeprefix("www.")
+    if host == "twitter.com":
+        host = "x.com"
+    query = f"?{parts.query}" if parts.query else ""
+    return f"https://{host}{parts.path.rstrip('/')}{query}"
+
+
 def social_profile_link(url: str) -> Optional[tuple[str, str]]:
     """(link to publish, de-duplication key) for a company profile, or None.
 
-    The link keeps the form the company itself uses (path as written, so a
-    trailing slash or a country subdomain survives) minus the query string and
-    fragment, which only carry tracking. The key is the canonical form, so the
-    same profile linked three ways is one claim."""
+    The key is the canonical form, so the same profile linked three ways is one claim; the
+    link is that profile in Builderr's own spelling (published_form). The evidence keeps the
+    link exactly as the page writes it."""
     # A link read from a feed's text can carry the CDATA close ("/steinerskolenioslo/]]").
     url = re.sub(r"[\]\[)>'\"]+$", "", url.strip())
     key = canonical_social_profile_url(url)
     if key is None:
         return None
-    parts = urlsplit(url.strip())
-    link = f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path}"
-    if (
-        "profile.php" in parts.path
-        or parts.path.lower().startswith("/pg/")
-        or (key.startswith("https://www.youtube.com/") and parts.path.rstrip("/") != urlsplit(key).path)
-    ):
-        # The account id lives in the query string; /pg/<name>/about and a YouTube channel's
-        # /featured or /playlists are tabs of the account itself.
-        link = key
-    elif "linkedin.com" in parts.netloc.lower():
-        # The company page as the site writes it, never one of its tabs (/about, /posts,
-        # /mycompany, /admin/...): the first two path segments, and a trailing slash only
-        # if the original had one after the name (or went on to a tab).
-        raw = [seg for seg in parts.path.split("/") if seg]
-        slash = "/" if len(raw) > 2 or parts.path.endswith("/") else ""
-        link = f"{parts.scheme.lower()}://{parts.netloc.lower()}/{raw[0]}/{raw[1]}{slash}"
-    return link, key
+    return published_form(key), key
 
 
 # --- profiles that live in a page's script data rather than in an <a> tag ------------------

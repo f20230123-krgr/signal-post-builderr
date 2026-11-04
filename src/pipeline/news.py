@@ -146,7 +146,7 @@ def is_headline(title: str) -> bool:
 # Official audit feedback (23 Oct): "news" included product, listing and navigation pages
 # ("Kontakt oss", a shop's new-arrivals feed). Only a dated post with its own page is news.
 _NAV_TITLE_RE = re.compile(
-    r"^(?:hjem|home|forside|kontakt(?:\s+oss)?|contact(?:\s+us)?|om\s+oss|about(?:\s+us)?|personvern\w*|privacy(?:\s+policy)?|"
+    r"^(?:hjem|home|forside|kontakt(?:\s+oss)?|contact(?:\s+us)?|om(?:\s+\S+){1,3}|about(?:\s+\S+){0,3}|personvern\w*|privacy(?:\s+policy)?|"
     r"cookies?(?:\s*-?\s*(?:policy|erklæring|innstillinger))?|vilkår\w*|salgsbetingelser|terms(?:\s+\w+)*|faq|"
     r"logg\s+inn|login|log\s+in|min\s+side|my\s+page|meld\s+skade|ledige\s+stillinger|karriere|careers?|jobs?|jobb(?:\s+hos\s+oss)?|"
     r"priser|prices|produkter|products|tjenester|services|butikk(?:er)?|nettbutikk|shop|handlekurv|cart|søk|search)$",

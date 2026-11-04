@@ -38,7 +38,7 @@ from rapidfuzz import fuzz
 from src.pipeline.careers import CAREERS_VALUE_PREFIX, JOB_AD_VALUE_PREFIX, ROLE_VALUE_PREFIX
 from src.pipeline.extract import RawFact
 from src.pipeline.resolve import ResolvedEntity
-from src.pipeline.social import canonical_social_profile_url, plausibly_own_profile
+from src.pipeline.social import canonical_social_profile_url, identity_tokens, plausibly_own_profile, resembles_company
 
 # Documented threshold -- changing this number changes precision. Any change
 # must be accompanied by a /self-score run reported in the same PR/summary.
@@ -147,6 +147,17 @@ def _site_is_a_page_of_a_larger_site(site_url: str) -> bool:
     return any(s.lower() not in _LANGUAGE_SEGMENTS for s in segments)
 
 
+def _account_named_after(fact: RawFact, entity: ResolvedEntity) -> bool:
+    """A social account whose name holds the company's own registered name ("hmhcement" for
+    HMH CEMENT OSLO AS, "mestermur" for MESTERMUR AS) is the company's even when the page calls
+    itself something else ("HMHcement.no", "Mestra Entrepenør AS"). Only the registered name
+    counts here, never the domain: a housing manager's own account resembles its domain."""
+    if fact.field_name != "company_profile" or not entity.legal_name:
+        return False
+    canonical = canonical_social_profile_url(fact.value)
+    return bool(canonical) and resembles_company(canonical, identity_tokens(entity.legal_name, ""))
+
+
 def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     """
     Return a ConfirmedFact if `fact`'s source page identity matches `entity`
@@ -200,7 +211,7 @@ def verify(fact: RawFact, entity: ResolvedEntity) -> ConfirmedFact | None:
     # carries a co-located name -- that name must match too, regardless of
     # whether the field is normally name-bearing.
     if fact.context_name is not None:
-        if name_similarity(entity.legal_name, fact.context_name) < NAME_MATCH_THRESHOLD:
+        if name_similarity(entity.legal_name, fact.context_name) < NAME_MATCH_THRESHOLD and not _account_named_after(fact, entity):
             return None
 
     # A profile the site links is published as the company's own only when its account name

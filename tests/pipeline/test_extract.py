@@ -383,8 +383,8 @@ def test_social_profile_links_in_plain_markup_become_company_profile_facts():
     facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
     values = [f.value for f in facts]
 
-    assert "https://www.linkedin.com/company/acme-norge/" in values
-    assert "https://www.facebook.com/acmenorge" in values
+    assert "https://linkedin.com/company/acme-norge" in values
+    assert "https://facebook.com/acmenorge" in values
     assert "https://instagram.com/acme.norge" in values
     assert all(f.field_name == "company_profile" for f in facts)
     assert all(f.extraction_method == "structured" for f in facts)
@@ -585,7 +585,7 @@ def test_a_facebook_page_plugin_s_data_href_becomes_a_company_profile_fact():
 
     facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
 
-    assert [f.value for f in facts] == ["https://www.facebook.com/AcmeNorge"]
+    assert [f.value for f in facts] == ["https://facebook.com/AcmeNorge"]
 
 
 def test_a_share_button_s_data_href_is_still_rejected():
@@ -606,7 +606,7 @@ def test_the_real_profile_url_embedded_in_an_iframe_embed_is_recovered():
 
     facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
 
-    assert [f.value for f in facts] == ["https://www.facebook.com/AcmeNorge"]
+    assert [f.value for f in facts] == ["https://facebook.com/AcmeNorge"]
     # the embed/plugin URL itself is never published as if it were the profile
     assert not any("plugins" in f.value for f in facts)
 
@@ -635,7 +635,23 @@ def test_json_ld_sameas_is_filtered_the_same_way_as_plain_links():
     facts = structured_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
     profiles = [f.value for f in facts if f.field_name == "company_profile"]
 
-    assert profiles == ["https://www.linkedin.com/company/acme-norge"]
+    assert profiles == ["https://linkedin.com/company/acme-norge"]
+
+
+def test_sameas_of_the_sites_publisher_or_founder_is_read_but_not_a_parents():
+    """siguna.no (3 Nov): the WebSite object's "founder" Organization carries the sameAs list."""
+    html = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type":"WebSite","name":"Siguna","founder":{"@type":"Organization","name":"Siguna Consulting",'
+        '"sameAs":["https://www.linkedin.com/company/siguna-consulting"]},'
+        '"parentOrganization":{"@type":"Organization","name":"Big Group","sameAs":["https://www.linkedin.com/company/big-group"]}}'
+        "</script></head></html>"
+    )
+
+    facts = [f for f in structured_facts(html, "https://www.siguna.no/", datetime(2026, 1, 1, tzinfo=timezone.utc)) if f.field_name == "company_profile"]
+
+    assert [(f.value, f.context_name) for f in facts] == [("https://linkedin.com/company/siguna-consulting", "Siguna Consulting")]
+    assert facts[0].evidence_span in html
 
 
 def test_the_homepage_description_is_what_the_company_says_it_does_and_junk_is_skipped():

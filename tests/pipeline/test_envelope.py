@@ -254,3 +254,30 @@ def test_each_summary_sentence_points_at_the_evidence_it_rests_on():
     assert cited and cited <= set(evidence_by_id)
     identity = envelope["summary"]["sentences"][0]
     assert any(evidence_by_id[i]["source_url"] == "https://data.brreg.no/enhet/923609016" for i in identity["evidence_ids"])
+
+
+def test_an_area_we_checked_and_found_empty_is_a_not_available_claim_with_a_reason():
+    """The starter kit records a state for every area it checks; ours used to leave social
+    profiles, job ads and head count out of the claims when nothing was found."""
+    from tests.conftest import make_profile as mp
+
+    no_site = to_envelope(mp(org_number="923609016"), run_id="run-1")
+    by_field = {c["field"]: c for c in no_site["claims"]}
+
+    for field in ("company_profile", "hiring_signal"):
+        assert by_field[field]["availability"] == "not_available"
+        assert by_field[field]["value"] is None and by_field[field]["evidence_ids"] == []
+        assert "no website is registered" in by_field[field]["reason"]
+    assert by_field["official_website"]["reason"].startswith("no website is registered")
+    assert no_site["errors"] == []
+
+    with_site = to_envelope(
+        mp(org_number="923609016", official_site=available_claim("https://acme.no"),
+           company_profiles=[available_claim("https://facebook.com/acme")]),
+        run_id="run-1",
+    )
+    profiles = [c for c in with_site["claims"] if c["field"] == "company_profile"]
+    hiring = [c for c in with_site["claims"] if c["field"] == "hiring_signal"]
+    assert [c["availability"] for c in profiles] == ["available"]
+    assert profiles[0]["reason"] is None
+    assert hiring[0]["reason"] == "no single job ad was found on the company's website"

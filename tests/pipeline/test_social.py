@@ -55,12 +55,19 @@ def test_a_company_profile_is_reduced_to_its_canonical_form(url, expected):
     assert canonical_social_profile_url(url) == expected
 
 
-def test_the_published_link_keeps_the_companys_own_form_without_tracking_parameters():
+def test_the_published_link_is_written_the_way_builderrs_reference_data_writes_it():
+    """Builderr's sample writes https://facebook.com/afgruppen: no www., no country or mobile
+    prefix, no trailing slash, x.com for twitter.com, no tracking parameters."""
     link, key = social_profile_link("https://www.linkedin.com/company/nve/?originalSubdomain=no")
 
-    assert link == "https://www.linkedin.com/company/nve/"
+    assert link == "https://linkedin.com/company/nve"
     assert key == "https://www.linkedin.com/company/nve"
-    assert social_profile_link("https://www.instagram.com/bilforhandler1/?hl=nb")[0] == "https://www.instagram.com/bilforhandler1/"
+    assert social_profile_link("https://www.instagram.com/bilforhandler1/?hl=nb")[0] == "https://instagram.com/bilforhandler1"
+    assert social_profile_link("http://twitter.com/sailormusicno")[0] == "https://x.com/sailormusicno"
+    assert social_profile_link("https://m.facebook.com/Constokonsern/")[0] == "https://facebook.com/Constokonsern"
+    assert social_profile_link("https://www.facebook.com/profile.php?id=100057441009551&ref=x")[0] == (
+        "https://facebook.com/profile.php?id=100057441009551"
+    )
 
 
 def test_the_same_profile_linked_three_ways_is_one_claim():
@@ -72,7 +79,7 @@ def test_the_same_profile_linked_three_ways_is_one_claim():
 
     facts = social_profile_facts(html, "https://nve.no", NOW)
 
-    assert [f.value for f in facts] == ["https://www.linkedin.com/company/nve/"]
+    assert [f.value for f in facts] == ["https://linkedin.com/company/nve"]
 
 
 def test_posts_staff_and_share_links_in_a_footer_publish_nothing():
@@ -83,7 +90,7 @@ def test_posts_staff_and_share_links_in_a_footer_publish_nothing():
         '<a href="https://www.facebook.com/acmenorge">Facebook</a>'
     )
 
-    assert [f.value for f in social_profile_facts(html, "https://acme.no", NOW)] == ["https://www.facebook.com/acmenorge"]
+    assert [f.value for f in social_profile_facts(html, "https://acme.no", NOW)] == ["https://facebook.com/acmenorge"]
 
 
 def test_sameas_in_json_ld_is_filtered_the_same_way():
@@ -94,19 +101,19 @@ def test_sameas_in_json_ld_is_filtered_the_same_way():
 
     values = [f.value for f in structured_facts(html, "https://acme.no", NOW) if f.field_name == "company_profile"]
 
-    assert values == ["https://www.linkedin.com/company/acme/"]
+    assert values == ["https://linkedin.com/company/acme"]
 
 
 def test_a_malformed_link_is_not_a_profile_and_not_a_crash():
     assert canonical_social_profile_url("https://[::1/linkedin.com/company/x") is None
-    assert social_profile_facts('<a href="http://[bad">x</a><a href="https://www.facebook.com/acme">f</a>', "https://acme.no", NOW)[0].value == "https://www.facebook.com/acme"
+    assert social_profile_facts('<a href="http://[bad">x</a><a href="https://www.facebook.com/acme">f</a>', "https://acme.no", NOW)[0].value == "https://facebook.com/acme"
 
 
 @pytest.mark.parametrize("url,expected", [
-    ("https://www.linkedin.com/company/ragasco-as/mycompany/", "https://www.linkedin.com/company/ragasco-as/"),
-    ("https://www.linkedin.com/company/rsv-gruppen/posts/", "https://www.linkedin.com/company/rsv-gruppen/"),
-    ("https://www.linkedin.com/company/845627/admin/feed/posts/", "https://www.linkedin.com/company/845627/"),
-    ("https://no.linkedin.com/company/entra-asa", "https://no.linkedin.com/company/entra-asa"),
+    ("https://www.linkedin.com/company/ragasco-as/mycompany/", "https://linkedin.com/company/ragasco-as"),
+    ("https://www.linkedin.com/company/rsv-gruppen/posts/", "https://linkedin.com/company/rsv-gruppen"),
+    ("https://www.linkedin.com/company/845627/admin/feed/posts/", "https://linkedin.com/company/845627"),
+    ("https://no.linkedin.com/company/entra-asa", "https://linkedin.com/company/entra-asa"),
 ])
 def test_a_linkedin_company_is_published_as_the_company_page_never_one_of_its_tabs(url, expected):
     assert social_profile_link(url)[0] == expected
@@ -150,7 +157,7 @@ def test_profiles_in_script_data_are_found_with_escaped_slashes_and_quoted_as_fo
 
     found = script_social_candidates(html, {"afgruppen"})
 
-    assert [f[0] for f in found] == ["https://www.facebook.com/afgruppen", "https://no.linkedin.com/company/af-gruppen/"]
+    assert [f[0] for f in found] == ["https://facebook.com/afgruppen", "https://linkedin.com/company/af-gruppen"]
     assert found[0][2] in html  # the span is the text exactly as the page has it
 
 
@@ -166,7 +173,7 @@ def test_tracking_pixels_share_links_and_a_partners_profile_in_script_data_are_n
 
 def test_facebooks_old_pg_page_form_is_the_same_page():
     assert social_profile_link("https://www.facebook.com/pg/MtmSkogservice/about/") == (
-        "https://www.facebook.com/MtmSkogservice", "https://www.facebook.com/MtmSkogservice",
+        "https://facebook.com/MtmSkogservice", "https://www.facebook.com/MtmSkogservice",
     )
 
 
@@ -193,7 +200,7 @@ def test_facebook_feed_posts_are_not_profiles_and_youtube_tabs_are_dropped():
     assert canonical_social_profile_url("https://www.facebook.com/599407360228640_1627673669063159") is None
     assert canonical_social_profile_url("https://facebook.com/1552125346617992") is None
     assert social_profile_link("https://www.youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw/featured")[0] == (
-        "https://www.youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw"
+        "https://youtube.com/channel/UCSAz4EpgiM1HlNrjPy38_Lw"
     )
 
 
