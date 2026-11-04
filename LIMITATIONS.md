@@ -261,6 +261,12 @@ All permissive; no copyleft (GPL-style) obligations.
   published; only a domain that spells the company's name stands without that proof.
 - **Branch accounts are recognised by municipality names** at the end of the account name
   ("...larvik"); a branch named after a district or a shorter town name is not caught.
+- **"Not found" means not found where we looked.** A `not_available` social, hiring or head-count
+  claim says what was checked (the company's own website, Brønnøysund's record); a profile or job
+  ad that exists only elsewhere (a job board the site does not link, a club's page abbreviated
+  "SK ..." rather than its registered name) is not seen.
+- **"Open the page at this text"** uses a browser text fragment: Chrome, Edge and Safari scroll to
+  the quote; other browsers, or a quote from the page's hidden mark-up, just open the page.
 
 ## Known limits added 2026-10-14
 

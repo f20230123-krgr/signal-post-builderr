@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Literal, Optional
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, quote, urljoin, urlsplit
 
 from email.utils import parsedate_to_datetime
 
@@ -225,7 +225,13 @@ def _as_written(page: str, link: str) -> Optional[str]:
     if link in page:
         return link
     escaped = link.replace("/", "\\/")  # JSON-LD often writes https:\/\/...
-    return escaped if escaped in page else None
+    if escaped in page:
+        return escaped
+    # A Facebook page plugin carries the profile url-encoded in its iframe's href= parameter.
+    for encoded in (quote(link, safe=""), quote(link, safe="").lower()):
+        if encoded in page:
+            return encoded
+    return None
 
 
 def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list[RawFact]:

@@ -125,6 +125,13 @@ main { overflow-y: auto; min-height: 0; padding: 20px clamp(14px, 3vw, 36px) 60p
 .fact.src-external { border-left-color: var(--ext); }
 .fact .k { color: var(--muted); font-size: .86rem; }
 .fact .v { overflow-wrap: anywhere; }
+.fact .v .sub { font-style: normal; margin-top: 2px; }
+.ext { font-size: .8em; text-decoration: none; display: inline-block; }
+.socs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.soc { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 2px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: .84rem; text-decoration: none; }
+.soc:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.story a, .head .meta a { overflow-wrap: anywhere; }
+@media (pointer: coarse) { .soc, .evact .btn { min-height: 44px; } }
 .fact.na .v { color: var(--muted); font-style: italic; }
 .fact .why { border: 1px solid var(--line); background: transparent; border-radius: 6px; font-size: .78rem; padding: 2px 8px; color: var(--accent); }
 .fact .why:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
@@ -179,6 +186,8 @@ dialog::backdrop { background: rgba(7,18,24,.5); }
 .ev dl { margin: 0; display: grid; grid-template-columns: 112px 1fr; gap: 4px 10px; font-size: .86rem; }
 .ev dt { color: var(--muted); }
 .ev dd { margin: 0; overflow-wrap: anywhere; }
+.evact { display: flex; flex-wrap: wrap; gap: 8px; }
+.evact .btn { text-decoration: none; color: var(--ink); font-size: .84rem; display: inline-flex; align-items: center; gap: 4px; }
 .ev blockquote { margin: 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--mark); font: .85rem var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; border-radius: 0 6px 6px 0; }
 .guide { max-width: 640px; margin: 8vh auto; background: var(--panel); border-radius: 14px; padding: 22px 26px; border: 1px solid var(--line); }
 .guide h3 { margin-top: 0; }
@@ -415,6 +424,85 @@ function valueHtml(v) {
     return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(url) + "</a>" + esc(tail);
   }).join("");
 }
+// A link that opens outside the viewer, marked with an arrow so it reads as one.
+function extLink(url, text, cls) {
+  return '<a' + (cls ? ' class="' + cls + '"' : "") + ' href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(text) + ' <span class="ext" aria-hidden="true">&#8599;</span></a>';
+}
+const PLATFORM = { "facebook.com": "Facebook", "linkedin.com": "LinkedIn", "instagram.com": "Instagram", "youtube.com": "YouTube", "x.com": "X", "twitter.com": "X", "tiktok.com": "TikTok" };
+const platformOf = u => { const h = host(u); return PLATFORM[Object.keys(PLATFORM).find(p => h === p || h.endsWith("." + p))] || h; };
+const handleOf = u => { try { const s = new URL(u).pathname.split("/").filter(Boolean); return decodeURIComponent(s[0] === "company" || s[0] === "user" || s[0] === "channel" || s[0] === "c" || s[0] === "people" ? s[1] || "" : s[0] || ""); } catch (e) { return ""; } };
+const socialChip = u => extLink(u, platformOf(u), "soc");
+const brregUrl = org => "https://virksomhet.brreg.no/nb/oppslag/enheter/" + org;
+// A page link scrolled to and highlighting the quoted text (a text fragment, which Chrome,
+// Edge and Safari follow; other browsers just open the page).
+function atQuote(url, span) {
+  const s = String(span || "").replace(/\s+/g, " ").trim();
+  if (!isUrl(url) || /^https?:\/\/data\.brreg\.no\//.test(url) || s.length < 3 || /^https?:/i.test(s) || /[<>{}"\\]/.test(s)) return null;
+  const words = s.split(" "), text = words.length > 12 ? words.slice(0, 12).join(" ") : s;
+  return url.split("#")[0] + "#:~:text=" + encodeURIComponent(text).replace(/-/g, "%2D");
+}
+// Where a dated item or a job can be read: the company page it was found on, at its headline.
+function sourceOf(c, claim) {
+  const e = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean)[0];
+  if (!e || e.source_class === "official_registry" || !isUrl(e.source_url)) return null;
+  return atQuote(e.source_url, e.claim_span) || e.source_url;
+}
+// A fact's value as HTML: social profiles as "Facebook · name", a dated headline or an open
+// role as a link to where it was found, any other URL as a link.
+function factValueHtml(c, f, claim) {
+  const v = claim.value;
+  if (f === "company_profile" && isUrl(v)) return extLink(v, platformOf(v) + (handleOf(v) ? " \u00b7 " + handleOf(v) : ""));
+  if (f === "dated_activity") { const u = sourceOf(c, claim); if (u) return extLink(u, v); }
+  if (f === "hiring_signal") {
+    const m = /^Open role: (.+) - (https?:\/\/\S+)$/.exec(v || "");
+    if (m) return "Open role: " + extLink(m[2], m[1]);
+  }
+  return valueHtml(v);
+}
+// A summary sentence with the things it names made clickable: the website, each profile
+// ("LinkedIn"), the quoted open role and the quoted latest headline. Viewer only: the
+// envelope's summary text is unchanged.
+function linkedSentence(c, x) {
+  const raw = x.text.replace(/^As of \d{4}-\d{2}-\d{2}: /, "");
+  const fields = x.fields || [];
+  if (!/^Online: /.test(raw) || !fields.length) return esc(raw);
+  const links = [];
+  if (c.site) links.push([host(c.site), c.site]);
+  const seen = new Set();
+  c.ok("company_profile").forEach(p => { const n = platformOf(p.value); if (!seen.has(n)) { seen.add(n); links.push([n, p.value]); } });
+  const role = /open roles?(?:, e\.g\.|:) "(.+?)"/.exec(raw);
+  if (role) {
+    const hit = c.ok("hiring_signal").map(h => /^Open role: (.+) - (https?:\/\/\S+)$/.exec(h.value || "")).find(m => m && m[1] === role[1]);
+    if (hit) links.push([role[1], hit[2]]);
+  }
+  const news = /latest news "(.+?)" \(\d{4}-\d{2}-\d{2}\)/.exec(raw);
+  if (news) {
+    const item = c.siteNews.find(n => String(n.value || "").indexOf(news[1]) === 0);
+    const u = item && sourceOf(c, item);
+    if (u) links.push([news[1], u]);
+  }
+  // Swap each first mention for a numbered slot, then the slots for links, so a later label
+  // can never match inside an earlier link's address.
+  let html = esc(raw);
+  const slots = [];
+  links.forEach(([label, url]) => {
+    const needle = esc(label), at = html.indexOf(needle);
+    if (at < 0) return;
+    slots.push('<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + needle + "</a>");
+    html = html.slice(0, at) + "\u0000" + (slots.length - 1) + "\u0000" + html.slice(at + needle.length);
+  });
+  return html.replace(/\u0000(\d+)\u0000/g, (m, n) => slots[Number(n)]);
+}
+// Under each piece of evidence: open the source page at the quoted text, open a registry
+// record as Brønnøysund's own page, and copy the quote.
+function evActions(e) {
+  const bits = [], q = atQuote(e.source_url, e.claim_span);
+  const org = /^https:\/\/data\.brreg\.no\/.*?(\d{9})/.exec(e.source_url || "");
+  if (q) bits.push('<a class="btn" href="' + esc(q) + '" target="_blank" rel="noopener noreferrer">Open the page at this text <span class="ext" aria-hidden="true">&#8599;</span></a>');
+  if (org) bits.push('<a class="btn" href="' + esc(brregUrl(org[1])) + '" target="_blank" rel="noopener noreferrer">Open in the Brønnøysund Register <span class="ext" aria-hidden="true">&#8599;</span></a>');
+  if (e.claim_span) bits.push('<button type="button" class="btn copyq" data-q="' + esc(e.claim_span) + '">Copy quote</button>');
+  return bits.length ? '<div class="evact">' + bits.join("") + "</div>" : "";
+}
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -515,11 +603,10 @@ function citeButtons(c, ids) {
 // A list field (roles, workplaces ...) shows its label once, on the first row.
 function factRow(c, f, claim, first) {
   const cls = claimClass(c, claim);
-  const val = claim.value;
   let extra = "";
   if (claim.reporting_period) extra += '<div class="sub">Period ' + esc(claim.reporting_period) + (claim.effective_at ? ", to " + esc(claim.effective_at) : "") + "</div>";
   else if (claim.effective_at) extra += '<div class="sub">Effective ' + esc(claim.effective_at) + "</div>";
-  return '<div class="fact src-' + esc(cls) + (first === false ? " cont" : "") + '"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">' + valueHtml(val) + extra + "</div>" +
+  return '<div class="fact src-' + esc(cls) + (first === false ? " cont" : "") + '"><div class="k">' + esc(LABEL[f]) + '</div><div class="v">' + factValueHtml(c, f, claim) + extra + "</div>" +
     '<button type="button" class="why" data-ci="' + claim.i + '">Evidence</button></div>';
 }
 const SEVERITY = ["failed", "blocked", "ambiguous", "not_applicable", "not_available"];
@@ -528,7 +615,10 @@ function naLine(c, fields, labelOverride) {
   const states = fields.map(f => (c.all(f)[0] || {}).availability || "not_available");
   const st = SEVERITY.find(s => states.includes(s)) || "not_available";
   const names = labelOverride || fields.map(f => LABEL[f]).join(", ");
-  return '<div class="fact na"><div class="k">Not found</div><div class="v">' + esc(names) + ' <span class="pill ' + esc(st) + '" title="' + esc(STATE_HELP[st] || "") + '">' + esc(st.replace("_", " ")) + "</span></div><span></span></div>";
+  // Why each one is blank, when the run recorded a reason ("the company's website links no social profile of its own").
+  const why = fields.map(f => [f, (c.all(f).find(x => x.reason) || {}).reason]).filter(x => x[1] && x[0] !== "official_website")
+    .map(x => '<div class="sub">' + esc(LABEL[x[0]]) + ": " + esc(x[1]) + "</div>").join("");
+  return '<div class="fact na"><div class="k">Not found</div><div class="v">' + esc(names) + ' <span class="pill ' + esc(st) + '" title="' + esc(STATE_HELP[st] || "") + '">' + esc(st.replace("_", " ")) + "</span>" + why + "</div><span></span></div>";
 }
 const FIN_FIELDS = ["revenue", "operating_result", "profit_before_tax", "annual_result", "total_assets", "total_equity", "total_debt"];
 const amountOf = v => { const m = /^(-?[\d,]+)\s*([A-Z]{3})?$/.exec(v || ""); return m ? [Number(m[1].replace(/,/g, "")), m[2] || ""] : null; };
@@ -615,17 +705,18 @@ function headlineFacts(c) {
 function renderCompany(c) {
   const s = c.env.summary || { sentences: [], unknowns: [], changes: [] };
   const story = (s.sentences || []).map((x, i, a) =>
-    '<div class="sent"><span class="topic">' + esc(topicOf(x, i, a.length)) + "</span><span>" + esc(x.text.replace(/^As of \d{4}-\d{2}-\d{2}: /, "")) + citeButtons(c, x.evidence_ids) + "</span></div>").join("");
+    '<div class="sent"><span class="topic">' + esc(topicOf(x, i, a.length)) + "</span><span>" + linkedSentence(c, x) + citeButtons(c, x.evidence_ids) + "</span></div>").join("");
   const gaps = (s.unknowns || []).length ? '<div class="gaps">Not found:' + s.unknowns.map(u => '<span class="pill">' + esc(u) + "</span>").join("") + "</div>" : "";
   const cant = (s.cant_tell || []).length ? '<div class="gaps cant">Can\'t tell:' + s.cant_tell.map(u => '<span class="pill">' + esc(u) + "</span>").join("") + "</div>" : "";
   const st = (c.status || "").toLowerCase();
   $("#main").innerHTML = '<div class="wrap">' +
     '<div class="card"><div class="head"><div class="ttl">' +
     '<button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
-    '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\"><span class=\"mono\">org. " + esc(c.org) + "</span>" +
+    '<h2 class="co">' + esc(c.name) + "</h2><div class=\"meta\">" + '<a class="mono" href="' + esc(brregUrl(c.org)) + '" target="_blank" rel="noopener noreferrer" title="Open this company in the Brønnøysund Register">org. ' + esc(c.org) + ' <span class="ext" aria-hidden="true">&#8599;</span></a>' +
     (c.form ? "<span>" + esc(c.form) + "</span>" : "") + (c.status ? '<span class="pill ' + esc(st) + '">' + esc(c.status) + "</span>" : "") +
-    (c.site ? '<a href="' + esc(c.site) + '" target="_blank" rel="noopener noreferrer">' + esc(host(c.site)) + "</a>" : "") +
+    (c.site ? extLink(c.site, host(c.site)) : "") +
     (c.conf ? confBadge(c) : "") + "</div>" +
+    (c.ok("company_profile").length ? '<div class="socs" aria-label="Company-owned social profiles">' + c.ok("company_profile").map(x => socialChip(x.value)).join("") + "</div>" : "") +
     (headlineFacts(c) ? '<p class="headline">' + esc(headlineFacts(c)) + "</p>" : "") +
     (c.conf ? '<p class="confline">Confidence ' + esc(c.conf.level) + ": " + esc(c.conf.why) + "</p>" : "") + "</div>" +
     '<div class="actions"><button class="btn" id="pickBtn" type="button">' + (state.picked.includes(c.org) ? "Remove from compare" : "Add to compare") + "</button>" +
@@ -649,9 +740,12 @@ function renderCompare() {
     ["Accounts period", c => (c.ok("annual_accounts_latest")[0] || {}).reporting_period],
     ["Leadership", c => c.ok("leader").slice(0, 3).map(x => x.value).join("; ")],
     ["Workplaces", c => c.ok("workplace").length ? String(c.ok("workplace").length) : null],
-    ["Website", c => c.site && host(c.site)], ["Social profiles", c => c.ok("company_profile").length ? c.ok("company_profile").map(x => host(x.value)).join(", ") : null],
-    ["Hiring", c => c.ok("hiring_signal").length ? c.ok("hiring_signal")[0].value : null],
-    ["Latest company news", c => { const a = c.siteNews.map(x => x.effective_at || latestDate(x.value)).filter(Boolean).sort().pop(); return a || null; }],
+    ["Website", c => c.site, c => extLink(c.site, host(c.site))],
+    ["Social profiles", c => c.ok("company_profile").length ? c.ok("company_profile").map(x => x.value).join(", ") : null,
+      c => '<div class="socs">' + c.ok("company_profile").map(x => socialChip(x.value)).join("") + "</div>"],
+    ["Hiring", c => c.ok("hiring_signal").length ? c.ok("hiring_signal")[0].value : null, c => factValueHtml(c, "hiring_signal", c.ok("hiring_signal")[0])],
+    ["Latest company news", c => { const a = c.siteNews.map(x => x.effective_at || latestDate(x.value)).filter(Boolean).sort().pop(); return a || null; },
+      c => { const d = c.siteNews.map(x => x.effective_at || latestDate(x.value)).filter(Boolean).sort().pop(); const x = c.siteNews.find(n => (n.effective_at || latestDate(n.value)) === d); return factValueHtml(c, "dated_activity", x); }],
     ["Information types found", c => c.score + " of " + FLAGS.length], ["Evidence records", c => String(Object.keys(c.ev).length)]
   ];
   const head = "<thead><tr><th></th>" + cs.map(c => '<th scope="col"><button class="btn ghost" data-o="' + c.org + '" type="button">' + esc(c.name) + '</button><div class="mono">' + esc(c.org) + "</div></th>").join("") + "</tr></thead>";
@@ -659,7 +753,8 @@ function renderCompare() {
     const vals = cs.map(c => r[1](c));
     const distinct = new Set(vals.map(v => v == null || v === "" ? "" : String(v)));
     const differs = distinct.size > 1;
-    return "<tr><th scope=\"row\">" + esc(r[0]) + "</th>" + vals.map(v => (v == null || v === "") ? '<td class="na">Not found</td>' : '<td class="' + (differs ? "diff" : "") + '">' + esc(v) + "</td>").join("") + "</tr>";
+    // A row with a third function shows links (website, profiles, the job, the news item); the CSV keeps the plain value.
+    return "<tr><th scope=\"row\">" + esc(r[0]) + "</th>" + vals.map((v, j) => (v == null || v === "") ? '<td class="na">Not found</td>' : '<td class="' + (differs ? "diff" : "") + '">' + (r[2] ? r[2](cs[j]) : esc(v)) + "</td>").join("") + "</tr>";
   }).join("") + "</tbody>";
   $("#main").innerHTML = '<div class="wrap"><div class="card"><div class="head"><div class="ttl"><button class="btn only-mobile" id="backBtn" type="button">&larr; Companies</button>' +
     '<h2 class="co">Comparing ' + cs.length + ' companies</h2><div class="meta">Highlighted cells differ between companies. Select a company name to open its evidence.</div></div>' +
@@ -682,7 +777,8 @@ function evidenceHtml(e) {
     (e.effective_at ? "<dt>Effective</dt><dd>" + esc(e.effective_at) + "</dd>" : "") +
     (e.linked_from ? "<dt>Reached via</dt><dd>" + valueHtml(e.linked_from) + "</dd>" : "") +
     '<dt>Content SHA-256</dt><dd class="mono">' + esc(e.content_sha256 || "n/a") + "</dd></dl>" +
-    (e.claim_span ? "<div><div class=\"sub\">Supporting text</div><blockquote>" + esc(e.claim_span) + "</blockquote></div>" : "") + "</div>";
+    (e.claim_span ? "<div><div class=\"sub\">Supporting text</div><blockquote>" + esc(e.claim_span) + "</blockquote></div>" : "") +
+    evActions(e) + "</div>";
 }
 function openDrawer(html) {
   const d = $("#drawer");
@@ -697,7 +793,7 @@ function openClaim(c, ci) {
   const claim = c.claims[ci], st = claim.availability || "available";
   const evs = (claim.evidence_ids || []).map(i => c.ev[i]).filter(Boolean);
   openDrawer("<h3>" + esc(LABEL[claim.field] || claim.field) + '</h3><p>' + valueHtml(claim.value || "Not found") + '</p><p><span class="pill ' + esc(st) + '">' + esc(st.replace("_", " ")) + "</span> " +
-    (claim.confidence != null ? '<span class="sub">identity confidence ' + Math.round(claim.confidence * 100) + "%</span>" : "") + '</p><p class="sub">' + esc(STATE_HELP[st] || "") + "</p>" + (claim.reason ? "<p><b>Can't tell:</b> " + esc(claim.reason) + "</p>" : "") +
+    (claim.confidence != null ? '<span class="sub">identity confidence ' + Math.round(claim.confidence * 100) + "%</span>" : "") + '</p><p class="sub">' + esc(STATE_HELP[st] || "") + "</p>" + (claim.reason ? "<p><b>" + (st === "ambiguous" ? "Can't tell" : "Why it is blank") + ":</b> " + esc(claim.reason) + "</p>" : "") +
     (evs.length ? evs.map(evidenceHtml).join("") : '<p class="sub">No source recorded: nothing is published without one.</p>'));
 }
 function openEv(c, id) {
@@ -712,6 +808,7 @@ function openGuide() {
   $("#guideBody").innerHTML = "<h3>How to read this page</h3><p>Every sentence and fact comes from a recorded source. Nothing is estimated, and a missing value is shown as <i>not found</i>, never as zero.</p>" +
     '<dl><dt>Left bar colour</dt><dd><span style="color:var(--reg)">Blue</span> official registry, <span style="color:var(--own)">green</span> the company\'s own site, <span style="color:var(--ext)">amber</span> external source.</dd>' +
     "<dt>Numbered citations</dt><dd>Open the evidence behind a sentence: link, retrieval time, content hash and quoted text.</dd>" +
+    "<dt>Links &#8599;</dt><dd>Open the website, a social profile, a job ad, a news page or the Brønnøysund record in a new tab. In the evidence panel, <i>Open the page at this text</i> jumps to the quoted words.</dd>" +
     Object.keys(STATE_HELP).map(k => "<dt>" + esc(k.replace("_", " ")) + "</dt><dd>" + esc(STATE_HELP[k]) + "</dd>").join("") +
     '</dl><p><b>Shortcuts:</b> <span class="mono">/</span> search, <span class="mono">Esc</span> close.</p><button class="btn primary" type="button" id="guideClose">Got it</button>';
   $("#guide").showModal(); $("#guideClose").focus();
@@ -751,6 +848,11 @@ document.addEventListener("click", e => {
   else if (t.id === "pickBtn") { const top = $("#main").scrollTop; togglePick(state.open); renderCompany(byOrg[state.open]); $("#main").scrollTop = top; renderList(); $("#pickBtn").focus(); }
   else if (t.id === "jsonBtn") { download(state.open + ".envelope.json", JSON.stringify(byOrg[state.open].env, null, 2), "application/json"); }
   else if (t.id === "linkBtn") { try { navigator.clipboard.writeText(location.href); t.textContent = "Link copied"; } catch (x) { t.textContent = "Copy from the address bar"; } }
+  else if (t.classList.contains("copyq")) {
+    const done = m => { t.textContent = m; };
+    if (navigator.clipboard) navigator.clipboard.writeText(t.dataset.q).then(() => done("Quote copied"), () => done("Select the text above to copy"));
+    else done("Select the text above to copy");
+  }
   else if (t.id === "cmpGo") { go("#cmp=" + state.picked.join(",")); }
   else if (t.id === "cmpClear") { state.picked = []; renderTray(); renderList(); if (state.view === "compare") go("#"); }
   else if (t.id === "csv") { exportCsv(); }

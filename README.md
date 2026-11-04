@@ -295,6 +295,21 @@ hand-checked against v5:
   not tell which website is the company's) and `summary.cant_tell`; a blank claim carries its
   one-line `reason`. The viewer shows the mark on every company, a "Can't tell" filter, and the
   reason on the field.
+- **What we looked for and did not find is in the claims.** A social profile, a job ad or a head
+  count we searched for and did not find is a `not_available` claim with its reason ("the
+  company's website links no social profile of its own"; "no website is registered with
+  Brønnøysund or was found under the company's name, so there is no careers page to read"),
+  not just absent; the summary's percentages say they are calculated.
+- **Social links in Builderr's own form.** A profile is published as Builderr's reference data
+  writes it (`https://facebook.com/afgruppen`: no `www.`, no trailing slash, `x.com`); the
+  evidence quotes the link as the page writes it. A footer account named after the company is
+  kept when the page calls itself by another name ("HMHcement.no", "Mestra Entrepenør AS"), and
+  a profile listed by the site owner's nested publisher/founder mark-up is read.
+- **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
+  the org number opens the Brønnøysund record, news headlines and open roles link to where they
+  were found, the summary's website, profiles, role and headline are links, compare links the
+  website, profiles, job and news, and the evidence panel can open the page at the quoted text
+  or copy the quote.
 - **Registry "slow down".** A 429 (or 503 with Retry-After) from Brønnøysund starts one shared
   pause (what it asks for, at most 5 s) and the request is retried up to twice, instead of that
   company's registry data being lost.

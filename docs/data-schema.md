@@ -40,6 +40,12 @@ plus role assembled from JSON fields), so the span is the text a checker can
 actually find. Both are exported on each envelope claim/evidence entry
 (`effective_at`, `claim_span`).
 
+`reason` (sixth revision) is a one-line explanation on a claim that is not `available`: why a
+website is ambiguous, or what was checked when nothing was found. The envelope also emits one
+`not_available` claim, with its reason, for each area that was searched and came back empty
+(`company_profile`, `hiring_signal`, and `employee_count` when the registry record carries no head
+count), so the claims themselves say what was looked for.
+
 `linked_from` was added alongside the allow-listed-ATS-platform crawl path
 (see `crawl.py`'s `ats_domains`): a claim sourced from e.g. a Greenhouse job
 board is only ever accepted (`verify.py`) when reached by following a link

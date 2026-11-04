@@ -607,6 +607,8 @@ def test_the_real_profile_url_embedded_in_an_iframe_embed_is_recovered():
     facts = social_profile_facts(html, "https://acme.no", datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     assert [f.value for f in facts] == ["https://facebook.com/AcmeNorge"]
+    # quoted as the page writes it, url-encoded (trondelag-betong.no, 4 Nov receipt check)
+    assert facts[0].evidence_span == "https%3A%2F%2Fwww.facebook.com%2FAcmeNorge" and facts[0].evidence_span in html
     # the embed/plugin URL itself is never published as if it were the profile
     assert not any("plugins" in f.value for f in facts)
 
