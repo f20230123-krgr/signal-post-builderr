@@ -272,6 +272,20 @@ def _limit_careers_claims(claims: list[Claim]) -> list[Claim]:
     return [c for c in claims if not is_careers(c) or c in keep]
 
 
+def _dated_after_reading(fact: ConfirmedFact) -> bool:
+    """True for an item dated after the day it was read (a day's grace for time zones). A post
+    is published before anyone reads it; a date ahead is an upcoming event, a deadline or an
+    offer's end ("Barneminimesse Stavanger (2027-02-09)"), not news."""
+    effective = (fact.effective_date or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", effective) or fact.retrieved_at is None:
+        return False
+    try:
+        ahead = datetime.fromisoformat(effective).date() - fact.retrieved_at.date()
+    except ValueError:
+        return False
+    return ahead.days > 1
+
+
 def assemble(
     entity: ResolvedEntity,
     confirmed_facts: list[ConfirmedFact],
@@ -305,7 +319,7 @@ def assemble(
         _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
     )
     dated_activity_claims = _dedup_claims(
-        [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")]
+        [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity") if not _dated_after_reading(f)]
     )
     workplace_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "workplace")])
     annual_history_claims = _dedup_claims(

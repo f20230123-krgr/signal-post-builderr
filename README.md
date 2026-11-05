@@ -199,6 +199,9 @@ work is keyless first:
   accepts a page showing the registered phone or street address; a name-derived guess
   additionally needs proof (org number, phone, address, or registered postcode and town with
   the name). 100 random companies with no registered website: 9 sites found, all correct.
+  A guess that spells the company's whole name may also stand on the whole name plus the
+  registered town or municipality on the page, when no other registered company has the
+  same name (seventh revision; 20 sites in 1,300 companies, all correct on review).
 - **Dated news.** Norwegian and English date formats and `<time datetime>`, each date paired
   with its headline ("Headline (YYYY-MM-DD)", the headline as the span), plus the site's own
   news link. Companies with a site-sourced news claim: 8 -> 23 of 100.
@@ -305,6 +308,12 @@ hand-checked against v5:
   evidence quotes the link as the page writes it. A footer account named after the company is
   kept when the page calls itself by another name ("HMHcement.no", "Mestra Entrepenør AS"), and
   a profile listed by the site owner's nested publisher/founder mark-up is read.
+  Letters such as æ, ø and å are written as the browser sends them (`velv%C3%A6re`), as
+  Builderr's data does, and a front page served at `/home`, `/hjem`, `/forside` or
+  `/index.html` counts as the home page its profiles are read from (Nov 5).
+- **No news from the future.** A site item dated more than a day after it was read is an
+  upcoming event or a deadline ("Barneminimesse Stavanger (2027-02-09)"), not a post, and is
+  left out (Nov 5).
 - **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
   the org number opens the Brønnøysund record, news headlines and open roles link to where they
   were found, the summary's website, profiles, role and headline are links, compare links the

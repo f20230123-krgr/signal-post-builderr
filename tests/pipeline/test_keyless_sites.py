@@ -270,3 +270,51 @@ def test_a_holding_company_is_not_given_its_operating_sisters_site():
     assert not _is_a_sister_companys_site("STEBIO AS", "<p>Stebio, Buvika</p>")  # not a holding name: rule n/a
     assert _is_a_sister_companys_site("ROTNESLEGENE EIENDOM AS", "<b>Rotneslegene AS</b>")
     assert not _is_a_sister_companys_site("CUSTOS INVEST AS", "<h1>Custos</h1>")  # a brand, not a sister company
+
+
+def test_a_guess_spelling_the_whole_name_is_marked_exact_and_a_first_word_guess_is_not():
+    from src.pipeline.keyless_sites import spells_whole_name
+
+    kinds = {c.url: c.kind for c in keyless_candidates("VISION OF ENERGY AS", SiteHints(), resolves=lambda h: True)}
+    assert kinds["https://visionofenergy.no"] == "exact" and kinds["https://vision-of-energy.no"] == "exact"
+    assert kinds["https://vision.no"] == "guess"
+    assert spells_whole_name("visionofenergy.com", "VISION OF ENERGY AS")
+    assert not spells_whole_name("aksla.no", "AKSLA AS")  # too short to be a name only this company has
+    assert "visionofenergy.com" in name_domain_candidates("VISION OF ENERGY AS")
+
+
+def test_the_registered_town_or_municipality_counts_only_as_a_whole_word_outside_scripts():
+    from src.pipeline.keyless_sites import page_names_town, page_shows_whole_name
+
+    hints = SiteHints(poststed="LAKSEVÅG", kommune="BERGEN")
+    assert page_names_town("<title>Slipeteknikk AS - Mekanisk verksted i Bergen</title>", hints) == "Bergen"
+    assert page_names_town("<p>Bergenhus</p><script>var city='Bergen'</script>", hints) is None
+    assert page_shows_whole_name("<h1>Slipeteknikk AS</h1>", "SLIPETEKNIKK AS")
+    assert page_shows_whole_name("<p>Neergård Regnskap</p>", "NEERGÅRD REGNSKAP AS")
+    assert not page_shows_whole_name("<p>Neergård</p>", "NEERGÅRD REGNSKAP AS")
+
+
+def test_a_whole_name_guess_stands_on_the_whole_name_and_the_town_unless_the_name_is_taken():
+    """slipeteknikk.no shows "Slipeteknikk AS - Mekanisk verksted i Bergen" and no number or
+    address. Measured on 1,300 companies: same-named sites abroad and for-sale pages never
+    showed the town."""
+    page = "<html><head><title>Slipeteknikk AS - Mekanisk verksted i Bergen</title></head><body>Slipeteknikk AS</body></html>"
+    hints = SiteHints(poststed="LAKSEVÅG", kommune="BERGEN")
+    asked = []
+
+    def run(html, exact=True, taken=False):
+        client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+        return verify_discovered_site(
+            "https://slipeteknikk.no/", "SLIPETEKNIKK AS", client, BudgetGovernor(), org_number="923456789",
+            hints=hints, require_proof=True, whole_name_domain=exact,
+            name_taken=lambda: asked.append(1) or taken,
+        )
+
+    assert run(page) is not None
+    assert run(page, exact=False) is None                          # a first-word guess still needs real proof
+    assert run(page, taken=True) is None                           # another company has the same name
+    assert run(page.replace("i Bergen", "in Monaghan")) is None    # same name, another place
+    assert run("<title>Slipeteknikk.com is for sale | HugeDomains</title>") is None
+    before = len(asked)
+    assert run("<title>Sago</title><footer>Org.nr: 923 456 789</footer>") is not None
+    assert len(asked) == before                                    # real proof costs no name search

@@ -345,3 +345,26 @@ def test_a_domain_spelling_aa_for_a_and_o_for_o_slash_resembles_the_name():
 
     assert domain_resembles_name("https://www.skaatoy.com", "BYGGMESTER SKÅTØY AS")
     assert not domain_resembles_name("https://thon.no", "HUSTADGÅRDEN ANS")
+
+
+def test_an_item_dated_after_the_day_it_was_read_is_an_upcoming_event_not_news():
+    """hjelpemiddelspesialisten.no's front page lists coming fairs ("Barneminimesse Stavanger
+    (2027-02-09)"): a post is published before it is read."""
+    import dataclasses
+
+    def dated(value, day):
+        return dataclasses.replace(_fact("dated_activity", value), effective_date=day)
+
+    facts = [
+        _fact("organization_name", "Equinor ASA"),
+        dated("Barneminimesse Stavanger (2027-02-09)", "2027-02-09"),
+        dated("Kvartalsrapport (2025-12-31)", "2025-12-31"),
+        dated("Published today, read just after midnight UTC (2026-01-02)", "2026-01-02"),
+        _fact("dated_activity", "Undated line"),
+    ]
+
+    profile = assemble(_entity(), facts, previous_snapshot=None)
+
+    values = [c.value for c in profile.activity.dated_activity]
+    assert "Barneminimesse Stavanger (2027-02-09)" not in values
+    assert {"Kvartalsrapport (2025-12-31)", "Published today, read just after midnight UTC (2026-01-02)", "Undated line"} <= set(values)

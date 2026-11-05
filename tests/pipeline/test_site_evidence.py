@@ -207,3 +207,14 @@ def test_the_brand_part_of_a_brand_and_tagline_title_names_the_company():
     assert name_span("<html><head><title>Bergen – Velkommen</title></head></html>", "BERGEN BIL AS") is None
     assert name_span("<html><head><title>Nordic | Hjem</title></head></html>", "NORDIC DOOR AS") is None
     assert name_span("<html><head><title>Epsco – Home</title></head></html>", "EPSCO NORGE AS") == "Epsco"
+
+
+def test_a_front_page_served_at_home_or_index_is_the_home_page():
+    from src.pipeline.site_evidence import _is_owner_page
+
+    for url in ("https://shoclifestyle.no/home", "https://a.no/hjem/", "https://a.no/forside",
+                "https://a.no/index.html", "https://a.no/en/home", "https://a.no/", "https://a.no/kontakt"):
+        assert _is_owner_page(url), url
+    for url in ("https://a.no/homes-for-sale", "https://www.storebrand.no/fond", "https://a.no/hjemmetjenester",
+                "https://a.no/home/products"):
+        assert not _is_owner_page(url), url

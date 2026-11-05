@@ -43,7 +43,7 @@ GENERIC_EMAIL_DOMAINS = {
 _LEGAL_SUFFIXES = {"as", "asa", "ans", "da", "sa", "ks", "nuf", "enk", "ba", "sf", "iks", "stiftelse", "a/s"}
 _GENERIC_NAME_WORDS = {"norge", "norway", "holding", "invest", "eiendom", "group", "gruppen", "and", "og", "the"}
 _PHONE_ON_PAGE_RE = re.compile(r"(?<!\d)(?:\+?47[ .\-]?)?((?:\d[ .\-]?){7}\d)(?!\d)")
-MAX_NAME_CANDIDATES = 3
+MAX_NAME_CANDIDATES = 4
 MAX_CANDIDATES_VERIFIED = 3
 
 
@@ -57,6 +57,7 @@ class SiteHints:
     street: Optional[str] = None
     postcode: Optional[str] = None
     poststed: Optional[str] = None
+    kommune: Optional[str] = None
     nav_homepages: list[str] = field(default_factory=list)
 
 
@@ -81,6 +82,9 @@ def hints_from_registry_record(body: dict) -> SiteHints:
         poststed = address.get("poststed")
         if isinstance(poststed, str) and poststed.strip():
             hints.poststed = poststed.strip()
+        kommune = address.get("kommune")
+        if isinstance(kommune, str) and kommune.strip():
+            hints.kommune = kommune.strip()
     return hints
 
 
@@ -125,6 +129,19 @@ def name_domain_candidates(legal_name: str, limit: int = MAX_NAME_CANDIDATES) ->
     return domains[:limit]
 
 
+def spells_whole_name(domain: str, legal_name: str) -> bool:
+    """True when the domain's label is the company's whole name, joined or hyphenated
+    ("slipeteknikk.no" for SLIPETEKNIKK AS, "vision-of-energy.no"), not just its first word,
+    and long enough not to be a common word."""
+    cleaned = re.sub(r"[.,!?'\"()&+/]", " ", legal_name.lower())
+    words = [w for w in cleaned.split() if w and w not in _LEGAL_SUFFIXES]
+    if not words:
+        return False
+    joined = _fold("".join(words)).strip("-")
+    label = domain.lower().removeprefix("www.").split(".")[0]
+    return len(joined) >= 6 and label in (joined, _fold("-".join(words)).strip("-"))
+
+
 def dns_resolves(host: str) -> bool:
     try:
         socket.getaddrinfo(host, 443)
@@ -141,11 +158,11 @@ class Candidate:
     company can own the obvious domain."""
 
     url: str
-    kind: str  # "nav" | "email" | "guess"
+    kind: str  # "nav" | "email" | "guess" | "exact" (a guess that spells the whole name)
 
     @property
     def needs_proof(self) -> bool:
-        return self.kind == "guess"
+        return self.kind in ("guess", "exact")
 
 
 _HOUSING_WORDS = ("borettslag", "boligsameie", "sameie", "brl", "bolig")
@@ -165,7 +182,10 @@ def keyless_candidates(
     from_email = email_domain_candidate(hints.email)
     if from_email and not any(w in legal_name.lower() for w in _HOUSING_WORDS):
         ordered.append(Candidate(from_email, "email"))
-    ordered += [Candidate(f"https://{d}", "guess") for d in name_domain_candidates(legal_name)]
+    ordered += [
+        Candidate(f"https://{d}", "exact" if spells_whole_name(d, legal_name) else "guess")
+        for d in name_domain_candidates(legal_name)
+    ]
 
     seen: set[str] = set()
     out: list[Candidate] = []
@@ -231,3 +251,47 @@ def page_shows_location(text: str, hints: SiteHints) -> bool:
         return False
     flattened = " ".join(re.sub(r"<[^>]+>", " ", text).split())
     return re.search(rf"(?<!\d){hints.postcode}\s*,?\s+{re.escape(hints.poststed)}", flattened, re.IGNORECASE) is not None
+
+
+def _visible_text(html: str) -> str:
+    html = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", html)
+    return " ".join(re.sub(r"<[^>]+>", " ", html).split())
+
+
+def page_names_town(text: str, hints: SiteHints) -> Optional[str]:
+    """The registered post town or municipality as the page writes it ("Mekanisk verksted i
+    Bergen"), or None. Much weaker than an address, so it only ever backs a guess whose domain
+    spells the company's whole name and whose page shows that name: measured on 1,300
+    companies, the same-named sites abroad and the for-sale pages never showed the town."""
+    visible = _visible_text(text)
+    for place in (hints.poststed, hints.kommune):
+        if place and len(place) >= 3:
+            found = re.search(rf"(?<![\wæøå]){re.escape(place)}(?![\wæøå])", visible, re.IGNORECASE)
+            if found:
+                return found.group(0)
+    return None
+
+
+def _fold_words(t: str) -> str:
+    t = t.lower().replace("æ", "ae").replace("ø", "o").replace("å", "a")
+    return " " + " ".join(re.sub(r"[^a-z0-9]+", " ", t).split()) + " "
+
+
+def _whole_name(legal_name: str) -> str:
+    words = [w for w in re.sub(r"[.,!?'\"()&+/]", " ", legal_name.lower()).split() if w not in _LEGAL_SUFFIXES]
+    return _fold_words(" ".join(words)) if words else ""
+
+
+def page_shows_whole_name(text: str, legal_name: str) -> bool:
+    """True when the page's visible text holds the company's whole name, legal form aside."""
+    name = _whole_name(legal_name)
+    return bool(name) and name in _fold_words(_visible_text(text))
+
+
+def whole_name_span(text: str, legal_name: str) -> Optional[str]:
+    """The page's own text that names the company, quoted as written ("Slipeteknikk AS - Mekanisk
+    verksted i Bergen"), or None."""
+    from src.pipeline.spans import node_span
+
+    name = _whole_name(legal_name)
+    return node_span(text, lambda node: bool(name) and name in _fold_words(node)) if name else None

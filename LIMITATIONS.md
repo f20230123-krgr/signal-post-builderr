@@ -184,6 +184,14 @@ All permissive; no copyleft (GPL-style) obligations.
   so some genuine sites (a small shop whose page shows neither its org number nor its
   registered phone, address or postcode) are missed rather than risked. A housing co-op gets
   no e-mail-domain candidate, because its registered e-mail is its property manager's.
+  Seventh revision (Nov 5): a guessed domain that spells the company's WHOLE name
+  (slipeteknikk.no, visionofenergy.com; never the first word alone) may also stand on the
+  page showing that whole name plus the registered post town or municipality ("Mekanisk
+  verksted i Bergen"), and only when no other registered company has the same name under any
+  legal form. Measured on 1,300 companies from earlier runs: a name match alone accepted 97
+  domains, many of them for-sale pages and same-named companies abroad (an Irish plastics
+  firm, a Philippine radio station); with the town as well, 20, every one the company's own.
+  A site whose page shows the name but not the town (themiceguru.com) is still missed.
 - **A careers claim is one of two things, and says which.** "Careers page lists N open
   roles, e.g. ..." only when the page's HTML shows at least two job-detail links with titles.
   Otherwise "Careers page: <url>", which claims the page exists and nothing about openings

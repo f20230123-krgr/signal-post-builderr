@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 _PLATFORMS = ("linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com", "youtube.com", "tiktok.com")
 # Path segments that are features of a platform, not an account name.
@@ -119,7 +119,9 @@ def published_form(canonical: str) -> str:
     if host == "twitter.com":
         host = "x.com"
     query = f"?{parts.query}" if parts.query else ""
-    return f"https://{host}{parts.path.rstrip('/')}{query}"
+    # æøå written as the browser sends them ("velv%C3%A6re"), as Builderr's data does.
+    path = quote(parts.path.rstrip("/"), safe="/@:%!$&'()*+,;=-._~")
+    return f"https://{host}{path}{query}"
 
 
 def social_profile_link(url: str) -> Optional[tuple[str, str]]:

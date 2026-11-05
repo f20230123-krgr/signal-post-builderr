@@ -237,6 +237,10 @@ def _default_process_one(
                 discovered_site_fact = verify_discovered_site(
                     candidate.url, entity.legal_name, real_client, budget, now=now,
                     org_number=entity.org_number, hints=site_hints, require_proof=candidate.needs_proof,
+                    whole_name_domain=candidate.kind == "exact",
+                    name_taken=lambda: name_is_held_by_another_entity(
+                        entity.legal_name, entity.org_number, budget, client=real_client, ignore_legal_form=True
+                    ),
                 )
                 if discovered_site_fact:
                     break

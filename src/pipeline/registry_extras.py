@@ -963,14 +963,27 @@ def _normalized_company_name(name: str) -> str:
     return " ".join(name.upper().split())
 
 
+_LEGAL_FORM_WORDS = {"AS", "ASA", "ANS", "DA", "SA", "KS", "NUF", "ENK", "BA", "SF", "IKS"}
+
+
+def _base_company_name(name: str) -> str:
+    words = _normalized_company_name(name).split()
+    while words and words[-1].rstrip(".") in _LEGAL_FORM_WORDS:
+        words.pop()
+    return " ".join(words)
+
+
 def name_is_held_by_another_entity(
     name: str,
     org_number: str,
     budget: BudgetGovernor,
     client: Optional[httpx.Client] = None,
     sleep: Callable[[float], None] = time.sleep,
+    ignore_legal_form: bool = False,
 ) -> bool:
-    """True if a DIFFERENT registered entity currently holds exactly this name.
+    """True if a DIFFERENT registered entity currently holds exactly this name
+    (with `ignore_legal_form`, the same name under any legal form: UNHJEM DESIGN AS
+    and an UNHJEM DESIGN sole trader).
 
     Guards the former-name website search: a name this company gave up can
     since have been registered by someone else, and a site under that name
@@ -984,7 +997,8 @@ def name_is_held_by_another_entity(
     try:
         try:
             wait_if_paused(time.sleep)
-            response = client.get(NAME_SEARCH_URL, params={"navn": name, "size": 20}, timeout=10.0)
+            query = _base_company_name(name) if ignore_legal_form else name
+            response = client.get(NAME_SEARCH_URL, params={"navn": query, "size": 50 if ignore_legal_form else 20}, timeout=10.0)
         except httpx.HTTPError:
             response = None
         budget.record_request()
@@ -994,9 +1008,10 @@ def name_is_held_by_another_entity(
             units = (response.json().get("_embedded") or {}).get("enheter", [])
         except ValueError:
             return True
-        wanted = _normalized_company_name(name)
+        norm = _base_company_name if ignore_legal_form else _normalized_company_name
+        wanted = norm(name)
         return any(
-            _normalized_company_name(str(u.get("navn") or "")) == wanted
+            norm(str(u.get("navn") or "")) == wanted
             and str(u.get("organisasjonsnummer")) != org_number
             for u in units
         )

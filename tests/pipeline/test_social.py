@@ -220,3 +220,15 @@ def test_a_foreign_parents_group_or_branch_account_is_not_the_companys_own():
     assert plausibly_own_profile("https://www.facebook.com/kitrongroup", "KITRON ASA", "https://www.kitron.com")
     assert plausibly_own_profile("https://www.linkedin.com/company/tormatic-as", "TORMATIC AS", "https://www.tormatic.no")
     assert plausibly_own_profile("https://www.facebook.com/byggmesterolaisenbodo", "BYGGMESTER OLAISEN AS", "https://byggmesterolaisen.no", "Gata 2, 8006 BODØ")
+
+
+def test_a_profile_with_norwegian_letters_is_written_the_way_the_browser_sends_it():
+    # Builderr's data writes "velv%C3%A6re"; the same page linked with "æ" must match it letter for letter.
+    for raw in ("https://www.linkedin.com/company/the-well---en-verden-av-velvære/",
+                "https://www.linkedin.com/company/the-well---en-verden-av-velv%C3%A6re"):
+        link, key = social_profile_link(raw)
+        assert link == "https://linkedin.com/company/the-well---en-verden-av-velv%C3%A6re"
+        assert key == "https://www.linkedin.com/company/the-well---en-verden-av-velvære"
+    assert social_profile_link("https://www.facebook.com/profile.php?id=100057441009551")[0] == \
+        "https://facebook.com/profile.php?id=100057441009551"
+    assert social_profile_link("https://www.youtube.com/@gozaptec")[0] == "https://youtube.com/@gozaptec"

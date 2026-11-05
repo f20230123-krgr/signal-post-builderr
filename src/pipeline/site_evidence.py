@@ -146,7 +146,10 @@ def other_org_reason(number: str) -> str:
 # The pages where a site names its own owner: the home page and its contact/about pages. A
 # name on a deeper page (a builder's project page, a customer story) is somebody else's.
 _OWNER_PAGE_RE = re.compile(
-    r"^/?(?:[a-z]{2}(?:-[a-z]{2})?(?:/|$))?(?:(?:kontakt|contact|om-?oss|om|about|about-us|firma|selskapet|company|impressum)[\w-]*/?)?$",
+    # A site whose front page lives at /home, /hjem, /forside or /index.html (shoclifestyle.no/home)
+    # is still showing its home page.
+    r"^/?(?:[a-z]{2}(?:-[a-z]{2})?(?:/|$))?(?:(?:kontakt|contact|om-?oss|om|about|about-us|firma|selskapet|company|impressum)[\w-]*/?"
+    r"|(?:home|hjem|forside|startside)/?|(?:index|default)\.(?:html?|php|aspx?))?$",
     re.IGNORECASE,
 )
 # An organisation number the page states as one ("Org.nr. 999 296 432", "Org: NO 990 859 671 MVA").

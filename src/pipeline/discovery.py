@@ -53,7 +53,15 @@ from src.orchestrator.budget import BudgetGovernor
 from src.storage.cache import ResponseCache
 from src.pipeline.extract import structured_facts, text_fallback_facts
 from src.pipeline.careers import page_heading
-from src.pipeline.keyless_sites import SiteHints, contact_span, page_confirms_contact, page_shows_location
+from src.pipeline.keyless_sites import (
+    SiteHints,
+    contact_span,
+    page_confirms_contact,
+    page_names_town,
+    page_shows_location,
+    page_shows_whole_name,
+    whole_name_span,
+)
 from src.pipeline.site_evidence import org_number_span
 from src.pipeline.verify import NAME_MATCH_THRESHOLD, ConfirmedFact, name_similarity
 
@@ -913,10 +921,20 @@ def verify_discovered_site(
     alternate_names: Optional[list[str]] = None,
     hints: Optional[SiteHints] = None,
     require_proof: bool = False,
+    whole_name_domain: bool = False,
+    name_taken: Optional[Callable[[], bool]] = None,
 ) -> Optional[ConfirmedFact]:
     """`require_proof` demands the page show the company's org number or its
     registered phone/address: a name match alone is not enough. Used for
     name-derived domain guesses, where a different company may own the domain.
+
+    `whole_name_domain` marks a guess whose domain spells the company's whole name
+    (slipeteknikk.no). Such a page may stand on its own when it shows that whole name
+    and the registered post town or municipality ("Mekanisk verksted i Bergen") and
+    `name_taken()` says no other registered company has the same name. Measured on
+    1,300 companies (Nov 5): 20 sites, all the company's own; the same-named sites
+    abroad and the for-sale pages that a name match alone let through never showed
+    the town.
 
     `hints` (the phone number and street address the company registered in
     Brønnøysund) let a page that shows them stand in for a name match: a small
@@ -1028,13 +1046,21 @@ def verify_discovered_site(
     identity_proven = confirmed_by_org_number or confirmed_by_contact
     # A name-derived guess needs more than the name: proof of identity, or at
     # least the registered postcode and town on the page alongside the name match.
-    if require_proof and not identity_proven and not (hints and page_shows_location(response.text, hints)):
+    located = bool(hints) and page_shows_location(response.text, hints)
+    by_town = (
+        whole_name_domain and not identity_proven and not located and bool(hints)
+        and page_names_town(response.text, hints) is not None
+        and page_shows_whole_name(response.text, legal_name)
+    )
+    if require_proof and not identity_proven and not located and not by_town:
         return None
     if not confirmed_by_org_number and _is_a_sister_companys_site(legal_name, response.text):
         return None
-    if not identity_proven and best_score < NAME_MATCH_THRESHOLD:
+    # A whole-name guess was matched on the page's own text above (page_shows_whole_name);
+    # the names read from its markup can be an error banner (slipeteknikk.no).
+    if not identity_proven and not by_town and best_score < NAME_MATCH_THRESHOLD:
         return None
-    if not identity_proven:
+    if not identity_proven and not by_town:
         best_coverage = max(
             (_name_word_coverage(name, c) for name in identity_names for c in name_candidates), default=0.0
         )
@@ -1042,6 +1068,10 @@ def verify_discovered_site(
             return None
     if identity_proven:
         best_score = 100.0
+    # Last, as it costs a registry request: a site proven only by its name and town is
+    # never published when another registered company carries the same name.
+    if require_proof and by_town and (name_taken is None or name_taken()):
+        return None
 
     # The evidence is the company's own page: quote where it names the company
     # (its org number, else the best-matching name, else its title), keep the
@@ -1049,6 +1079,8 @@ def verify_discovered_site(
     span = org_number_span(response.text, org_number) if org_number_confirmed and org_number else None
     if span is None and confirmed_by_contact:
         span = contact_span(response.text, hints)  # the phone or address the registry holds
+    if span is None and by_town:
+        span = whole_name_span(response.text, legal_name)  # where the page names the company
     if span is None and name_candidates:
         span = max(name_candidates, key=lambda c: max(name_similarity(n, c) for n in identity_names))
     if span is None:
