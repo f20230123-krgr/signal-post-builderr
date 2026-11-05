@@ -198,6 +198,12 @@ All permissive; no copyleft (GPL-style) obligations.
   shared address (observemedical.com). A guessed site without its own org number is now refused
   whenever another registered company has the same name; of 73 earlier guessed sites this drops
   one, vinjekiropraktor.no, which Brønnøysund lists as the same-named sole trader's site.
+  Any found site not proven by the company's own org number is also refused when another
+  registered company lists it as its own and the domain spells that company's whole name
+  (norgesgruppen.no for NORGESGRUPPEN MØRE AS, found on the group's switchboard number;
+  eurosupply.no, EUROSUPPLY AS's, for EUROSUPPLY INTERNATIONAL AS). A chain site registered by
+  one member and named after none (consto.no, netsolution.no, isobygg.no) still counts for a
+  member whose whole name is on it, as in Builderr's own data.
 - **A careers claim is one of two things, and says which.** "Careers page lists N open
   roles, e.g. ..." only when the page's HTML shows at least two job-detail links with titles.
   Otherwise "Careers page: <url>", which claims the page exists and nothing about openings

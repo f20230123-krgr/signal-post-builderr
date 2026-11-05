@@ -950,6 +950,7 @@ def verify_discovered_site(
     require_proof: bool = False,
     whole_name_domain: bool = False,
     name_taken: Optional[Callable[[], bool]] = None,
+    registered_by_other: Optional[Callable[[str], Optional[tuple[str, str]]]] = None,
 ) -> Optional[ConfirmedFact]:
     """`require_proof` demands the page show the company's org number or its
     registered phone/address: a name match alone is not enough. Used for
@@ -1108,6 +1109,19 @@ def verify_discovered_site(
         if by_town and name_taken is None:
             return None
         if name_taken is not None and name_taken():
+            return None
+
+    # A site another registered company lists as its own, under a domain that spells that
+    # company's whole name, is that company's (1,000-company run, Nov 5: norgesgruppen.no for
+    # NORGESGRUPPEN MØRE AS on the group's switchboard number; eurosupply.no, EUROSUPPLY AS's, for
+    # EUROSUPPLY INTERNATIONAL AS). A chain site registered by one member (consto.no, CONSTO
+    # ANLEGG AS's, for CONSTO AS) is not named after that member, and stays.
+    if not confirmed_by_org_number and registered_by_other is not None:
+        from src.pipeline.keyless_sites import spells_whole_name  # the peer module, already loaded
+
+        landed_host = urlsplit(str(response.url)).netloc.lower().removeprefix("www.")
+        holder = registered_by_other(f"https://{landed_host}") if landed_host else None
+        if holder and spells_whole_name(landed_host, holder[0]) and not spells_whole_name(landed_host, legal_name):
             return None
 
     # The evidence is the company's own page: quote where it names the company

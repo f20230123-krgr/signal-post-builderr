@@ -359,3 +359,23 @@ def test_a_guess_proven_by_a_shared_address_is_refused_when_another_company_has_
     assert run(page, taken=False) is not None
     assert run(page, taken=True) is None
     assert run(page + "<footer>Org.nr 923 456 789</footer>", taken=True) is not None
+
+
+def test_a_found_site_named_after_another_company_that_registers_it_is_that_companys():
+    """norgesgruppen.no was found for NORGESGRUPPEN MØRE AS on the group's switchboard number, but
+    NORGESGRUPPEN ASA registers it. consto.no, registered by CONSTO ANLEGG AS, is still CONSTO AS's
+    (Builderr's own data agrees): the domain spells CONSTO AS's name, not its registrant's."""
+    def run(site, name, holder, page):
+        client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=page)))
+        return verify_discovered_site(
+            site, name, client, BudgetGovernor(), org_number="923456789",
+            hints=SiteHints(phones=["24113100"]), registered_by_other=lambda s: holder,
+        )
+
+    group = "<title>NorgesGruppen</title><p>NorgesGruppen Møre</p><p>Telefon: (+47) 24 11 31 00</p>"
+    assert run("https://norgesgruppen.no", "NORGESGRUPPEN MØRE AS", None, group) is not None
+    assert run("https://norgesgruppen.no", "NORGESGRUPPEN MØRE AS", ("NORGESGRUPPEN ASA", "819731322"), group) is None
+    assert run("https://norgesgruppen.no", "NORGESGRUPPEN MØRE AS", ("NORGESGRUPPEN ASA", "819731322"),
+               group + "<footer>Org.nr 923 456 789</footer>") is not None   # its own number still proves it
+    consto = "<title>Consto AS</title><p>Consto AS, tlf 24 11 31 00</p>"
+    assert run("https://consto.no", "CONSTO AS", ("CONSTO ANLEGG AS", "939767770"), consto) is not None

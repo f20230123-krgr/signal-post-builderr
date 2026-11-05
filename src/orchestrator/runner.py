@@ -204,6 +204,9 @@ def _default_process_one(
             exa_api_key = os.environ.get("EXA_API_KEY")
             parallel_api_key = os.environ.get("PARALLEL_API_KEY")
 
+            def registered_by_other(site: str) -> Optional[tuple[str, str]]:
+                return website_held_by_another_entity(site, entity.org_number, budget, client=real_client)
+
             def _discover_and_verify(
                 query_name: str, alternate_names: Optional[list[str]] = None, first_round: bool = False
             ) -> Optional[ConfirmedFact]:
@@ -225,7 +228,7 @@ def _default_process_one(
                     return None
                 return verify_discovered_site(
                     candidate, entity.legal_name, real_client, budget, now=now, org_number=entity.org_number,
-                    alternate_names=alternate_names, hints=site_hints,
+                    alternate_names=alternate_names, hints=site_hints, registered_by_other=registered_by_other,
                 )
 
             # Candidates that need no key come first: they cost nothing, and a
@@ -241,6 +244,7 @@ def _default_process_one(
                     name_taken=lambda: name_is_held_by_another_entity(
                         entity.legal_name, entity.org_number, budget, client=real_client, ignore_legal_form=True
                     ),
+                    registered_by_other=registered_by_other,
                 )
                 if discovered_site_fact:
                     break
