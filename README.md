@@ -201,7 +201,7 @@ work is keyless first:
   the name). 100 random companies with no registered website: 9 sites found, all correct.
   A guess that spells the company's whole name may also stand on the whole name plus the
   registered town or municipality on the page, when no other registered company has the
-  same name (seventh revision; 20 sites in 1,300 companies, all correct on review). Never a
+  same name (sixth revision, Nov 5; 20 sites in 1,300 companies, all correct on review). Never a
   for-sale or parking page, never a redirect to another name's site (a developer's project
   page), and no guessed site without its own org number when another registered company has
   the same name (a listed parent and its subsidiary sharing an address).

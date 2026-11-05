@@ -184,7 +184,7 @@ All permissive; no copyleft (GPL-style) obligations.
   so some genuine sites (a small shop whose page shows neither its org number nor its
   registered phone, address or postcode) are missed rather than risked. A housing co-op gets
   no e-mail-domain candidate, because its registered e-mail is its property manager's.
-  Seventh revision (Nov 5): a guessed domain that spells the company's WHOLE name
+  Sixth revision, Nov 5 addition: a guessed domain that spells the company's WHOLE name
   (slipeteknikk.no, visionofenergy.com; never the first word alone) may also stand on the
   page showing that whole name plus the registered post town or municipality ("Mekanisk
   verksted i Bergen"), and only when no other registered company has the same name under any
