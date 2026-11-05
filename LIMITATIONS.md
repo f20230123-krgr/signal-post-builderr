@@ -191,7 +191,13 @@ All permissive; no copyleft (GPL-style) obligations.
   legal form. Measured on 1,300 companies from earlier runs: a name match alone accepted 97
   domains, many of them for-sale pages and same-named companies abroad (an Irish plastics
   firm, a Philippine radio station); with the town as well, 20, every one the company's own.
-  A site whose page shows the name but not the town (themiceguru.com) is still missed.
+  A site whose page shows the name but not the town (themiceguru.com) is still missed. The
+  1,000-company run then showed three more traps, now refused: a HugeDomains for-sale page that
+  mentions Bergen (viabergen.com), a domain that redirects to the developer's project page
+  (hjemseng-brygge.no), and a listed parent's site found for its same-named subsidiary on their
+  shared address (observemedical.com). A guessed site without its own org number is now refused
+  whenever another registered company has the same name; of 73 earlier guessed sites this drops
+  one, vinjekiropraktor.no, which Brønnøysund lists as the same-named sole trader's site.
 - **A careers claim is one of two things, and says which.** "Careers page lists N open
   roles, e.g. ..." only when the page's HTML shows at least two job-detail links with titles.
   Otherwise "Careers page: <url>", which claims the page exists and nothing about openings

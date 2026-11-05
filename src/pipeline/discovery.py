@@ -910,6 +910,33 @@ def _is_a_sister_companys_site(legal_name: str, page_html: str) -> bool:
     return False
 
 
+_PARKED_PAGE_RE = re.compile(
+    r"\.(?:com|no|net|org)\s+(?:is\s+)?for sale|domain (?:name )?(?:is )?for sale|domen\w* (?:er )?til salgs|"
+    r"hugedomains|parkert domene|parkert hos|parked (?:at|by|free|domain)|domain parking|"
+    r"hosted by one\.com|kjøp (?:dette )?domenet|buy this domain|this domain (?:may be|is) (?:for sale|available)|"
+    r"sedo domain",
+    re.IGNORECASE,
+)
+
+
+def _page_head_text(html: str) -> str:
+    """The page's title and the start of its visible text, where a parking page says what it is."""
+    title = re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
+    body = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", html)
+    body = " ".join(re.sub(r"<[^>]+>", " ", body).split())
+    return f"{title.group(1) if title else ''} {body[:2000]}"
+
+
+def _same_label(asked: str, landed: str) -> bool:
+    """True when the page landed on the domain asked for, or the same name under another ending
+    (osloanalytica.no -> osloanalytica.org), not on someone else's site (hjemseng-brygge.no ->
+    formateiendom.no/hjemseng-brygge/, the developer's project page)."""
+    def label(u: str) -> str:
+        host = urlsplit(u).netloc.lower().removeprefix("www.")
+        return host.rsplit(".", 1)[0] if "." in host else host
+    return bool(label(asked)) and label(asked) == label(landed)
+
+
 def verify_discovered_site(
     url: str,
     legal_name: str,
@@ -1046,9 +1073,14 @@ def verify_discovered_site(
     identity_proven = confirmed_by_org_number or confirmed_by_contact
     # A name-derived guess needs more than the name: proof of identity, or at
     # least the registered postcode and town on the page alongside the name match.
+    # A for-sale or parking page ("ViaBergen.com is for sale | HugeDomains") is nobody's site,
+    # whatever words it happens to show.
+    if require_proof and not confirmed_by_org_number and _PARKED_PAGE_RE.search(_page_head_text(response.text)):
+        return None
     located = bool(hints) and page_shows_location(response.text, hints)
     by_town = (
         whole_name_domain and not identity_proven and not located and bool(hints)
+        and _same_label(url, str(response.url))
         and page_names_town(response.text, hints) is not None
         and page_shows_whole_name(response.text, legal_name)
     )
@@ -1068,10 +1100,15 @@ def verify_discovered_site(
             return None
     if identity_proven:
         best_score = 100.0
-    # Last, as it costs a registry request: a site proven only by its name and town is
-    # never published when another registered company carries the same name.
-    if require_proof and by_town and (name_taken is None or name_taken()):
-        return None
+    # Last, as it costs a registry request: a guessed site not proven by its own org number is
+    # never published when another registered company carries the same name (observemedical.com
+    # is OBSERVE MEDICAL ASA's, not its subsidiary OBSERVE MEDICAL AS's, though they share an
+    # address). A site proven only by its name and town needs that check.
+    if require_proof and not confirmed_by_org_number:
+        if by_town and name_taken is None:
+            return None
+        if name_taken is not None and name_taken():
+            return None
 
     # The evidence is the company's own page: quote where it names the company
     # (its org number, else the best-matching name, else its title), keep the

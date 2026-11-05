@@ -318,3 +318,44 @@ def test_a_whole_name_guess_stands_on_the_whole_name_and_the_town_unless_the_nam
     before = len(asked)
     assert run("<title>Sago</title><footer>Org.nr: 923 456 789</footer>") is not None
     assert len(asked) == before                                    # real proof costs no name search
+
+
+def test_a_whole_name_guess_is_not_a_parking_page_nor_a_redirect_to_someone_elses_site():
+    """1,000-company run (Nov 5): viabergen.com, a HugeDomains for-sale page that mentions Bergen,
+    and hjemseng-brygge.no, which lands on the developer's project page formateiendom.no/hjemseng-brygge/."""
+    hints = SiteHints(poststed="LAKSEVÅG", kommune="BERGEN")
+
+    def run(html, asked="https://viabergen.com/", landed=None):
+        def handler(request):
+            if landed and request.url.host != httpx.URL(landed).host:
+                return httpx.Response(301, headers={"location": landed})
+            return httpx.Response(200, text=html)
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        return verify_discovered_site(
+            asked, "VIABERGEN AS", client, BudgetGovernor(), org_number="923456789", hints=hints,
+            require_proof=True, whole_name_domain=True, name_taken=lambda: False,
+        )
+
+    page = "<title>ViaBergen</title><p>ViaBergen AS - transport i Bergen</p>"
+    assert run(page) is not None
+    assert run("<title>ViaBergen.com is for sale | HugeDomains</title><p>ViaBergen - Bergen</p>") is None
+    assert run(page, landed="https://formateiendom.no/viabergen/") is None
+    assert run(page, asked="https://viabergen.no/", landed="https://viabergen.com/") is not None  # same name, other ending
+
+
+def test_a_guess_proven_by_a_shared_address_is_refused_when_another_company_has_the_same_name():
+    """observemedical.com shows OBSERVE MEDICAL AS's registered street, but the site is its
+    listed parent OBSERVE MEDICAL ASA's; the org number on the page would still prove it."""
+    hints = SiteHints(street="Dronning Eufemias gate 16", postcode="0191", poststed="OSLO")
+    page = "<title>Observe Medical</title><p>Observe Medical, Dronning Eufemias gate 16, 0191 Oslo</p>"
+
+    def run(html, taken):
+        client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html)))
+        return verify_discovered_site(
+            "https://observemedical.com/", "OBSERVE MEDICAL AS", client, BudgetGovernor(), org_number="923456789",
+            hints=hints, require_proof=True, whole_name_domain=True, name_taken=lambda: taken,
+        )
+
+    assert run(page, taken=False) is not None
+    assert run(page, taken=True) is None
+    assert run(page + "<footer>Org.nr 923 456 789</footer>", taken=True) is not None

@@ -201,7 +201,10 @@ work is keyless first:
   the name). 100 random companies with no registered website: 9 sites found, all correct.
   A guess that spells the company's whole name may also stand on the whole name plus the
   registered town or municipality on the page, when no other registered company has the
-  same name (seventh revision; 20 sites in 1,300 companies, all correct on review).
+  same name (seventh revision; 20 sites in 1,300 companies, all correct on review). Never a
+  for-sale or parking page, never a redirect to another name's site (a developer's project
+  page), and no guessed site without its own org number when another registered company has
+  the same name (a listed parent and its subsidiary sharing an address).
 - **Dated news.** Norwegian and English date formats and `<time datetime>`, each date paired
   with its headline ("Headline (YYYY-MM-DD)", the headline as the span), plus the site's own
   news link. Companies with a site-sourced news claim: 8 -> 23 of 100.
