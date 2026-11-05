@@ -368,3 +368,25 @@ def test_an_item_dated_after_the_day_it_was_read_is_an_upcoming_event_not_news()
     values = [c.value for c in profile.activity.dated_activity]
     assert "Barneminimesse Stavanger (2027-02-09)" not in values
     assert {"Kvartalsrapport (2025-12-31)", "Published today, read just after midnight UTC (2026-01-02)", "Undated line"} <= set(values)
+
+
+def test_spam_injected_into_a_hacked_site_and_the_companys_own_name_are_not_headlines():
+    """digiregnskap.no's front page carried "kypit kyrsovyu_aton (2025-12-12)" and "top asian
+    porn web"; sealengineering.no's post list carried "Seal Engineering AS (2026-09-17)"."""
+    facts = [
+        _fact("organization_name", "Equinor ASA"),
+        _fact("dated_activity", "kypit kyrsovyu_aton (2025-12-12)"),
+        _fact("dated_activity", "top asian porn web (2025-12-12)"),
+        _fact("dated_activity", "Equinor ASA (2025-09-17)"),
+        _fact("dated_activity", "Equinor signs Northern Lights contract (2025-09-17)"),
+        _fact("dated_activity", "Casino Kafé åpner i Bergen (2025-09-17)"),  # lost too: the price of a word list
+        _fact("dated_activity", "Registry record updated (Endring) on 2026-06-19 - Brønnøysundregistrene",
+              source_class="official_registry"),
+    ]
+
+    values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]
+
+    assert values == [
+        "Equinor signs Northern Lights contract (2025-09-17)",
+        "Registry record updated (Endring) on 2026-06-19 - Brønnøysundregistrene",
+    ]

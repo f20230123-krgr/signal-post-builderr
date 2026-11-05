@@ -272,6 +272,31 @@ def _limit_careers_claims(claims: list[Claim]) -> list[Claim]:
     return [c for c in claims if not is_careers(c) or c in keep]
 
 
+# A hacked site's injected posts ("kypit kyrsovyu_aton", "top asian porn web" on an
+# accountant's front page, Nov 5): made-up words joined by an underscore, or spam words.
+_SPAM_HEADLINE_RE = re.compile(
+    r"[^\W_]+_[^\W_]+|\b(?:porn\w*|xxx|casino\w*|viagra|cialis|escorts?|hentai|onlyfans|camgirls?)\b",
+    re.IGNORECASE,
+)
+_DATE_SUFFIX_RE = re.compile(r"\s*\(\d{4}-\d{2}-\d{2}\)$")
+_LEGAL_FORM_RE = re.compile(r"\s+(?:as|asa|ans|da|sa|ks|nuf|enk|ba|sf|iks)$", re.IGNORECASE)
+
+
+def _not_a_headline(fact: ConfirmedFact, legal_name: Optional[str]) -> bool:
+    """True for a site item that is not a news headline: spam injected into a hacked site, or the
+    company's own name alone ("Seal Engineering AS (2026-09-17)"). Registry events are kept."""
+    if fact.source_class == "official_registry":
+        return False
+    headline = _DATE_SUFFIX_RE.sub("", fact.value or "").strip()
+    if _SPAM_HEADLINE_RE.search(headline):
+        return True
+    if legal_name:
+        def bare(text: str) -> str:
+            return " ".join(_LEGAL_FORM_RE.sub("", " ".join(text.lower().split())).split())
+        return bare(headline) == bare(legal_name)
+    return False
+
+
 def _dated_after_reading(fact: ConfirmedFact) -> bool:
     """True for an item dated after the day it was read (a day's grace for time zones). A post
     is published before anyone reads it; a date ahead is an upcoming event, a deadline or an
@@ -319,7 +344,10 @@ def assemble(
         _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
     )
     dated_activity_claims = _dedup_claims(
-        [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity") if not _dated_after_reading(f)]
+        [
+            _confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")
+            if not _dated_after_reading(f) and not _not_a_headline(f, entity.legal_name)
+        ]
     )
     workplace_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "workplace")])
     annual_history_claims = _dedup_claims(

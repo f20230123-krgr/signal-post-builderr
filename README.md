@@ -313,7 +313,8 @@ hand-checked against v5:
   `/index.html` counts as the home page its profiles are read from (Nov 5).
 - **No news from the future.** A site item dated more than a day after it was read is an
   upcoming event or a deadline ("Barneminimesse Stavanger (2027-02-09)"), not a post, and is
-  left out (Nov 5).
+  left out (Nov 5). Nor are posts injected into a hacked site ("kypit kyrsovyu_aton", spam
+  words) or a "headline" that is only the company's own name.
 - **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
   the org number opens the Brønnøysund record, news headlines and open roles link to where they
   were found, the summary's website, profiles, role and headline are links, compare links the
