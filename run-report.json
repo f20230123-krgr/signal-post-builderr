@@ -1,30 +1,30 @@
 {
-  "run_id": "2026-11-05T07-11-45Z",
+  "run_id": "2026-11-05T09-24-35Z",
   "input_count": 100,
   "profile_count": 100,
   "universe_used": true,
   "chunk_size": 100,
   "chunk_count": 1,
-  "requests_used": 1582,
-  "outbound_requests_measured": 1582,
+  "requests_used": 1597,
+  "outbound_requests_measured": 1597,
   "outbound_requests_breakdown": {
-    "total": 1582,
-    "redirect_hops": 86,
-    "server_error_responses": 10,
+    "total": 1597,
+    "redirect_hops": 88,
+    "server_error_responses": 8,
     "by_host": {
-      "data.brreg.no": 721,
+      "data.brreg.no": 733,
       "pam-stilling-feed.nav.no": 66,
-      "www.afgruppen.no": 17,
       "consto.no": 16,
+      "www.afgruppen.no": 15,
       "www.dips.com": 14,
       "api.duckduckgo.com": 14,
       "www.haugesund-sparebank.no": 13,
       "www.pervaco.no": 13,
       "leirvik.com": 13,
+      "www.bien.no": 13,
       "www.luftambulanse.no": 13,
       "www.avogpaa.no": 13,
       "peab.no": 12,
-      "www.bien.no": 12,
       "total-vvs.no": 12,
       "www.roadsupply.no": 12
     }
@@ -35,7 +35,7 @@
     "exa_first_round_only": false,
     "max_search_spend_usd": null
   },
-  "wall_clock_seconds": 327.016,
+  "wall_clock_seconds": 371.258,
   "degraded_providers": {},
   "search_keys": {
     "exa": "absent",
@@ -47,7 +47,7 @@
   "nav_job_index": {
     "pages_fetched": 59,
     "requests_used": 60,
-    "active_ads_indexed": 8068,
+    "active_ads_indexed": 8192,
     "truncated_at_page_cap": false
   },
   "viewer": {
