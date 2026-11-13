@@ -293,10 +293,14 @@ def structured_facts(html: str, source_url: str, extracted_at: datetime) -> list
         if activity_date:
             # "2023-04-13T15:12:07.000Z" -> the day; the time of day is not part of the fact.
             day = re.match(r"\s*(\d{4}-\d{2}-\d{2})", str(activity_date))
+            item = f"{headline} ({day.group(1) if day else activity_date})"
+            if _is_post_page(source_url):
+                # Marked up on the post's own page: that page is the item's link.
+                item = with_post_link(item, source_url)
             facts.append(
                 RawFact(
                     "dated_activity",
-                    f"{headline} ({day.group(1) if day else activity_date})",
+                    item,
                     source_url,
                     "structured",
                     extracted_at,

@@ -263,6 +263,35 @@ def _dedup_profiles(claims: list[Claim]) -> list[Claim]:
 MAX_CAREERS_CLAIMS = 2
 
 
+# An open application ("åpen søknad") is a standing form, not an open posting (official feedback,
+# 13 Nov: "an open posting").
+_OPEN_APPLICATION_RE = re.compile(
+    r"(?:\b|/)(?:[åa]pen|generell|spontan)[\s_-]+s(?:ø|o|oe)knad|open[\s_-]+application|unsolicited|spontaneous[\s_-]+application",
+    re.IGNORECASE,
+)
+
+
+def _open_postings(claims: list[Claim]) -> list[Claim]:
+    """Hiring claims that are open postings: not an open-application form, and not a bare
+    "Job ad: <url>" when another claim already names that same ad with its title."""
+    titled_links = {
+        m.group(1).rstrip("/")
+        for c in claims if not (c.value or "").startswith(JOB_AD_VALUE_PREFIX)
+        for m in re.finditer(r"(https?://\S+)", c.value or "")
+    }
+    kept = []
+    for claim in claims:
+        value = claim.value or ""
+        if _OPEN_APPLICATION_RE.search(value):
+            continue
+        if value.startswith(JOB_AD_VALUE_PREFIX):
+            link = re.search(r"(https?://\S+)", value)
+            if link and link.group(1).rstrip("/") in titled_links:
+                continue
+        kept.append(claim)
+    return kept
+
+
 def _limit_careers_claims(claims: list[Claim]) -> list[Claim]:
     """At most MAX_CAREERS_CLAIMS careers-page claims per company, role-level
     ones first and, among bare pages, the shortest URL (the main careers page
@@ -428,7 +457,7 @@ def assemble(
         [_confirmed_claim(f) for f in _all_matching(confirmed_facts, "company_profile")]
     )
     hiring_claims = _limit_careers_claims(
-        _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
+        _open_postings(_dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")]))
     )
     shared_links = _links_shared_by_several_items(confirmed_facts)
     dated_activity_claims = _dedup_claims(

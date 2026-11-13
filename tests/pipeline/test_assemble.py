@@ -443,3 +443,19 @@ def test_the_brand_is_the_part_of_a_page_title_that_names_the_company():
     assert claim.evidence_span == "Blåseisolering i Bergen og omegn | Isoenergi Vestland AS"
     assert brand("Hjem - Bilforhandler1", "BILFORHANDLER1 AS").value == "Bilforhandler1"
     assert brand("Tannlege Bauge AS", "TANNLEGE BAUGE AS").value == "Tannlege Bauge AS"
+
+
+def test_an_open_application_form_and_a_repeated_job_ad_are_not_more_open_postings():
+    facts = [
+        _fact("organization_name", "Equinor ASA"),
+        _fact("hiring_signal", "Open role: Nettverkskonsulent - https://www.equinor.com/ledige-stillinger/nettverkskonsulent/"),
+        _fact("hiring_signal", "Job ad: https://www.equinor.com/ledige-stillinger/nettverkskonsulent/"),
+        _fact("hiring_signal", "Job ad: https://www.equinor.com/ledige-stillinger/apen-soknad/"),
+        _fact("hiring_signal", "Open role: Åpen søknad - https://www.equinor.com/jobb/1"),
+        _fact("hiring_signal", "Job ad: https://www.equinor.com/ledige-stillinger/salgsleder/"),
+    ]
+    values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.hiring_signals]
+    assert values == [
+        "Open role: Nettverkskonsulent - https://www.equinor.com/ledige-stillinger/nettverkskonsulent/",
+        "Job ad: https://www.equinor.com/ledige-stillinger/salgsleder/",
+    ]

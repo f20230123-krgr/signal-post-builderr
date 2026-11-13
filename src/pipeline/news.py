@@ -311,7 +311,10 @@ def news_items_with_links(
             break
     if not items:
         today_iso = (today or datetime.now().date()).isoformat()
-        items = [(t, d, None) for t, d in _time_tag_items(html, today, page_url) if is_news_title(t) and d != today_iso][:MAX_NEWS_ITEMS_PER_PAGE]
+        items = [
+            (t, d, link) for t, d, link in _time_tag_items_with_links(html, today, page_url)
+            if is_news_title(t) and d != today_iso
+        ][:MAX_NEWS_ITEMS_PER_PAGE]
     return items
 
 
@@ -320,27 +323,46 @@ _NEARBY_CHARS = 400
 
 
 def _time_tag_items(html: str, today: Optional[date], page_url: Optional[str] = None) -> list[tuple[str, str]]:
+    return [(title, iso) for title, iso, _ in _time_tag_items_with_links(html, today, page_url)]
+
+
+def _link_beside(window: str, title: str, page_url: str) -> Optional[str]:
+    """The post link next to a <time> item: the one whose text or address is the headline, else
+    the only post link there is. Two candidates and no match: unknown (a neighbour's link)."""
+    links = [(url, text) for url, text in _anchors(window, page_url) if is_post_link(url, page_url)]
+    key, slug = title.strip().lower(), _slug(title)[:40]
+    for url, text in links:
+        if (text and (text.strip().lower() == key or key in text.lower())) or (len(slug) >= 12 and slug in _slug(url)):
+            return url
+    distinct = {url for url, _ in links}
+    return links[0][0] if len(distinct) == 1 else None
+
+
+def _time_tag_items_with_links(
+    html: str, today: Optional[date], page_url: Optional[str] = None
+) -> list[tuple[str, str, Optional[str]]]:
     """Fallback for layouts with no article/list/card wrapper: each <time datetime> is paired
     with the nearest headline or link text right after it (or just before it)."""
     cleaned = _SCRIPT_STYLE_RE.sub(" ", html)
-    items: list[tuple[str, str]] = []
+    items: list[tuple[str, str, Optional[str]]] = []
     seen: set[str] = set()
     for match in _TIME_TAG_RE.finditer(cleaned):
         iso = parse_date(match.group(1), today)
         if not iso:
             continue
-        title = None
+        title, link = None, None
         for window in (cleaned[match.end() : match.end() + _NEARBY_CHARS], cleaned[max(0, match.start() - _NEARBY_CHARS) : match.start()]):
             titles = [_text(m.group(1)) for m in _NEARBY_HEADING_RE.finditer(window)]
             title = next((t for t in titles if _MIN_TITLE_LEN <= len(t) <= _MAX_TITLE_LEN and not parse_date(t)), None)
             if title and page_url and not any(is_post_link(url, page_url) for url, _ in _anchors(window, page_url)):
                 title = None
             if title:
+                link = _link_beside(window, title, page_url) if page_url else None
                 break
         if not title or title.lower() in seen:
             continue
         seen.add(title.lower())
-        items.append((title, iso))
+        items.append((title, iso, link))
     return items
 
 

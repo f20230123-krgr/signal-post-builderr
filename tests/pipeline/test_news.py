@@ -150,7 +150,8 @@ def test_json_ld_article_dates_lose_their_time_of_day_and_become_the_effective_d
 
     fact = next(f for f in structured_facts(html, "https://dips.com/n", NOW) if f.field_name == "dated_activity")
 
-    assert fact.value == "SvarUT er nå tilgjengelig (2023-04-13)"
+    # Marked up on the post's own page: that page is its link.
+    assert fact.value == "SvarUT er nå tilgjengelig (2023-04-13) - https://dips.com/n"
     assert fact.effective_date == "2023-04-13" and fact.evidence_span == "SvarUT er nå tilgjengelig"
 
 
@@ -285,3 +286,18 @@ def test_a_news_item_carries_its_own_post_link_and_demo_or_listing_posts_are_not
     assert not is_news_title("Slider One")
     assert not is_news_title("BMW 3-serie M340i xDrive Norsksolgt Panorama/Krok/Acc/Laser-lys/H&K")
     assert is_news_title("Fikk toppscore på alle kriterier – 1/2")
+
+
+
+def test_a_time_tag_item_keeps_the_post_link_beside_it_but_never_a_neighbours():
+    from src.pipeline.news import _time_tag_items_with_links
+
+    page = "https://example.no/nyheter"
+    one = "<div><time datetime='2026-09-22'></time><a href='https://example.no/nyheter/nytt-kontor-bergen'>Nytt kontor i Bergen</a></div>"
+    assert _time_tag_items_with_links(one, TODAY, page) == [
+        ("Nytt kontor i Bergen", "2026-09-22", "https://example.no/nyheter/nytt-kontor-bergen")
+    ]
+    # Two post links beside it and neither is this headline's: the link is unknown.
+    two = ("<div><time datetime='2026-09-22'></time><h3>Nytt kontor i Bergen</h3>"
+           "<a href='https://example.no/nyheter/a'>Les mer</a><a href='https://example.no/nyheter/b'>Les mer</a></div>")
+    assert _time_tag_items_with_links(two, TODAY, page) == [("Nytt kontor i Bergen", "2026-09-22", None)]
