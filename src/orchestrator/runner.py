@@ -38,7 +38,14 @@ from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS,
 from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.render import active_renderer
 from src.pipeline.site_evidence import NOT_READABLE, NOT_SHOWN, _is_owner_page, site_ownership
-from src.pipeline.social import identity_tokens, script_social_candidates, social_profile_link
+from src.pipeline.social import (
+    account_is_the_company,
+    account_named_after_another,
+    identity_tokens,
+    registry_query_for_accounts,
+    script_social_candidates,
+    social_profile_link,
+)
 from src.pipeline.discovery import (
     ProviderHealth,
     discover_candidate_site,
@@ -54,6 +61,7 @@ from src.pipeline.registry_extras import (
     fetch_registry_update_activity,
     UNIVERSE_SOURCE,
     name_is_held_by_another_entity,
+    other_entity_names,
     subunit_org_numbers,
     universe_identity_facts,
     website_held_by_another_entity,
@@ -385,6 +393,19 @@ def _default_process_one(
         f for f in confirmed_facts
         if f.field_name != "company_profile" or (site_proven and _is_owner_page(f.source_url))
     ]
+    # An account that is not simply the company's own name or domain may be a sister company's
+    # (official feedback, 13 Nov: ROGER AAMODT BYGG AS's site links "rogeraamodteiendom", which is
+    # ROGER AAMODT EIENDOM AS). One name search per such company; an account that spells another
+    # registered company's name is left out, and so is every doubtful one if the search fails.
+    doubtful = [
+        f for f in confirmed_facts
+        if f.field_name == "company_profile"
+        and not account_is_the_company(f.value, entity.legal_name or "", crawl_entity.official_site_candidate or "")
+    ]
+    if doubtful:
+        others = other_entity_names(registry_query_for_accounts(entity.legal_name or ""), org_number, budget, client=client)
+        dropped = {id(f) for f in doubtful if others is None or account_named_after_another(f.value, others)}
+        confirmed_facts = [f for f in confirmed_facts if id(f) not in dropped]
     # Registry extras (roles/accounts/sub-units) are already-confirmed --
     # same authoritative registry as resolve.py, no identity risk to gate on.
     confirmed_facts += registry_facts

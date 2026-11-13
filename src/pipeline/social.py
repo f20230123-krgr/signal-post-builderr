@@ -234,11 +234,15 @@ def plausibly_own_profile(canonical: str, legal_name: str, site_url: str, home: 
     A site also links its parent group's accounts, an owner's personal brand, a supplier's
     channel embedded in an article. Hand-checked on Builderr's 100-company sample: requiring
     a named account to resemble the company's name or domain removed every such link and
-    none of the 76 profiles Builderr's own crawl confirmed. An account known only by an id
-    (a YouTube channel id, a numeric page id) cannot be compared by name and is kept."""
+    none of the 76 profiles Builderr's own crawl confirmed.
+
+    An account known only by an id (a YouTube channel id, a numeric page id) cannot be tied to
+    the company's name, so it is left out (official feedback, 13 Nov: OLYMPIC SERVICES AS's site
+    linked a channel id that is OLYMPIC SUBSEA ASA's; "leave out any claim you cannot tie to the
+    company's name or org number")."""
     account = _account_name(canonical)
     if not account or _ID_LIKE_RE.match(account) or "profile.php" in canonical:
-        return True
+        return False
     # An account named with another country's company form ("epsco-ltd" linked from EPSCO
     # NORGE AS's site) is the foreign parent or sister company's, not this Norwegian one's
     # (official audit, 23 Oct: social accounts belonging to other companies).
@@ -258,6 +262,45 @@ def plausibly_own_profile(canonical: str, legal_name: str, site_url: str, home: 
     host = urlsplit(site_url if "://" in site_url else f"https://{site_url}").netloc.lower().removeprefix("www.")
     label = re.sub(r"[^a-z0-9æøå]", "", host.split(".")[0]) if host else ""
     return len(label) >= 3 and account.startswith(label)
+
+
+_TRAILING_FORM_RE = re.compile(r"(?:as|asa|no|norge|norway)$")
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", _fold(text))
+
+
+def _base_words(legal_name: str) -> list[str]:
+    return [w for w in re.sub(r"[^a-z0-9æøå ]", " ", _fold(legal_name)).split() if w not in _LEGAL_FORM_TOKENS]
+
+
+def account_is_the_company(canonical: str, legal_name: str, site_url: str) -> bool:
+    """The account is the company's whole name or its domain label, nothing more ("afgruppen")."""
+    account = _TRAILING_FORM_RE.sub("", _plain(_account_name(canonical)))
+    host = urlsplit(site_url if "://" in site_url else f"https://{site_url}").netloc.lower().removeprefix("www.")
+    label = _plain(host.split(".")[0]) if host else ""
+    return bool(account) and account in {_plain("".join(_base_words(legal_name))), label}
+
+
+def registry_query_for_accounts(legal_name: str) -> str:
+    """The name to search the register with for companies an account might be named after: the
+    company's name without its last word ("ROGER AAMODT BYGG AS" -> "roger aamodt"), so sister
+    companies sharing the stem come back."""
+    words = _base_words(legal_name)
+    return " ".join(words[:-1] if len(words) > 1 else words)
+
+
+def account_named_after_another(canonical: str, other_names: list[str]) -> bool:
+    """True when the account spells another registered company's name ("rogeraamodteiendom" is
+    ROGER AAMODT EIENDOM AS, not ROGER AAMODT BYGG AS: official feedback, 13 Nov)."""
+    account = _plain(_account_name(canonical))
+    trimmed = _TRAILING_FORM_RE.sub("", account)
+    for name in other_names:
+        other = _plain("".join(_base_words(name)))
+        if len(other) >= 4 and other in (account, trimmed):
+            return True
+    return False
 
 
 def script_social_candidates(html: str, tokens: set[str]) -> list[tuple[str, str, str]]:

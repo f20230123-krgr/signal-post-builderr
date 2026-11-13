@@ -194,7 +194,7 @@ def test_feed_and_page_headlines_read_as_plain_text_with_the_raw_text_as_span():
 
     [fact] = feed_activity_facts(feed, "https://www.strongpoint.com/news/feed/", NOW)
 
-    assert fact.value == "World\u2019s largest Pio installation (2026-09-18)"
+    assert fact.value == "World\u2019s largest Pio installation (2026-09-18) - https://www.strongpoint.com/news/pio-installation/"
     assert "&amp;#8217;" in fact.evidence_span
 
 

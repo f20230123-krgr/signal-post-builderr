@@ -44,7 +44,7 @@ def test_a_wordpress_title_is_quoted_as_the_json_writes_it():
 
     [fact] = wp_post_facts(body, "https://consto.no/wp-json/wp/v2/posts", NOW)
 
-    assert fact.value == "Fikk toppscore på alle kriterier – 1/2 (2026-01-07)"
+    assert fact.value == "Fikk toppscore på alle kriterier – 1/2 (2026-01-07) - https://consto.no/a"
     assert fact.evidence_span in body
 
 

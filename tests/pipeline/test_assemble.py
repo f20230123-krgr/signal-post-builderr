@@ -390,3 +390,14 @@ def test_spam_injected_into_a_hacked_site_and_the_companys_own_name_are_not_head
         "Equinor signs Northern Lights contract (2025-09-17)",
         "Registry record updated (Endring) on 2026-06-19 - Brønnøysundregistrene",
     ]
+
+
+def test_the_spam_and_name_checks_read_the_headline_before_its_post_link():
+    facts = [
+        _fact("organization_name", "Equinor ASA"),
+        _fact("dated_activity", "kypit kyrsovyu_aton (2025-12-12) - https://www.equinor.com/kypit"),
+        _fact("dated_activity", "Equinor ASA (2025-09-17) - https://www.equinor.com/a"),
+        _fact("dated_activity", "Equinor signs a contract (2025-09-17) - https://www.equinor.com/b"),
+    ]
+    values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]
+    assert values == ["Equinor signs a contract (2025-09-17) - https://www.equinor.com/b"]

@@ -30,7 +30,7 @@ import trafilatura
 
 from src.pipeline.careers import careers_page_facts, is_careers_url
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, FetchedPage
-from src.pipeline.news import is_headline, is_news_title, is_post_link, news_item_facts, plain_headline, wp_post_facts
+from src.pipeline.news import is_headline, is_news_title, is_post_link, news_item_facts, plain_headline, with_post_link, wp_post_facts
 from src.pipeline.social import social_profile_link
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -604,7 +604,7 @@ def feed_activity_facts(content: str, source_url: str, extracted_at: datetime) -
         iso = _feed_iso_date(published)
         facts.append(
             RawFact(
-                "dated_activity", f"{plain_headline(title)} ({iso or published})", source_url, "structured", extracted_at,
+                "dated_activity", with_post_link(f"{plain_headline(title)} ({iso or published})", link), source_url, "structured", extracted_at,
                 evidence_span=title, effective_date=iso,
             )
         )

@@ -1020,6 +1020,34 @@ def name_is_held_by_another_entity(
             client.close()
 
 
+def other_entity_names(
+    query: str, org_number: str, budget: BudgetGovernor, client: Optional[httpx.Client] = None
+) -> Optional[list[str]]:
+    """Names of registered entities OTHER than this one that the name search returns for `query`,
+    or None when the search could not be made (the caller then trusts no doubtful account)."""
+    if not query or not budget.can_spend_request():
+        return None
+    owns_client = client is None
+    client = client or new_client()
+    try:
+        try:
+            wait_if_paused(time.sleep)
+            response = client.get(NAME_SEARCH_URL, params={"navn": query, "size": 100}, timeout=10.0)
+        except httpx.HTTPError:
+            response = None
+        budget.record_request()
+        if response is None or response.status_code != 200:
+            return None
+        try:
+            units = (response.json().get("_embedded") or {}).get("enheter", [])
+        except ValueError:
+            return None
+        return [str(u.get("navn") or "") for u in units if str(u.get("organisasjonsnummer") or "") != org_number]
+    finally:
+        if owns_client:
+            client.close()
+
+
 def website_held_by_another_entity(
     site: str,
     org_number: str,

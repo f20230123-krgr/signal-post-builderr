@@ -318,6 +318,14 @@ hand-checked against v5:
   upcoming event or a deadline ("Barneminimesse Stavanger (2027-02-09)"), not a post, and is
   left out (Nov 5). Nor are posts injected into a hacked site ("kypit kyrsovyu_aton", spam
   words) or a "headline" that is only the company's own name.
+- **After the 13 November feedback** (80 claims checked, 70 right; two wrong examples were social
+  pages of related companies). A social account known only by an id (a YouTube channel id, a
+  numeric LinkedIn or Facebook page id) is left out, because it cannot be tied to the company's
+  name. An account that is not simply the company's name or domain is checked against the
+  register, and left out when it spells another registered company's name ("rogeraamodteiendom"
+  is ROGER AAMODT EIENDOM AS, not ROGER AAMODT BYGG AS). Each news item now carries its own post's
+  address ("Headline (YYYY-MM-DD) - https://..."), as open roles do, and a theme's demo post or a
+  product listed as a post is not news.
 - **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
   the org number opens the Brønnøysund record, news headlines and open roles link to where they
   were found, the summary's website, profiles, role and headline are links, compare links the

@@ -729,7 +729,7 @@ def _latest_news(profile: CompanyProfile) -> Optional[tuple[Claim, str, str]]:
             date = max(found) if found else ""
         if not date or date > today:
             continue
-        headline = re.sub(r"\s*\([^()]*\d{4}[^()]*\)\s*$", "", claim.value).strip()
+        headline = re.sub(r"\s*\([^()]*\d{4}[^()]*\)\s*$", "", re.sub(r"\s+-\s+https?://\S+$", "", claim.value)).strip()
         # A headline scraped from a page line can carry its own date ("Arkiv 2026-01-28 ..."):
         # the date is already stated beside it.
         headline = re.sub(r"\s+", " ", _DATE_RE.sub(" ", headline)).strip(" -:")

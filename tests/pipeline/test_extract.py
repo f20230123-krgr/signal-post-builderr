@@ -504,7 +504,7 @@ def test_rss_feed_entries_become_dated_activity():
     # product or an entry without a link.
     assert len(facts) == 2
     first = next(f for f in facts if "Bergen" in f.value)
-    assert first.value == "Acme opens Bergen office (2026-09-01)"
+    assert first.value == "Acme opens Bergen office (2026-09-01) - https://acme.no/news/bergen-office"
     assert first.effective_date == "2026-09-01" and first.evidence_span == "Acme opens Bergen office"
 
 

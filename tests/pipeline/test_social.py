@@ -187,8 +187,11 @@ def test_a_profile_is_the_companys_own_only_when_its_name_resembles_the_company_
 
     assert own("https://www.linkedin.com/company/peab/", "PEAB BYGG AS", "https://peab.no")
     assert own("https://www.instagram.com/nspnorge/", "NORDIC SUPPLY PARTNER AS", "https://www.nsp.no")
-    assert own("https://www.youtube.com/channel/UC-L9GGxaVCNOCMziy1rXqIw", "HJELPEMIDDELSPESIALISTEN AS", "https://hm-spes.no")
-    assert own("https://www.facebook.com/profile.php?id=100057441009551", "RSV GRUPPEN AS", "https://rsvgruppen.no")
+    # An account known only by an id cannot be tied to the name (official feedback, 13 Nov:
+    # OLYMPIC SERVICES AS's site linked OLYMPIC SUBSEA ASA's channel id), so it is left out.
+    assert not own("https://www.youtube.com/channel/UCoUcPDVk1n_pxVZIeQpTynQ", "OLYMPIC SERVICES AS", "https://olympic.no")
+    assert not own("https://www.facebook.com/profile.php?id=100057441009551", "RSV GRUPPEN AS", "https://rsvgruppen.no")
+    assert not own("https://www.linkedin.com/company/845627", "RAGASCO AS", "https://ragasco.com")
     assert not own("https://www.linkedin.com/company/eltera-gruppen/", "VALDRES INSTALLASJON AS", "https://valdres-installasjon.no")
     assert not own("https://www.youtube.com/@Prevent1942/playlists", "NORDIC SUPPLY PARTNER AS", "https://www.nsp.no")
     assert not own("https://www.instagram.com/orsolyahaarberg/", "FJELLHEIMEN GALLERI AS", "https://fjellheimengalleri.no")
@@ -232,3 +235,19 @@ def test_a_profile_with_norwegian_letters_is_written_the_way_the_browser_sends_i
     assert social_profile_link("https://www.facebook.com/profile.php?id=100057441009551")[0] == \
         "https://facebook.com/profile.php?id=100057441009551"
     assert social_profile_link("https://www.youtube.com/@gozaptec")[0] == "https://youtube.com/@gozaptec"
+
+
+def test_an_account_named_after_a_sister_company_is_that_companys():
+    """Official feedback, 13 Nov: ROGER AAMODT BYGG AS's site links "rogeraamodteiendom", the page
+    of ROGER AAMODT EIENDOM AS, a separate company."""
+    from src.pipeline.social import account_is_the_company, account_named_after_another, registry_query_for_accounts
+
+    assert registry_query_for_accounts("ROGER AAMODT BYGG AS") == "roger aamodt"
+    assert registry_query_for_accounts("ENTRA ASA") == "entra"
+    others = ["ROGER AAMODT EIENDOM AS", "AAMODT HOLDING AS"]
+    assert account_named_after_another("https://facebook.com/rogeraamodteiendom", others)
+    assert not account_named_after_another("https://facebook.com/rogeraamodtbygg", others)
+    assert account_named_after_another("https://linkedin.com/company/entra-eiendom-as", ["ENTRA EIENDOM AS"])
+    assert account_is_the_company("https://facebook.com/afgruppen", "AF GRUPPEN ASA", "https://afgruppen.no")
+    assert account_is_the_company("https://instagram.com/hmspes", "HJELPEMIDDELSPESIALISTEN AS", "https://hmspes.no")
+    assert not account_is_the_company("https://facebook.com/rogeraamodteiendom", "ROGER AAMODT BYGG AS", "https://rogeraamodt.no")

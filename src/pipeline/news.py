@@ -205,17 +205,36 @@ def _post_links(html: str, page_url: str) -> list[tuple[str, str]]:
     return [(url, text) for url, text in _anchors(html, page_url) if is_post_link(url, page_url)]
 
 
-def _links_to_its_post(block: str, title: str, page_url: str, post_links: list[tuple[str, str]]) -> bool:
-    """The item links to its own post page: a post link inside the item, or one anywhere on the
-    page whose text or address is this headline (layouts that put the link outside the dated
-    part of the card)."""
-    if any(is_post_link(url, page_url) for url, _ in _anchors(block, page_url)):
-        return True
+def _post_link_of(block: str, title: str, page_url: str, post_links: list[tuple[str, str]]) -> Optional[str]:
+    """The item's own post page: a post link inside the item, or one anywhere on the page whose
+    text or address is this headline (layouts that put the link outside the dated part of the
+    card). None when the item links to no post of its own."""
+    inside = [url for url, _ in _anchors(block, page_url) if is_post_link(url, page_url)]
+    if inside:
+        return inside[0]
     key, slug = title.strip().lower(), _slug(title)[:40]
-    return any(
-        (text and (text.strip().lower() == key or key in text.lower())) or (len(slug) >= 12 and slug in _slug(url))
-        for url, text in post_links
-    )
+    for url, text in post_links:
+        if (text and (text.strip().lower() == key or key in text.lower())) or (len(slug) >= 12 and slug in _slug(url)):
+            return url
+    return None
+
+
+def _links_to_its_post(block: str, title: str, page_url: str, post_links: list[tuple[str, str]]) -> bool:
+    return _post_link_of(block, title, page_url, post_links) is not None
+
+
+_LINK_SUFFIX_RE = re.compile(r"\s+-\s+https?://\S+$")
+
+
+def with_post_link(value: str, link: Optional[str]) -> str:
+    """The item with its own post's address, "Headline (YYYY-MM-DD) - https://...", the way an
+    open role carries its ad (official feedback, 13 Nov: news "linked from the company's own
+    site")."""
+    return f"{value} - {link}" if link and re.match(r"https?://\S+$", link) else value
+
+
+def without_post_link(value: str) -> str:
+    return _LINK_SUFFIX_RE.sub("", value or "")
 
 
 def is_news_title(title: str) -> bool:
@@ -225,13 +244,16 @@ def is_news_title(title: str) -> bool:
     return (
         is_headline(title) and len(words) >= 2
         and not _NAV_TITLE_RE.match(title.strip(" .:-–|")) and not _PLACEHOLDER_TITLE_RE.search(title)
+        # A product or a car listed as a "post" reads as a spec list ("Panorama/Krok/Acc/Laser-lys").
+        and title.count("/") < 3
     )
 
 
 # A website builder's sample post, never edited ("Hello world!" on 1 in 10 WordPress sites).
 _PLACEHOLDER_TITLE_RE = re.compile(
     r"^\s*(?:hello\s+world|hei,?\s+verden|hallo,?\s+verden|welcome\s+to\s+(?:flatsome|wordpress|your\s+(?:site|blog))|"
-    r"a\s+simple\s+blog\s+post|just\s+another\s+post|sample\s+(?:post|page)|eksempelside|blog\s+post\s+title)\b",
+    r"a\s+simple\s+blog\s+post|just\s+another\s+post|sample\s+(?:post|page)|eksempelside|blog\s+post\s+title|"
+    r"slider?\s+(?:one|two|three|four|\d)|post\s+(?:one|two|three|\d))\b",
     re.IGNORECASE,
 )
 
@@ -258,7 +280,14 @@ def news_items(html: str, today: Optional[date] = None, page_url: Optional[str] 
     """(headline, ISO date) for each dated article or list item on the page. Given the page's
     address, an item counts only when it links to its own post page on the same site (a dated
     post, not a product, listing or navigation entry)."""
-    items: list[tuple[str, str]] = []
+    return [(title, iso) for title, iso, _ in news_items_with_links(html, today, page_url)]
+
+
+def news_items_with_links(
+    html: str, today: Optional[date] = None, page_url: Optional[str] = None
+) -> list[tuple[str, str, Optional[str]]]:
+    """news_items, each with the address of its own post page when known."""
+    items: list[tuple[str, str, Optional[str]]] = []
     seen: set[str] = set()
     post_links = _post_links(html, page_url) if page_url else []
     for block in _blocks(html):
@@ -273,15 +302,16 @@ def news_items(html: str, today: Optional[date] = None, page_url: Optional[str] 
             continue
         if not is_news_title(title) or iso == (today or datetime.now().date()).isoformat():
             continue
-        if page_url and not _links_to_its_post(block, title, page_url, post_links):
+        link = _post_link_of(block, title, page_url, post_links) if page_url else None
+        if page_url and link is None:
             continue
         seen.add(title.lower())
-        items.append((title, iso))
+        items.append((title, iso, link))
         if len(items) >= MAX_NEWS_ITEMS_PER_PAGE:
             break
     if not items:
         today_iso = (today or datetime.now().date()).isoformat()
-        items = [(t, d) for t, d in _time_tag_items(html, today, page_url) if is_news_title(t) and d != today_iso][:MAX_NEWS_ITEMS_PER_PAGE]
+        items = [(t, d, None) for t, d in _time_tag_items(html, today, page_url) if is_news_title(t) and d != today_iso][:MAX_NEWS_ITEMS_PER_PAGE]
     return items
 
 
@@ -361,7 +391,8 @@ def wp_post_facts(
             continue
         facts.append(
             RawFact(
-                "dated_activity", f"{title} ({iso})", page_url, "structured", extracted_at,
+                "dated_activity", with_post_link(f"{title} ({iso})", link if isinstance(link, str) else None),
+                page_url, "structured", extracted_at,
                 context_name=context_name, evidence_span=_json_written(body, raw_title), effective_date=iso,
             )
         )
@@ -377,10 +408,10 @@ def news_item_facts(
 
     return [
         RawFact(
-            "dated_activity", f"{plain_headline(title)} ({iso})", page_url, "text", extracted_at,
+            "dated_activity", with_post_link(f"{plain_headline(title)} ({iso})", link), page_url, "text", extracted_at,
             context_name=context_name, evidence_span=title, effective_date=iso,
         )
-        for title, iso in news_items(html, extracted_at.date(), page_url)
+        for title, iso, link in news_items_with_links(html, extracted_at.date(), page_url)
         if plain_headline(title)
     ]
 

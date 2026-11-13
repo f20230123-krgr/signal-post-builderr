@@ -69,7 +69,7 @@ def test_the_fact_carries_headline_span_and_effective_date():
     )
 
     assert fact.field_name == "dated_activity"
-    assert fact.value == "Vi åpner nytt kontor (2026-09-24)"
+    assert fact.value == "Vi åpner nytt kontor (2026-09-24) - https://example.no/nyheter/nytt-kontor"
     assert fact.evidence_span == "Vi åpner nytt kontor"
     assert fact.effective_date == "2026-09-24"
 
@@ -193,7 +193,7 @@ def test_wordpress_posts_become_dated_headlines_quoted_as_the_json_writes_them()
 
     facts = wp_post_facts(body, "https://x.no/wp-json/wp/v2/posts", NOW)
 
-    assert [f.value for f in facts] == ["Nytt kontor – Bergen (2026-09-22)"]  # today's item and a section label are dropped
+    assert [f.value for f in facts] == ["Nytt kontor – Bergen (2026-09-22) - https://x.no/a"]  # today's item and a section label are dropped
     assert facts[0].evidence_span == "Nytt kontor &#8211; Bergen" and facts[0].evidence_span in body
     assert facts[0].effective_date == "2026-09-22"
     assert wp_post_facts("not json", "u", NOW) == [] and wp_post_facts('{"a": 1}', "u", NOW) == []
@@ -208,7 +208,7 @@ def test_the_crawl_asks_a_wordpress_homepage_for_its_post_list_and_the_extractor
     facts = [f for p in pages for f in extract(p, now=lambda: NOW) if f.field_name == "dated_activity"]
 
     assert any(p.url.endswith("/wp-json/wp/v2/posts?per_page=6&_fields=date,title,link") for p in pages)
-    assert [f.value for f in facts] == ["Nytt kontor i Bergen (2026-09-22)"]
+    assert [f.value for f in facts] == ["Nytt kontor i Bergen (2026-09-22) - https://example.com/a"]
     assert verify(facts[0], _entity("https://example.com/")) is not None
 
 
@@ -272,3 +272,16 @@ def test_an_about_heading_and_a_job_ads_dates_are_not_news():
     )
 
     assert [f for f in extract(page) if f.field_name == "dated_activity"] == []
+
+
+def test_a_news_item_carries_its_own_post_link_and_demo_or_listing_posts_are_not_news():
+    """Official feedback, 13 Nov: news "linked from the company's own site". A theme's demo post
+    ("Slider One") and a car ad posted as a WordPress post are not news."""
+    from src.pipeline.news import is_news_title, with_post_link, without_post_link
+
+    assert with_post_link("Nytt kontor (2026-09-22)", "https://x.no/nytt-kontor") == "Nytt kontor (2026-09-22) - https://x.no/nytt-kontor"
+    assert with_post_link("Nytt kontor (2026-09-22)", None) == "Nytt kontor (2026-09-22)"
+    assert without_post_link("Nytt kontor (2026-09-22) - https://x.no/nytt-kontor") == "Nytt kontor (2026-09-22)"
+    assert not is_news_title("Slider One")
+    assert not is_news_title("BMW 3-serie M340i xDrive Norsksolgt Panorama/Krok/Acc/Laser-lys/H&K")
+    assert is_news_title("Fikk toppscore på alle kriterier – 1/2")

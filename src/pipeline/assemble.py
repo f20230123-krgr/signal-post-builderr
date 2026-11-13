@@ -287,7 +287,9 @@ def _not_a_headline(fact: ConfirmedFact, legal_name: Optional[str]) -> bool:
     company's own name alone ("Seal Engineering AS (2026-09-17)"). Registry events are kept."""
     if fact.source_class == "official_registry":
         return False
-    headline = _DATE_SUFFIX_RE.sub("", fact.value or "").strip()
+    from src.pipeline.news import without_post_link  # deferred: keeps assemble's imports light
+
+    headline = _DATE_SUFFIX_RE.sub("", without_post_link(fact.value or "")).strip()
     if _SPAM_HEADLINE_RE.search(headline):
         return True
     if legal_name:
