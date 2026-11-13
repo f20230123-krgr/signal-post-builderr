@@ -329,7 +329,7 @@ def related_company_site(
     else:  # proved by its address: the name the site gives itself, else its domain
         own = next((n for p in owner[:1] for n in (_page_organization_name_from_html(p.raw_html),) if n), None)
         site_name = _TITLE_PART_RE.split(own.strip())[0] if own else label
-    target = _words(site_name)
+    target = _base_words(site_name)  # "Mestra Entrepenør AS" -> mestra entrepenor
     if not target:
         return None
     units = find_units(site_name)
@@ -347,9 +347,10 @@ def related_company_site(
             base == target
             or (base[-1:] and base[-1] in _GROUP_WORDS and base[:-1] == target)
             or (registered_site and _domain(registered_site if "://" in registered_site else f"https://{registered_site}") == host)
-            # An address-proved site whose domain is not this company's name at all, with a company
-            # by that name registered (mestra.as at MESTERMUR AS's address: MESTRA ENTREPRENØR AS).
-            or (unrelated_domain and base[: len(target)] == target)
+            # A site whose domain is not this company's name at all, under the name of a registered
+            # company (mestra.as, "Mestra Entrepenør AS", at MESTERMUR AS's address: MESTRA
+            # ENTREPRENØR AS). Its first word decides: a site may misspell the rest.
+            or (unrelated_domain and base[:1] == target[:1])
         ):
             return str(unit.get("navn") or "")
     return None

@@ -266,3 +266,19 @@ def test_a_site_that_is_this_companys_own_is_kept():
     # The group itself: ABAX GROUP AS's site names "ABAX".
     abax = lambda name: [{"organisasjonsnummer": "9", "navn": "ABAX AS", "organisasjonsform": {"kode": "AS"}}]
     assert related_company_site("ABAX", [_page("https://www.abax.com/", title="ABAX")], "ABAX GROUP AS", "1", "https://www.abax.com/", abax) is None
+
+
+def test_a_site_under_another_registered_companys_name_is_theirs_even_misspelled():
+    """mestra.as, found at MESTERMUR AS's registered address, calls itself "Mestra Entrepenør AS":
+    MESTRA ENTREPRENØR AS's site. streams.no ("Streams AS") for STREAMS SERVICES AS is STREAMS AS's."""
+    from src.pipeline.site_evidence import related_company_site
+
+    mestra = lambda name: [
+        {"organisasjonsnummer": "9", "navn": "MESTRE AS", "organisasjonsform": {"kode": "AS"}},
+        {"organisasjonsnummer": "8", "navn": "MESTRA ENTREPRENØR AS", "organisasjonsform": {"kode": "AS"}},
+    ]
+    home = _page("https://www.mestra.as/", title="Mestra Entrepenør AS")
+    assert related_company_site("Grindalsvegen 3", [home], "MESTERMUR AS", "917968101", "https://www.mestra.as/", mestra) == "MESTRA ENTREPRENØR AS"
+    streams = lambda name: [{"organisasjonsnummer": "9", "navn": "STREAMS AS", "organisasjonsform": {"kode": "AS"}}]
+    home = _page("https://streams.no", title="Streams AS")
+    assert related_company_site("John Strandruds vei 16", [home], "STREAMS SERVICES AS", "998877665", "https://streams.no", streams) == "STREAMS AS"

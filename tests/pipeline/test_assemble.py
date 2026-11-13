@@ -420,6 +420,9 @@ def test_only_a_dated_post_linked_from_the_companys_own_site_is_news():
         _fact("dated_activity", "Protected: For ansatte (2026-04-27) - https://www.equinor.com/for-ansatte/"),
         _fact("dated_activity", "Relaterte artikler (2026-03-16) - https://www.equinor.com/sovn/"),
         _fact("dated_activity", "Volvo-avtale for hele flåten (2026-03-16) - https://www.equinor.com/volvo-avtale/"),
+        _fact("dated_activity", "Ann-Kristin Buvik (2023-10-12) - https://www.equinor.com/aktuelt-arkiv?author=5bd6b64e27978f6c"),
+        _fact("dated_activity", "Blog - Equinor (2025-11-08) - https://www.equinor.com/blog-2/"),
+        _fact("dated_activity", "2013: Prosjekt; WGC for Statoil (2018-01-02) - https://www.equinor.com/referansar/2013-wgc"),
         _fact("dated_activity", "Equinor signs a contract (2025-09-17) - https://www.equinor.com/b"),
     ]
     values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]

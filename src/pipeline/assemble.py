@@ -354,7 +354,10 @@ _POST_LINK_RE = re.compile(r"\s+-\s+(https?://\S+)$")
 # Pages that are never a dated post: a service or product page, a form's thank-you or feedback
 # page, or a theme's demo post left in place ("/front/post-four").
 _NOT_A_POST_LINK_RE = re.compile(
-    r"/(?:tjenester|tjeneste|services?|produkter|produkt|products?|feedback|thank-?you|takk)(?:/|$|\?)"
+    r"/(?:tjenester|tjeneste|services?|produkter|produkt|products?|feedback|thank-?you|takk|"
+    r"referansar|referanser|referanse|author|forfatter)(?:/|$|\?)"
+    # An author's page ("?author=5bd6b64e...": a byline, not a post) or a blog's listing page.
+    r"|[?&]author=|/blogg?(?:-\d+)?/?$"
     r"|/post-(?:one|two|three|four|five|six|\d+)/?$",
     re.IGNORECASE,
 )
@@ -374,7 +377,7 @@ _CAR_AD_RE = re.compile(
 # A section heading or a protected page, not a headline.
 _NOT_A_HEADLINE_RE = re.compile(
     r"^(?:protected|private|beskyttet|privat)\s*:|^(?:relaterte|related|siste|latest|flere|more)\s+"
-    r"(?:artikler|articles|nyheter|news|innlegg|posts)$",
+    r"(?:artikler|articles|nyheter|news|innlegg|posts)$|^(?:blogg?|nyheter|news|aktuelt|artikler|articles)\s+[-–|]\s+",
     re.IGNORECASE,
 )
 
