@@ -251,3 +251,17 @@ def test_an_account_named_after_a_sister_company_is_that_companys():
     assert account_is_the_company("https://facebook.com/afgruppen", "AF GRUPPEN ASA", "https://afgruppen.no")
     assert account_is_the_company("https://instagram.com/hmspes", "HJELPEMIDDELSPESIALISTEN AS", "https://hmspes.no")
     assert not account_is_the_company("https://facebook.com/rogeraamodteiendom", "ROGER AAMODT BYGG AS", "https://rogeraamodt.no")
+
+
+def test_an_account_naming_a_separate_kind_of_company_is_not_this_companys():
+    """Official feedback, 13 Nov: "rogeraamodteiendom" for ROGER AAMODT BYGG AS. Measured on 1,100
+    companies, the rule also removed only "mandalmaritime" and "heimstadenbostad"."""
+    from src.pipeline.social import canonical_social_profile_url, plausibly_own_profile
+
+    def own(url, name, site):
+        return plausibly_own_profile(canonical_social_profile_url(url), name, site)
+
+    assert not own("https://www.facebook.com/rogeraamodteiendom", "ROGER AAMODT BYGG AS", "https://rogeraamodt.no")
+    assert not own("https://www.facebook.com/mandalmaritime", "SJØ-SPORT MANDAL AS", "https://sjosport.no")
+    assert own("https://www.facebook.com/rogeraamodtbygg", "ROGER AAMODT BYGG AS", "https://rogeraamodt.no")
+    assert own("https://www.facebook.com/entraeiendom", "ENTRA EIENDOM AS", "https://entra.no")

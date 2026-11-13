@@ -200,6 +200,13 @@ _GROUP_WORD_RE = re.compile(r"gruppen|group|konsern|holding", re.IGNORECASE)
 
 _LEGAL_FORM_WORDS = {"as", "asa", "sa", "ans", "da", "ba", "enk", "nuf", "norge", "norway"}
 
+# Words that name a separate company in a family of companies (the property arm, the holding,
+# the subsea or shipping arm). Measured on 1,100 companies: only sister companies' accounts.
+_SISTER_COMPANY_WORDS = (
+    "eiendom", "property", "properties", "bostad", "holding", "invest", "capital", "subsea", "offshore",
+    "shipping", "maritime", "entreprenor", "utvikling", "forvaltning",
+)
+
 
 def _is_the_group(account: str, legal_name: str) -> bool:
     """The company is the group itself: its name is exactly the brand before the group word
@@ -251,6 +258,12 @@ def plausibly_own_profile(canonical: str, legal_name: str, site_url: str, home: 
     if _FOREIGN_FORM_RE.search(raw_account) and not _FOREIGN_FORM_RE.search(legal_name):
         return False
     if _GROUP_WORD_RE.search(account) and not _GROUP_WORD_RE.search(legal_name) and not _is_the_group(account, legal_name):
+        return False
+    # An account carrying a word that names a separate kind of company, which this company's own
+    # name does not ("rogeraamodteiendom" for ROGER AAMODT BYGG AS, "olympicsubsea" for OLYMPIC
+    # SERVICES AS: official feedback, 13 Nov), is that other company's.
+    folded_account, folded_name = _fold(account), _fold(legal_name)
+    if any(word in folded_account and word not in folded_name for word in _SISTER_COMPANY_WORDS):
         return False
     # A chain's branch ("uniteperformancelarvik", NKL's "...Trondheim" page) is not the company.
     if _branch_town(account, legal_name, site_url, home):
