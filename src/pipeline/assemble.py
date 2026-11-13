@@ -191,6 +191,28 @@ def _confirmed_claim(fact: ConfirmedFact) -> Claim:
     )
 
 
+# A page title used as the site's name ("Blåseisolering i Bergen og omegn | Isoenergi Vestland AS",
+# "Hjem - Bilforhandler1"): the brand is the part that names the company, not the tagline or the
+# page's name.
+_TITLE_SEPARATOR_RE = re.compile(r"\s+[|–—·:-]\s+")
+_PAGE_NAME_RE = re.compile(r"^(?:hjem|home|forside|ny\s+forside|hjemmeside|startside|velkommen|welcome)$", re.IGNORECASE)
+
+
+def _brand_part(fact: ConfirmedFact, legal_name: str) -> ConfirmedFact:
+    import dataclasses
+
+    from src.pipeline.verify import name_similarity  # deferred: keeps assemble's imports light
+
+    parts = [p.strip() for p in _TITLE_SEPARATOR_RE.split(fact.value or "") if p.strip()]
+    parts = [p for p in parts if not _PAGE_NAME_RE.match(p)]
+    if len(parts) < 1 or parts == [fact.value]:
+        return fact
+    best = max(parts, key=lambda p: (name_similarity(legal_name, p), -len(p)))
+    if name_similarity(legal_name, best) < 60:
+        return fact
+    return dataclasses.replace(fact, value=best, evidence_span=fact.evidence_span or fact.value)
+
+
 def _first_matching(facts: list[ConfirmedFact], field_name: str) -> Optional[ConfirmedFact]:
     return next((f for f in facts if f.field_name == field_name), None)
 
@@ -392,6 +414,8 @@ def assemble(
     official_site_claim = _official_site_claim(entity, confirmed_facts)
 
     brand_fact = _first_matching(confirmed_facts, "organization_name")
+    if brand_fact and entity.legal_name:
+        brand_fact = _brand_part(brand_fact, entity.legal_name)
     public_brand_claim = _confirmed_claim(brand_fact) if brand_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)
 
     # Roles are statutory facts: only the registry's own role records are published as roles.

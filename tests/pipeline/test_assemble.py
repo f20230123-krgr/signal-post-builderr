@@ -427,3 +427,19 @@ def test_only_a_dated_post_linked_from_the_companys_own_site_is_news():
         "Volvo-avtale for hele flåten (2026-03-16) - https://www.equinor.com/volvo-avtale/",
         "Equinor signs a contract (2025-09-17) - https://www.equinor.com/b",
     ]
+
+
+def test_the_brand_is_the_part_of_a_page_title_that_names_the_company():
+    """Seen in a 1,000-company run: "Blåseisolering i Bergen og omegn | Isoenergi Vestland AS" and
+    "Hjem - Bilforhandler1" published as brands. The brand is the part naming the company."""
+    import dataclasses
+
+    def brand(title, name):
+        entity = dataclasses.replace(_entity(), legal_name=name)
+        return assemble(entity, [_fact("organization_name", title)], previous_snapshot=None).legal_identity.public_brand
+
+    claim = brand("Blåseisolering i Bergen og omegn | Isoenergi Vestland AS", "ISOENERGI VESTLAND AS")
+    assert claim.value == "Isoenergi Vestland AS"
+    assert claim.evidence_span == "Blåseisolering i Bergen og omegn | Isoenergi Vestland AS"
+    assert brand("Hjem - Bilforhandler1", "BILFORHANDLER1 AS").value == "Bilforhandler1"
+    assert brand("Tannlege Bauge AS", "TANNLEGE BAUGE AS").value == "Tannlege Bauge AS"
