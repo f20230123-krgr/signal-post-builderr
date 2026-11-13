@@ -326,6 +326,23 @@ hand-checked against v5:
   is ROGER AAMODT EIENDOM AS, not ROGER AAMODT BYGG AS). Each news item now carries its own post's
   address ("Headline (YYYY-MM-DD) - https://..."), as open roles do, and a theme's demo post or a
   product listed as a post is not news.
+- **Parent and sister companies' websites (same feedback).** A subsidiary or a local branch often
+  registers, or is found under, its group's site (heimstaden.com for HEIMSTADEN PROPERTY 4 AS,
+  diabetes.no for DIABETESFORBUNDET KONGSBERG, backe.no for BACKE TRONDHEIM AS). When a site never
+  shows the company's whole name or org number, its domain does not spell the whole name, and
+  Brønnøysund has another company under exactly the shorter name the site uses (or listing the
+  same website), the site is that company's: the website is left blank with the reason, and no
+  social page, news item, job or description is read from it. A registered site that never shows
+  the company's name or number keeps its registered address, but nothing read from it is published
+  unless its domain spells the whole name or its initials.
+- **Only linked, real posts are news; only real ads are jobs.** A news item must link to its own
+  post on the company's site (a post marked up on its own page links to that page). Left out: an
+  author's name or a duplicate with no link, items that share one link (a form's thank-you page),
+  service pages, a theme's demo posts and lorem ipsum, car ads, protected pages and section
+  headings. An "åpen søknad" form is not an open posting, and an ad listed with its title is not
+  listed again as a bare link. A page title used as the site's name is cut to the part that names
+  the company ("Isoenergi Vestland AS", not "Blåseisolering i Bergen og omegn | ..."), and a site
+  builder's template text or code is not taken as the company's description.
 - **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
   the org number opens the Brønnøysund record, news headlines and open roles link to where they
   were found, the summary's website, profiles, role and headline are links, compare links the
