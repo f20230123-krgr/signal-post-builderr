@@ -218,3 +218,51 @@ def test_a_front_page_served_at_home_or_index_is_the_home_page():
     for url in ("https://a.no/homes-for-sale", "https://www.storebrand.no/fond", "https://a.no/hjemmetjenester",
                 "https://a.no/home/products"):
         assert not _is_owner_page(url), url
+
+
+def test_a_site_naming_only_a_related_companys_name_is_that_companys():
+    """Official feedback, 13 Nov: sister and parent companies. heimstaden.com shows "Heimstaden"
+    for HEIMSTADEN PROPERTY 4 AS, and Brønnøysund has HEIMSTADEN AB; diabetes.no is the
+    federation's, not its Kongsberg branch's; backe.no is registered by AS BACKE too."""
+    from src.pipeline.site_evidence import related_company_site
+
+    def units(*rows):
+        return lambda name: [
+            {"organisasjonsnummer": org, "navn": navn, "organisasjonsform": {"kode": kode}, "hjemmeside": site}
+            for org, navn, kode, site in rows
+        ]
+
+    home = [_page("https://heimstaden.com/no/", title="Heimstaden")]
+    heimstaden = units(("1", "HEIMSTADEN AB", "UTLA", None), ("989079999", "HEIMSTADEN PROPERTY 4 AS", "AS", None))
+    assert related_company_site("Heimstaden", home, "HEIMSTADEN PROPERTY 4 AS", "989079999", "https://heimstaden.com/no/", heimstaden) == "HEIMSTADEN AB"
+    assert related_company_site(
+        "Diabetesforbundet", [_page("https://www.diabetes.no/", title="Diabetesforbundet")], "DIABETESFORBUNDET KONGSBERG",
+        "993803308", "https://www.diabetes.no/", units(("2", "DIABETESFORBUNDET", "FLI", "www.diabetes.no")),
+    ) == "DIABETESFORBUNDET"
+    assert related_company_site(
+        "Backe", [_page("https://backe.no/", title="Backe")], "BACKE TRONDHEIM AS", "952228609", "https://backe.no",
+        units(("3", "AS BACKE", "AS", "www.backe.no")),
+    ) == "AS BACKE"
+    # A failed search is "can't tell": the site is left out.
+    assert related_company_site("Heimstaden", home, "HEIMSTADEN PROPERTY 4 AS", "989079999", "https://heimstaden.com/no/", lambda n: None)
+
+
+def test_a_site_that_is_this_companys_own_is_kept():
+    from src.pipeline.site_evidence import related_company_site
+
+    kilsund = lambda name: [{"organisasjonsnummer": "9", "navn": "KILSUND AS", "organisasjonsform": {"kode": "AS"}}]
+    # The domain spells the whole name (Builderr's own sample has kilsundtravel.no for KILSUND TRAVEL AS).
+    assert related_company_site("Kilsund", [_page("https://www.kilsundtravel.no/", title="Kilsund")], "KILSUND TRAVEL AS", "1", "https://www.kilsundtravel.no/", kilsund) is None
+    # Proved by its org number or its registered phone number.
+    assert related_company_site("Org.nr. 989 079 999", [], "HEIMSTADEN PROPERTY 4 AS", "989079999", "https://heimstaden.com/", kilsund) is None
+    assert related_company_site("22 73 10 00", [], "NORDANGER GULV AS", "1", "https://nordanger.no", kilsund) is None
+    # The home page shows the whole name somewhere.
+    page = _page("https://www.kirkeland.no/", title="Kirkeland Begravelsesbyrå AS")
+    holding = lambda name: [{"organisasjonsnummer": "9", "navn": "KIRKELAND HOLDING AS", "organisasjonsform": {"kode": "AS"}}]
+    assert related_company_site("Verftsgata 6B", [page], "KIRKELAND BEGRAVELSESBYRÅ AS", "1", "https://www.kirkeland.no/", holding) is None
+    # No other company under the site's name; a sole trader sharing the name is no relation.
+    sole = lambda name: [{"organisasjonsnummer": "9", "navn": "MINTIE", "organisasjonsform": {"kode": "ENK"}}]
+    assert related_company_site("Mintie", [_page("https://mintie.no/", title="Mintie")], "MINTIE CORPORATION OF SCANDINAVIA AS", "1", "https://mintie.no/", sole) is None
+    # The group itself: ABAX GROUP AS's site names "ABAX".
+    abax = lambda name: [{"organisasjonsnummer": "9", "navn": "ABAX AS", "organisasjonsform": {"kode": "AS"}}]
+    assert related_company_site("ABAX", [_page("https://www.abax.com/", title="ABAX")], "ABAX GROUP AS", "1", "https://www.abax.com/", abax) is None

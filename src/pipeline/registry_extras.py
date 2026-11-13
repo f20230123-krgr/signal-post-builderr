@@ -1048,6 +1048,34 @@ def other_entity_names(
             client.close()
 
 
+def registered_units(
+    query: str, org_number: str, budget: BudgetGovernor, client: Optional[httpx.Client] = None
+) -> Optional[list[dict]]:
+    """The units Brønnøysund's name search returns for `query` (name, number, legal form,
+    website), or None when the search could not be made (the caller then fails closed)."""
+    if not query or not budget.can_spend_request():
+        return None
+    owns_client = client is None
+    client = client or new_client()
+    try:
+        try:
+            wait_if_paused(time.sleep)
+            response = client.get(NAME_SEARCH_URL, params={"navn": query, "size": 100}, timeout=10.0)
+        except httpx.HTTPError:
+            response = None
+        budget.record_request()
+        if response is None or response.status_code != 200:
+            return None
+        try:
+            units = (response.json().get("_embedded") or {}).get("enheter", [])
+        except ValueError:
+            return None
+        return [u for u in units if isinstance(u, dict)]
+    finally:
+        if owns_client:
+            client.close()
+
+
 def website_held_by_another_entity(
     site: str,
     org_number: str,

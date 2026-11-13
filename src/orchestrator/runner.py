@@ -37,7 +37,7 @@ from src.pipeline.assemble import assemble, domain_resembles_name
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
 from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.render import active_renderer
-from src.pipeline.site_evidence import NOT_READABLE, NOT_SHOWN, _is_owner_page, site_ownership
+from src.pipeline.site_evidence import NOT_READABLE, NOT_SHOWN, _is_owner_page, related_company_site, site_ownership
 from src.pipeline.social import (
     account_is_the_company,
     account_named_after_another,
@@ -62,6 +62,7 @@ from src.pipeline.registry_extras import (
     UNIVERSE_SOURCE,
     name_is_held_by_another_entity,
     other_entity_names,
+    registered_units,
     subunit_org_numbers,
     universe_identity_facts,
     website_held_by_another_entity,
@@ -385,6 +386,27 @@ def _default_process_one(
                 source_url=crawl_entity.source or "", match_confidence=0.0,
                 retrieved_at=now(), source_class="official_registry", extraction_method="registry",
             ))
+    # A site that names only a shorter, shared name which Brønnøysund lists for a related company
+    # (heimstaden.com for HEIMSTADEN PROPERTY 4 AS: HEIMSTADEN AB) is that company's, and nothing
+    # read from it is this company's (official feedback, 13 Nov: sister and parent companies).
+    site_proof = discovered_site_fact or next((f for f in confirmed_facts if f.field_name == "official_site_evidence"), None)
+    if site_proof is not None and crawl_entity.official_site_candidate:
+        related = related_company_site(
+            site_proof.evidence_span, pages, entity.legal_name or "", org_number, crawl_entity.official_site_candidate,
+            lambda name: registered_units(name, org_number, budget, client=client),
+        )
+        if related:
+            if discovered_site_fact is not None:
+                discovered_site_fact = None
+                confirmed_facts = []
+            else:
+                confirmed_facts = [ConfirmedFact(
+                    field_name="official_site_unproven",
+                    value=f"Registered website {crawl_entity.official_site_candidate}: the website names only the "
+                    f"name it shares with {related}, a related company, not this company's own name or number",
+                    source_url=crawl_entity.source or "", match_confidence=0.0,
+                    retrieved_at=now(), source_class="official_registry", extraction_method="registry",
+                )]
     # Social pages only from a site proven to be the company's, and only the ones its home or
     # contact page links (its header and footer), not an article's or a careers page's
     # (official feedback, Nov: "take them from the footer of each confirmed site").

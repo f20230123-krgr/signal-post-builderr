@@ -250,3 +250,106 @@ def site_ownership(
         source_class="company_owned",
         evidence_span=span,
     ), None
+
+
+# Official feedback, 13 Nov: claims tied to a sister or parent company (ROGER AAMODT BYGG AS given
+# ROGER AAMODT EIENDOM AS's page). A subsidiary or a local branch often registers, or is found
+# under, its group's site: heimstaden.com for HEIMSTADEN PROPERTY 4 AS, diabetes.no for
+# DIABETESFORBUNDET KONGSBERG, backe.no for BACKE TRONDHEIM AS. Such a site names only the shared
+# part of the name, and Brønnøysund has another company under exactly that name (or listing the
+# same site). It is that company's site, and nothing read from it is this company's.
+_GROUP_WORDS = {"group", "gruppen", "konsern", "konsernet", "holding"}
+# Here a country word distinguishes: SH GROUP NORWAY AS is not SH GROUP A/S, whose site it registered.
+_STRICT_FORM_WORDS = _FORM_WORDS - {"norge", "norway", "norsk"}
+_FOREIGN_FORM_WORDS = {"ab", "a", "s", "aps", "bv", "b", "v", "gmbh", "ltd", "oy", "ks", "iks", "sf", "inc", "llc", "ag", "sa"}
+
+
+def holds_whole_name_strictly(text: Optional[str], legal_name: str) -> bool:
+    """The text (or one part of a "Brand – tagline" title) is this company's whole name: every
+    distinctive word, country words included; a group word on either side does not count."""
+    if not text:
+        return False
+    core = [w for w in _words(legal_name) if w not in _STRICT_FORM_WORDS and w not in _GROUP_WORDS]
+    if not core:
+        return False
+    for part in [text, *(p.strip() for p in _TITLE_PART_RE.split(text))]:
+        words = [w for w in _words(part) if w not in _STRICT_FORM_WORDS]
+        if words and ("".join(core) == "".join(w for w in words if w not in _GROUP_WORDS) or all(w in words for w in core)):
+            return True
+    return False
+
+
+def _owner_pages(pages: list[FetchedPage]) -> list[FetchedPage]:
+    return [
+        p for p in pages
+        if p.fetch_state == EvidenceState.AVAILABLE and p.raw_html and p.linked_from is None
+        and _is_owner_page(p.final_url or p.url)
+    ]
+
+
+def _base_words(name: str) -> list[str]:
+    words = _words(name)
+    while words and (words[-1] in _STRICT_FORM_WORDS or words[-1] in _FOREIGN_FORM_WORDS):
+        words.pop()
+    return words
+
+
+def related_company_site(
+    proof_span: Optional[str],
+    pages: list[FetchedPage],
+    legal_name: str,
+    org_number: str,
+    site_url: str,
+    find_units,
+) -> Optional[str]:
+    """The name of the related company whose site this is, or None when it is this company's.
+
+    `proof_span` is the text that proved the site (an org number, a name, an address or a
+    phone number); `find_units(name)` is Brønnøysund's name search (a list of units, or None
+    when it could not be made, which counts as "can't tell": the site is then left out)."""
+    from src.pipeline.assemble import domain_resembles_name  # deferred: assemble imports this module's peers
+
+    span = (proof_span or "").replace("&nbsp;", " ")
+    digits = re.sub(r"\D", "", span)
+    if org_number in digits or len(digits) >= 8:
+        return None  # its org number, or the phone number it registered: its own
+    host = _domain(site_url if "://" in site_url else f"https://{site_url}")
+    label = host.split(".")[0]
+    if holds_whole_name_strictly(label, legal_name) or holds_whole_name_strictly(span, legal_name):
+        return None  # kilsundtravel.no for KILSUND TRAVEL AS
+    owner = _owner_pages(pages)
+    for page in owner:
+        if org_number_span(page.raw_html, org_number):
+            return None
+        for name in (_page_organization_name_from_html(page.raw_html), page_heading(page.raw_html)):
+            if holds_whole_name_strictly(name, legal_name):
+                return None
+    if span and not any(ch.isdigit() for ch in span):
+        site_name = _TITLE_PART_RE.split(span.strip())[0]
+    else:  # proved by its address: the name the site gives itself, else its domain
+        own = next((n for p in owner[:1] for n in (_page_organization_name_from_html(p.raw_html),) if n), None)
+        site_name = _TITLE_PART_RE.split(own.strip())[0] if own else label
+    target = _words(site_name)
+    if not target:
+        return None
+    units = find_units(site_name)
+    if units is None:
+        return "a company Brønnøysund could not be asked about"
+    unrelated_domain = not domain_resembles_name(site_url, legal_name)
+    for unit in units:
+        if str(unit.get("organisasjonsnummer") or "") == org_number:
+            continue
+        if ((unit.get("organisasjonsform") or {}).get("kode") or "") == "ENK":
+            continue  # a sole trader sharing a surname is no relation
+        base = _base_words(str(unit.get("navn") or ""))
+        registered_site = str(unit.get("hjemmeside") or "")
+        if (
+            base == target
+            or (base[-1:] and base[-1] in _GROUP_WORDS and base[:-1] == target)
+            or (registered_site and _domain(registered_site if "://" in registered_site else f"https://{registered_site}") == host)
+            # An address-proved site whose domain is not this company's name at all, with a company
+            # by that name registered (mestra.as at MESTERMUR AS's address: MESTRA ENTREPRENØR AS).
+            or (unrelated_domain and base[: len(target)] == target)
+        ):
+            return str(unit.get("navn") or "")
+    return None
