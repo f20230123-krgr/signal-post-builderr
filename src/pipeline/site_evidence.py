@@ -353,3 +353,17 @@ def related_company_site(
         ):
             return str(unit.get("navn") or "")
     return None
+
+
+def domain_spells_the_name(site_url: Optional[str], legal_name: str) -> bool:
+    """The site's domain is the company's whole name (gulvbetong.no for GULVBETONG AS) or its
+    initials (nkl.no for NORSKE KOKKERS LANDSFORENING, lmi-as.no), not one word of it."""
+    if not site_url:
+        return False
+    label = _domain(site_url if "://" in site_url else f"https://{site_url}").split(".")[0]
+    if holds_whole_name_strictly(label, legal_name):
+        return True
+    core = [w for w in _words(legal_name) if w not in _FORM_WORDS]
+    initials = "".join(w[0] for w in core)
+    joined = "".join(_words(label))
+    return len(initials) >= 3 and joined in (initials, initials + "as")

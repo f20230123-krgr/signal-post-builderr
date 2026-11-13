@@ -148,7 +148,7 @@ def test_full_data_populates_all_sections():
         _fact("leader", "Anna Hansen (Senior Engineer)"),  # a company page's staff list: not a role
         _fact("company_profile", "https://www.linkedin.com/company/equinor/"),
         _fact("hiring_signal", "Kahoot! AS is hiring: Senior Backend Engineer"),
-        _fact("dated_activity", "2026-08-01: Senior Reservoir Engineer, Stavanger"),
+        _fact("dated_activity", "2026-08-01: Senior Reservoir Engineer, Stavanger - https://www.equinor.com/news/a"),
         _fact("workplace", "EQUINOR ASA AVD CCB SOTRA (OYGARDEN, 39 ansatte)"),
         _fact("annual_accounts_latest", "Revenue: 67,956,000,000 USD; Net result: 5,731,000,000 USD", reporting_period="FY2025"),
         _fact("annual_accounts_history", "Revenue: 60,000,000,000 USD", reporting_period="FY2024"),
@@ -357,17 +357,17 @@ def test_an_item_dated_after_the_day_it_was_read_is_an_upcoming_event_not_news()
 
     facts = [
         _fact("organization_name", "Equinor ASA"),
-        dated("Barneminimesse Stavanger (2027-02-09)", "2027-02-09"),
-        dated("Kvartalsrapport (2025-12-31)", "2025-12-31"),
-        dated("Published today, read just after midnight UTC (2026-01-02)", "2026-01-02"),
-        _fact("dated_activity", "Undated line"),
+        dated("Barneminimesse Stavanger (2027-02-09) - https://x.no/a", "2027-02-09"),
+        dated("Kvartalsrapport (2025-12-31) - https://x.no/b", "2025-12-31"),
+        dated("Published today, read just after midnight UTC (2026-01-02) - https://x.no/c", "2026-01-02"),
+        _fact("dated_activity", "Undated line - https://x.no/d"),
     ]
 
     profile = assemble(_entity(), facts, previous_snapshot=None)
 
     values = [c.value for c in profile.activity.dated_activity]
-    assert "Barneminimesse Stavanger (2027-02-09)" not in values
-    assert {"Kvartalsrapport (2025-12-31)", "Published today, read just after midnight UTC (2026-01-02)", "Undated line"} <= set(values)
+    assert "Barneminimesse Stavanger (2027-02-09) - https://x.no/a" not in values
+    assert {"Kvartalsrapport (2025-12-31) - https://x.no/b", "Published today, read just after midnight UTC (2026-01-02) - https://x.no/c", "Undated line - https://x.no/d"} <= set(values)
 
 
 def test_spam_injected_into_a_hacked_site_and_the_companys_own_name_are_not_headlines():
@@ -375,11 +375,11 @@ def test_spam_injected_into_a_hacked_site_and_the_companys_own_name_are_not_head
     porn web"; sealengineering.no's post list carried "Seal Engineering AS (2026-09-17)"."""
     facts = [
         _fact("organization_name", "Equinor ASA"),
-        _fact("dated_activity", "kypit kyrsovyu_aton (2025-12-12)"),
-        _fact("dated_activity", "top asian porn web (2025-12-12)"),
-        _fact("dated_activity", "Equinor ASA (2025-09-17)"),
-        _fact("dated_activity", "Equinor signs Northern Lights contract (2025-09-17)"),
-        _fact("dated_activity", "Casino Kafé åpner i Bergen (2025-09-17)"),  # lost too: the price of a word list
+        _fact("dated_activity", "kypit kyrsovyu_aton (2025-12-12) - https://www.equinor.com/n1"),
+        _fact("dated_activity", "top asian porn web (2025-12-12) - https://www.equinor.com/n2"),
+        _fact("dated_activity", "Equinor ASA (2025-09-17) - https://www.equinor.com/n3"),
+        _fact("dated_activity", "Equinor signs Northern Lights contract (2025-09-17) - https://www.equinor.com/n4"),
+        _fact("dated_activity", "Casino Kafé åpner i Bergen (2025-09-17) - https://www.equinor.com/n5"),  # lost too: the price of a word list
         _fact("dated_activity", "Registry record updated (Endring) on 2026-06-19 - Brønnøysundregistrene",
               source_class="official_registry"),
     ]
@@ -387,7 +387,7 @@ def test_spam_injected_into_a_hacked_site_and_the_companys_own_name_are_not_head
     values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]
 
     assert values == [
-        "Equinor signs Northern Lights contract (2025-09-17)",
+        "Equinor signs Northern Lights contract (2025-09-17) - https://www.equinor.com/n4",
         "Registry record updated (Endring) on 2026-06-19 - Brønnøysundregistrene",
     ]
 
@@ -401,3 +401,29 @@ def test_the_spam_and_name_checks_read_the_headline_before_its_post_link():
     ]
     values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]
     assert values == ["Equinor signs a contract (2025-09-17) - https://www.equinor.com/b"]
+
+
+
+def test_only_a_dated_post_linked_from_the_companys_own_site_is_news():
+    """Official feedback, 13 Nov: news "linked from the company's own site". Seen in a 1,000-company
+    run: an author's name with no link, items all linking to one thank-you page, service pages,
+    a theme's demo posts, lorem ipsum, a car ad, a protected page and a section heading."""
+    facts = [
+        _fact("organization_name", "Equinor ASA"),
+        _fact("dated_activity", "Baard Selfors (2026-10-02)"),
+        _fact("dated_activity", "Julegrantenning i rundkjøringa (2010-11-28) - https://www.equinor.com/thankyou"),
+        _fact("dated_activity", "Vedr. ferdigbefaring (2013-04-07) - https://www.equinor.com/thankyou"),
+        _fact("dated_activity", "Rengjøring av fett i kjøkkenavtrekk (2016-10-01) - https://www.equinor.com/tjenester/fett/"),
+        _fact("dated_activity", "International agencies (2017-10-11) - https://www.equinor.com/front/post-four"),
+        _fact("dated_activity", "Amet Commodo Nulla Facilisi Vehicula Ipsum (2022-05-06) - https://www.equinor.com/amet"),
+        _fact("dated_activity", "BMW 5-serie 520d xDrive Luxury Line med mye utstyr (2023-10-03) - https://www.equinor.com/bmw"),
+        _fact("dated_activity", "Protected: For ansatte (2026-04-27) - https://www.equinor.com/for-ansatte/"),
+        _fact("dated_activity", "Relaterte artikler (2026-03-16) - https://www.equinor.com/sovn/"),
+        _fact("dated_activity", "Volvo-avtale for hele flåten (2026-03-16) - https://www.equinor.com/volvo-avtale/"),
+        _fact("dated_activity", "Equinor signs a contract (2025-09-17) - https://www.equinor.com/b"),
+    ]
+    values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]
+    assert values == [
+        "Volvo-avtale for hele flåten (2026-03-16) - https://www.equinor.com/volvo-avtale/",
+        "Equinor signs a contract (2025-09-17) - https://www.equinor.com/b",
+    ]

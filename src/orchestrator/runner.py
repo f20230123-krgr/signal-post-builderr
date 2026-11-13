@@ -37,7 +37,9 @@ from src.pipeline.assemble import assemble, domain_resembles_name
 from src.pipeline.crawl import DEFAULT_ATS_DOMAINS, DEFAULT_COMPANY_OWNED_PATHS, crawl
 from src.pipeline.keyless_sites import keyless_candidates
 from src.pipeline.render import active_renderer
-from src.pipeline.site_evidence import NOT_READABLE, NOT_SHOWN, _is_owner_page, related_company_site, site_ownership
+from src.pipeline.site_evidence import (
+    NOT_READABLE, NOT_SHOWN, _is_owner_page, domain_spells_the_name, related_company_site, site_ownership,
+)
 from src.pipeline.social import (
     account_is_the_company,
     account_named_after_another,
@@ -366,8 +368,13 @@ def _default_process_one(
             # The domain itself spells the company's name (gulvbetong.no, nkl.no for NORSKE
             # KOKKERS LANDSFORENING) and the site states no other organisation's number: the
             # registry's own statement of the website stands. It does not count as proven for
-            # social pages (below).
-            pass
+            # social pages (below), and nothing read from it is published: a site that never
+            # shows this company's name or number cannot tie a claim to it (official feedback,
+            # 13 Nov: "leave out any claim you cannot tie to the company's name or org number")
+            # unless the domain itself spells the whole name or its initials (gulvbetong.no,
+            # nkl.no). bradytechnologies.com for BRADY ENERGY NORWAY AS spells one word of it.
+            if not domain_spells_the_name(crawl_entity.official_site_candidate, crawl_entity.legal_name or ""):
+                confirmed_facts = []
         else:
             # Official feedback (Nov): wrong websites "were mostly a parent or a builder" --
             # "check that the page shows the company's own name or number". A registered site

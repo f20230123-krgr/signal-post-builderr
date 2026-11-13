@@ -299,6 +299,67 @@ def _not_a_headline(fact: ConfirmedFact, legal_name: Optional[str]) -> bool:
     return False
 
 
+_POST_LINK_RE = re.compile(r"\s+-\s+(https?://\S+)$")
+# Pages that are never a dated post: a service or product page, a form's thank-you or feedback
+# page, or a theme's demo post left in place ("/front/post-four").
+_NOT_A_POST_LINK_RE = re.compile(
+    r"/(?:tjenester|tjeneste|services?|produkter|produkt|products?|feedback|thank-?you|takk)(?:/|$|\?)"
+    r"|/post-(?:one|two|three|four|five|six|\d+)/?$",
+    re.IGNORECASE,
+)
+# Lorem ipsum in a theme's demo posts ("Amet Commodo Nulla Facilisi Vehicula Ipsum").
+_LOREM_WORDS = {
+    "lorem", "ipsum", "dolor", "amet", "consectetur", "adipiscing", "elit", "commodo", "nulla", "facilisi",
+    "vehicula", "tristique", "magna", "purus", "gravida", "ultricies", "hendrerit", "viverra", "justo",
+    "sapien", "urna", "neque", "massa", "quis", "blandit", "aliquam", "tempor", "pellentesque", "vestibulum",
+}
+# A car for sale posted as a blog post ("BMW 5-serie 520d xDrive Luxury Line med mye utstyr").
+_CAR_AD_RE = re.compile(
+    r"^(?:audi|bmw|citro[eë]n|cupra|dacia|fiat|ford|honda|hyundai|jaguar|jeep|kia|land\s+rover|lexus|mazda|"
+    r"mercedes(?:-benz)?|mg|mini|mitsubishi|nissan|opel|peugeot|polestar|porsche|renault|seat|skoda|subaru|"
+    r"suzuki|tesla|toyota|volkswagen|vw|volvo|byd)\b(?=.*\d)",
+    re.IGNORECASE,
+)
+# A section heading or a protected page, not a headline.
+_NOT_A_HEADLINE_RE = re.compile(
+    r"^(?:protected|private|beskyttet|privat)\s*:|^(?:relaterte|related|siste|latest|flere|more)\s+"
+    r"(?:artikler|articles|nyheter|news|innlegg|posts)$",
+    re.IGNORECASE,
+)
+
+
+def _not_own_news(fact: ConfirmedFact, shared_links: set[str]) -> bool:
+    """True for a site item that is not a dated post linked from the company's own site (official
+    feedback, 13 Nov: "a dated item ... linked from the company's own site"): no post link of its
+    own, a link several items share (a form's thank-you page), a service page or a theme's demo
+    post, a car ad, lorem ipsum, or a section heading. Registry events are kept."""
+    if fact.source_class == "official_registry":
+        return False
+    match = _POST_LINK_RE.search(fact.value or "")
+    if not match:
+        return True
+    link = match.group(1).rstrip("/")
+    if link in shared_links or _NOT_A_POST_LINK_RE.search(link):
+        return True
+    headline = _DATE_SUFFIX_RE.sub("", (fact.value or "")[: match.start()]).strip()
+    words = re.findall(r"[a-z]+", headline.lower())
+    if words and sum(w in _LOREM_WORDS for w in words) >= 2:
+        return True
+    return bool(_CAR_AD_RE.search(headline) or _NOT_A_HEADLINE_RE.search(headline))
+
+
+def _links_shared_by_several_items(facts: list[ConfirmedFact]) -> set[str]:
+    titles: dict[str, set[str]] = {}
+    for fact in facts:
+        if fact.field_name != "dated_activity" or fact.source_class == "official_registry":
+            continue
+        match = _POST_LINK_RE.search(fact.value or "")
+        if match:
+            headline = _DATE_SUFFIX_RE.sub("", (fact.value or "")[: match.start()]).strip().lower()
+            titles.setdefault(match.group(1).rstrip("/"), set()).add(headline)
+    return {link for link, heads in titles.items() if len(heads) > 1}
+
+
 def _dated_after_reading(fact: ConfirmedFact) -> bool:
     """True for an item dated after the day it was read (a day's grace for time zones). A post
     is published before anyone reads it; a date ahead is an upcoming event, a deadline or an
@@ -345,10 +406,12 @@ def assemble(
     hiring_claims = _limit_careers_claims(
         _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")])
     )
+    shared_links = _links_shared_by_several_items(confirmed_facts)
     dated_activity_claims = _dedup_claims(
         [
             _confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")
             if not _dated_after_reading(f) and not _not_a_headline(f, entity.legal_name)
+            and not _not_own_news(f, shared_links)
         ]
     )
     workplace_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "workplace")])

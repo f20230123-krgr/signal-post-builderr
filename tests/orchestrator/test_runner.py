@@ -231,6 +231,9 @@ def test_default_process_one_uses_sitemap_ats_and_cache_discovery(tmp_path):
             return httpx.Response(200, text="User-agent: *\nDisallow:\n")
         if url == "https://example.com/sitemap.xml":
             return httpx.Response(200, text=sitemap_xml)
+        if url in ("https://example.com", "https://example.com/"):
+            # The site names the company: only then is anything read from it published.
+            return httpx.Response(200, text="<html><head><title>Example Corp AS</title></head><body>Hei</body></html>")
         if url == "https://example.com/careers":
             return httpx.Response(200, text=careers_html)
         if url == "https://boards.greenhouse.io/examplecorp":

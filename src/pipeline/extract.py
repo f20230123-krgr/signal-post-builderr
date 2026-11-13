@@ -402,7 +402,11 @@ _META_DESCRIPTION_RES = (
 _JUNK_DESCRIPTION_RE = re.compile(
     r"cookie|informasjonskaps|javascript|just another wordpress|lorem ipsum|under (construction|utvikling)|"
     r"kommer snart|coming soon|domain (is )?for sale|domenet|parkert|page not found|side ikke funnet|"
-    r"^(velkommen|welcome)( til| to)? [^.]{0,40}\.?$|^(hjem|home|forside)$",
+    r"^(velkommen|welcome)( til| to)? [^.]{0,40}\.?$|^(hjem|home|forside)$|"
+    # A site builder's unedited template ("Consulting is a Framer template made for business") or
+    # the page's own template code ("{{ option.count }}", ":searchable=") is not the company's words.
+    r"\b(?:is|er) an? (?:\w+ ){0,2}(?:template|mal)\b|\b(?:framer|webflow|wix|squarespace|elementor) template|"
+    r"\{\{|\}\}|\boption\.\w|:\w+=|=>|\bfunction\s*\(",
     re.IGNORECASE,
 )
 _MIN_SITE_DESCRIPTION = 40
