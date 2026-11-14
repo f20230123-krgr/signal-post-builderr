@@ -462,3 +462,21 @@ def test_an_open_application_form_and_a_repeated_job_ad_are_not_more_open_postin
         "Open role: Nettverkskonsulent - https://www.equinor.com/ledige-stillinger/nettverkskonsulent/",
         "Job ad: https://www.equinor.com/ledige-stillinger/salgsleder/",
     ]
+
+
+def test_an_item_dated_before_the_company_was_founded_or_named_only_after_a_company_is_not_its_news():
+    """Audit of 80 random claims (14 Nov): A-SEAFOOD AS, founded 2024, had its website theme's
+    2016 demo posts as news; EMMTO AS had a project reference titled "Sparebank1 Østlandet AS"."""
+    facts = [
+        _fact("organization_name", "Equinor ASA"),
+        _fact("founded_date", "2024-08-20"),
+        _fact("dated_activity", "Seafood and international trade law (2016-07-14) - https://www.equinor.com/2016/07/14/trade/"),
+        _fact("dated_activity", "Sparebank1 Østlandet AS (2025-02-05) - https://www.equinor.com/sparebank1-ostlandet-as/"),
+        _fact("dated_activity", "Vi ble kjøpt av Norsk Gjenvinning AS (2025-03-01) - https://www.equinor.com/kjopt/"),
+        _fact("dated_activity", "Registry record updated (Endring) on 2020-06-19 - Brønnøysundregistrene", source_class="official_registry"),
+    ]
+    values = [c.value for c in assemble(_entity(), facts, previous_snapshot=None).activity.dated_activity]
+    assert values == [
+        "Vi ble kjøpt av Norsk Gjenvinning AS (2025-03-01) - https://www.equinor.com/kjopt/",
+        "Registry record updated (Endring) on 2020-06-19 - Brønnøysundregistrene",
+    ]

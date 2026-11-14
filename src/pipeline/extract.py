@@ -438,6 +438,13 @@ def _site_description(html: str, page_url: str) -> Optional[tuple[str, str]]:
         text = re.sub(r"\s+", " ", html_lib.unescape(raw)).strip()
         if len(text) < _MIN_SITE_DESCRIPTION or len(text.split()) < 6 or _JUNK_DESCRIPTION_RE.search(text):
             continue
+        # A menu or keyword list, not a description ("Smidig Support Smidig Drift Smidig Backup ...",
+        # "Hudpleie Oslo Negler Oslo Ansiktsbehandling Oslo ..."): one word four times or more.
+        counts: dict[str, int] = {}
+        for word in re.findall(r"\w{3,}", text.lower()):
+            counts[word] = counts.get(word, 0) + 1
+        if counts and max(counts.values()) >= 4:
+            continue
         if len(text) > _MAX_SITE_DESCRIPTION:
             text = text[:_MAX_SITE_DESCRIPTION].rsplit(" ", 1)[0].rstrip(",;:") + " ..."
         return raw, text

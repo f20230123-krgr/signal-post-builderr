@@ -665,3 +665,15 @@ def test_the_homepage_description_is_what_the_company_says_it_does_and_junk_is_s
     assert fact.evidence_span in good
     assert not [f for f in extract(_inline_page(cookie, "https://www.dips.com/")) if f.field_name == "site_description"]
     assert not [f for f in extract(_inline_page(good, "https://www.dips.com/om-oss")) if f.field_name == "site_description"]
+
+
+def test_a_menu_or_keyword_list_is_not_the_site_description():
+    from src.pipeline.extract import _site_description
+
+    menu = ('<meta name="description" content="Smidig Support Smidig Drift Smidig Backup Smidig Helsesjekk '
+            'Smidig EKSAMEN Start Fjernhjelp Smidige IT-løsninger for din bedrift">')
+    keywords = '<meta name="description" content="Hudpleie Oslo Negler Oslo Ansiktsbehandling Oslo Gele negler Oslo Brynstyling Oslo">'
+    real = '<meta name="description" content="Smidig IT leverer drift, support og backup til små bedrifter i hele Norge.">'
+    assert _site_description(menu, "https://www.smidigit.no/") is None
+    assert _site_description(keywords, "https://www.lily-beauty.no/") is None
+    assert _site_description(real, "https://www.smidigit.no/") is not None

@@ -399,7 +399,31 @@ def _not_own_news(fact: ConfirmedFact, shared_links: set[str]) -> bool:
     words = re.findall(r"[a-z]+", headline.lower())
     if words and sum(w in _LOREM_WORDS for w in words) >= 2:
         return True
-    return bool(_CAR_AD_RE.search(headline) or _NOT_A_HEADLINE_RE.search(headline))
+    return bool(
+        _CAR_AD_RE.search(headline) or _NOT_A_HEADLINE_RE.search(headline)
+        # Every word capitalised, as a name is: "Vi ble kjøpt av Norsk Gjenvinning AS" is news.
+        or (_COMPANY_NAME_ONLY_RE.match(headline) and all(w[:1].isupper() or w[:1].isdigit() for w in headline.split()))
+    )
+
+
+# A headline that is only a company's name ("Sparebank1 Østlandet AS"): a project or customer
+# reference, not a dated news post.
+_COMPANY_NAME_ONLY_RE = re.compile(
+    r"^[^\s()]+(?:\s+[^\s()]+){0,5}\s+(?:as|asa|sa|ans|da|ab|a/s|aps|gmbh|ltd|llc|inc)\.?$", re.IGNORECASE
+)
+_ITEM_DATE_RE = re.compile(r"\((\d{4}-\d{2}-\d{2})\)")
+
+
+def _dated_before_founding(fact: ConfirmedFact, founded: Optional[str]) -> bool:
+    """True for a site item dated before the company was founded: a website theme's demo posts
+    (2016 "news" on the site of A-SEAFOOD AS, founded 2024) or a predecessor's posts."""
+    if fact.source_class == "official_registry" or not founded:
+        return False
+    day = (fact.effective_date or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        match = _ITEM_DATE_RE.search(fact.value or "")
+        day = match.group(1) if match else ""
+    return bool(day) and day < founded[:10]
 
 
 def _links_shared_by_several_items(facts: list[ConfirmedFact]) -> set[str]:
@@ -463,11 +487,13 @@ def assemble(
         _open_postings(_dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "hiring_signal")]))
     )
     shared_links = _links_shared_by_several_items(confirmed_facts)
+    founded_fact = _first_matching(confirmed_facts, "founded_date")
+    founded = founded_fact.value if founded_fact and re.match(r"\d{4}-\d{2}-\d{2}", founded_fact.value or "") else None
     dated_activity_claims = _dedup_claims(
         [
             _confirmed_claim(f) for f in _all_matching(confirmed_facts, "dated_activity")
             if not _dated_after_reading(f) and not _not_a_headline(f, entity.legal_name)
-            and not _not_own_news(f, shared_links)
+            and not _not_own_news(f, shared_links) and not _dated_before_founding(f, founded)
         ]
     )
     workplace_claims = _dedup_claims([_confirmed_claim(f) for f in _all_matching(confirmed_facts, "workplace")])

@@ -343,6 +343,12 @@ hand-checked against v5:
   listed again as a bare link. A page title used as the site's name is cut to the part that names
   the company ("Isoenergi Vestland AS", not "Blåseisolering i Bergen og omegn | ..."), and a site
   builder's template text or code is not taken as the company's description.
+- **Audit of 80 random claims (14 November).** Drawn from the 1,000-company run's website, social,
+  news, job, brand and description claims and checked against their sources: 78 right. The two
+  wrong ones were a website theme's 2016 demo posts on the site of a company founded in 2024, so a
+  site item dated before the company was founded is no longer published. A "headline" that is only
+  a company's name ("Sparebank1 Østlandet AS", a project reference) is not news, and a menu or
+  keyword list ("Smidig Support Smidig Drift Smidig Backup ...") is not a description.
 - **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
   the org number opens the Brønnøysund record, news headlines and open roles link to where they
   were found, the summary's website, profiles, role and headline are links, compare links the
