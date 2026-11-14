@@ -480,3 +480,18 @@ def test_an_item_dated_before_the_company_was_founded_or_named_only_after_a_comp
         "Vi ble kjøpt av Norsk Gjenvinning AS (2025-03-01) - https://www.equinor.com/kjopt/",
         "Registry record updated (Endring) on 2020-06-19 - Brønnøysundregistrene",
     ]
+
+
+def test_a_page_the_company_only_links_to_does_not_describe_or_name_it():
+    """Seen in the sample: KITRON ASA's careers link leads to teamtailor.com, whose own
+    description ("Everything you need for hiring people") was published as Kitron's."""
+    import dataclasses
+
+    linked = "https://www.kitron.com/jobs-careers"
+    facts = [
+        dataclasses.replace(_fact("site_description", "Everything you need for hiring people. Made smarter with AI."), linked_from=linked),
+        dataclasses.replace(_fact("organization_name", "Teamtailor"), linked_from=linked),
+    ]
+    identity = assemble(_entity(), facts, previous_snapshot=None).legal_identity
+    assert identity.site_description is None
+    assert identity.public_brand.value is None

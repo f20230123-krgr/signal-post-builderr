@@ -236,8 +236,48 @@ def test_envelope_embeds_one_dated_summary_not_a_question_list():
     assert "answers" not in envelope
     summary = envelope["summary"]
     assert summary["as_of"] == profile.run_timestamp.date().isoformat()
-    assert summary["text"].startswith(f"As of {summary['as_of']}: EQUINOR ASA")
+    assert summary["text"].startswith(f"As of {summary['as_of']}. What it does: EQUINOR ASA")
+    assert summary["plain_text"].startswith(f"As of {summary['as_of']}: EQUINOR ASA")
     assert "equinor.com" in summary["text"]
+
+
+def test_the_summary_text_names_its_sources_in_labelled_parts_and_says_why_each_gap_is_a_gap():
+    """The brief scores synthesis on explaining "what the company does, what changed and what
+    remains unknown, with sources for its conclusions": the text carries the parts' labels and
+    each sentence's source numbers, the numbered sources are named in plain words, and each gap
+    has its reason."""
+    profile = make_profile(
+        org_number="923609016",
+        legal_name=available_claim("EQUINOR ASA", source="https://data.brreg.no/enhetsregisteret/api/enheter/923609016"),
+        official_site=available_claim("https://www.equinor.com", source="https://www.equinor.com/"),
+    )
+
+    summary = to_envelope(profile, run_id="run-1")["summary"]
+
+    for label in ("What it does:", "What changed:", "What remains unknown:"):
+        assert label in summary["text"]
+    assert summary["sources"][0]["n"] == 1
+    assert summary["sources"][0]["source"] == "Brønnøysund Register Centre: entity record"
+    assert summary["sources"][0]["url"] == "https://data.brreg.no/enhetsregisteret/api/enheter/923609016"
+    identity = summary["sentences"][0]
+    assert identity["part"] == "what_it_does" and 1 in identity["sources"]
+    assert "[1]" in summary["text"]
+    assert "company-owned social profiles (the company's website links none)" in summary["text"]
+    assert {"item": "company-owned social profiles", "state": "not_available", "reason": "the company's website links none"} in summary["unknown_detail"]
+    assert summary["markdown"].startswith("**Summary as of ")
+    assert "**Sources**" in summary["markdown"] and "1. Brønnøysund Register Centre: entity record: https://" in summary["markdown"]
+
+
+def test_signals_flag_what_a_reader_acts_on_with_their_sources():
+    from src.synthesis import build_summary
+    from tests.conftest import make_profile as mp
+
+    profile = mp(org_number="923609016", legal_name=available_claim("ACME AS"))
+    profile = profile.model_copy(update={
+        "legal_identity": profile.legal_identity.model_copy(update={"founded_date": available_claim("2025-06-01")}),
+    })
+    texts = [s.text for s in build_summary(profile).signals]
+    assert any(t.startswith("Young company: founded 2025-06-01") for t in texts)
 
 
 def test_each_summary_sentence_points_at_the_evidence_it_rests_on():

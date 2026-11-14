@@ -469,7 +469,11 @@ def assemble(
     legal_name_claim = _legal_name_claim(entity, confirmed_facts)
     official_site_claim = _official_site_claim(entity, confirmed_facts)
 
-    brand_fact = _first_matching(confirmed_facts, "organization_name")
+    # The company's own pages name it and say what it does; a page it only links to (a job board
+    # such as teamtailor.com, whose own description is "Everything you need for hiring people")
+    # does not.
+    own_pages = [f for f in confirmed_facts if not f.linked_from]
+    brand_fact = _first_matching(own_pages, "organization_name")
     if brand_fact and entity.legal_name:
         brand_fact = _brand_part(brand_fact, entity.legal_name)
     public_brand_claim = _confirmed_claim(brand_fact) if brand_fact else _unavailable_claim(EvidenceState.NOT_AVAILABLE)
@@ -544,7 +548,7 @@ def assemble(
         operating_status=_optional_identity_claim("operating_status"),
         founded_date=_optional_identity_claim("founded_date"),
         business_description=_optional_identity_claim("business_description"),
-        site_description=_optional_identity_claim("site_description"),
+        site_description=_confirmed_claim(f) if (f := _first_matching(own_pages, "site_description")) else None,
     )
     account_metrics = {
         name: claims

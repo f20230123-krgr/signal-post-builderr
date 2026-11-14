@@ -349,6 +349,21 @@ hand-checked against v5:
   site item dated before the company was founded is no longer published. A "headline" that is only
   a company's name ("Sparebank1 Østlandet AS", a project reference) is not news, and a menu or
   keyword list ("Smidig Support Smidig Drift Smidig Backup ...") is not a description.
+- **A summary with its sources visible (synthesis).** The brief scores synthesis on explaining
+  "what the company does, what changed and what remains unknown, with sources for its
+  conclusions". `summary.text` is now written in labelled parts (What it does, Money, People and
+  presence, What changed, Key signals, What remains unknown), each sentence followed by the
+  numbers of the sources it rests on ("[1][3]"); `summary.sources` names each numbered source in
+  plain words with its address and retrieval date ("Register of Company Accounts: FY2025
+  accounts"); `summary.markdown` is the same summary ready to read with the numbered sources at
+  the end; `summary.signals` lists up to six cited flags a reader acts on (revenue up or down a
+  quarter or more, a loss, negative equity, a registry status other than active, a new managing
+  director or board in the last year, a recent renaming, a young company, hiring now); and
+  `summary.unknown_detail` gives each gap with its reason. The sentence list (`sentences`, each
+  now with its `part` and `sources`) and `plain_text` are unchanged. A revenue change above 300%
+  is stated as the two amounts, not as a percentage. A company's description and brand come
+  only from its own pages, never from a job board it links to (KITRON ASA's careers link led to
+  teamtailor.com, whose own description had been published as Kitron's).
 - **Viewer links.** Social profiles show as "Facebook · name" buttons in the company header,
   the org number opens the Brønnøysund record, news headlines and open roles link to where they
   were found, the summary's website, profiles, role and headline are links, compare links the

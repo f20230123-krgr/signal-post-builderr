@@ -261,6 +261,22 @@ class SummarySentence:
     text: str
     fields: list[str]
     claims: list[Claim] = field(default_factory=list)
+    # Which part of the summary it answers (PART_LABELS): the brief asks what the company does,
+    # what changed and what remains unknown, each with sources.
+    part: str = ""
+
+
+# The parts of the summary, in reading order, as the brief asks for them: what the company does,
+# its money, its people and presence, what changed, the signals a reader acts on, and what
+# remains unknown.
+PART_LABELS = {
+    "what_it_does": "What it does",
+    "money": "Money",
+    "people_and_presence": "People and presence",
+    "what_changed": "What changed",
+    "signals": "Key signals",
+    "unknown": "What remains unknown",
+}
 
 
 @dataclass
@@ -280,6 +296,11 @@ class Summary:
     cant_tell: list[str] = field(default_factory=list)
     # How sure we are that the facts published belong to this company: (level, why).
     confidence: tuple[str, str] = ("high", "")
+    # Short cited flags a reader acts on (revenue up or down a quarter or more, a loss, negative
+    # equity, a new managing director, a young company, hiring now), at most MAX_SIGNALS.
+    signals: list[SummarySentence] = field(default_factory=list)
+    # Each gap with the reason it is a gap: [{"item", "reason"}].
+    unknown_detail: list[dict] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -501,7 +522,13 @@ def _revenue_phrase(now: Claim, before: Optional[Claim], before_period: Optional
     pct = (a - b) / abs(b) * 100
     if abs(pct) <= 0.05:
         return f"revenue was flat on {before_period} at {_short_amount(now.value)}"
+    if abs(pct) > _MAX_CHANGE_PCT:
+        # A change measured from a small base ("up 572%") misleads; the two amounts say it.
+        return f"revenue {'rose' if pct > 0 else 'fell'} from {_short_amount(before.value)} in {before_period} to {_short_amount(now.value)}"
     return f"revenue {'grew' if pct > 0 else 'fell'} {abs(pct):.1f}% on {before_period} to {_short_amount(now.value)}"
+
+
+_MAX_CHANGE_PCT = 300
 
 
 def _unsigned(value: str) -> str:
@@ -828,10 +855,16 @@ def build_summary(profile: CompanyProfile) -> Summary:
     and every gap is named under `unknowns` instead of guessed."""
     as_of = profile.run_timestamp.date().isoformat()
     builders = (
-        _identity_sentence, _activity_sentence, _accounts_sentence, _leadership_sentence, _workplaces_sentence,
-        _online_sentence,
+        (_identity_sentence, "what_it_does"), (_activity_sentence, "what_it_does"), (_accounts_sentence, "money"),
+        (_leadership_sentence, "people_and_presence"), (_workplaces_sentence, "people_and_presence"),
+        (_online_sentence, "people_and_presence"),
     )
-    sentences = [s for s in (build(profile) for build in builders) if s is not None]
+    sentences = []
+    for build, part in builders:
+        sentence = build(profile)
+        if sentence is not None:
+            sentence.part = part
+            sentences.append(sentence)
 
     unknowns: list[str] = []
     cant_tell: list[str] = []
@@ -878,17 +911,123 @@ def build_summary(profile: CompanyProfile) -> Summary:
             ))
         else:
             sentences.append(SummarySentence(f"No material change since the previous run{previous}.", []))
+    for sentence in sentences:
+        if not sentence.part:
+            sentence.part = "what_changed"
+    unknown_detail = [{"item": item, "reason": _unknown_reason(item, profile)} for item in unknowns]
     if cant_tell:
-        sentences.append(SummarySentence("Can't tell: " + "; ".join(cant_tell) + ".", []))
+        sentences.append(SummarySentence("Can't tell: " + "; ".join(cant_tell) + ".", [], part="unknown"))
     if unknowns:
-        sentences.append(SummarySentence("Not found: " + ", ".join(unknowns) + ".", []))
+        # The reasons are in unknown_detail (and in the envelope's labelled text): the sentence
+        # list stays short.
+        sentences.append(SummarySentence("Not found: " + ", ".join(unknowns) + ".", [], part="unknown"))
 
     if sentences:
         sentences[0].text = f"As of {as_of}: {sentences[0].text}"
     return Summary(
         as_of=as_of, sentences=sentences, unknowns=unknowns, changes=changes, headline=_headline(profile),
-        cant_tell=cant_tell, confidence=identity_confidence(profile),
+        cant_tell=cant_tell, confidence=identity_confidence(profile), signals=_signals(profile),
+        unknown_detail=unknown_detail,
     )
+
+
+def _site_confirmed(profile: CompanyProfile) -> bool:
+    site = profile.online_presence.official_site
+    return site.state == EvidenceState.AVAILABLE and bool(site.value)
+
+
+def _unknown_reason(item: str, profile: CompanyProfile) -> str:
+    """Why a gap is a gap, in a few words: what was looked at and found empty."""
+    confirmed = _site_confirmed(profile)
+    if item == "official website":
+        return "none is registered with Brønnøysund or was found under the company's name"
+    if item == "company-owned social profiles":
+        return "the company's website links none" if confirmed else "no confirmed website to read them from"
+    if item == "hiring signals":
+        return (
+            "no job ad on the company's website or on NAV's job board" if confirmed
+            else "no job ad on NAV's job board, and no confirmed website to read"
+        )
+    if item == "annual accounts":
+        return "none filed in the Register of Company Accounts"
+    if item == "leadership":
+        return "no roles registered in Brønnøysund"
+    return ""
+
+
+MAX_SIGNALS = 6
+_SIGNAL_CHANGE_PCT = 25
+_RECENT_DAYS = 365
+_YOUNG_YEARS = 2
+
+
+def _signals(profile: CompanyProfile) -> list[SummarySentence]:
+    """Short flags a reader acts on, each resting on cited claims: a registry status other than
+    active, a revenue move of a quarter or more, a loss, negative equity, a new managing director
+    or board in the last year, a recent renaming, a young company, and hiring now."""
+    from datetime import date as _date
+
+    out: list[SummarySentence] = []
+    today = profile.run_timestamp.date()
+
+    def within(day: str, days: int) -> bool:
+        try:
+            return 0 <= (today - _date.fromisoformat(day[:10])).days <= days
+        except ValueError:
+            return False
+
+    status = _optional_value(profile.legal_identity.operating_status)
+    if status and status.lower() != "active":
+        out.append(SummarySentence(f"Registry status: {status}.", ["operating_status"], [profile.legal_identity.operating_status], "signals"))
+
+    change = _revenue_change(profile)
+    if change and _SIGNAL_CHANGE_PCT <= abs(change[2]) <= _MAX_CHANGE_PCT:
+        newest, _, pct, now, before = change
+        out.append(SummarySentence(
+            f"Revenue {'up' if pct > 0 else 'down'} {abs(pct):.0f}% in {newest}.", ["revenue"], [now, before], "signals",
+        ))
+    periods = {p for name in ("annual_result", "total_equity") for p in _metric_by_period(profile, name)}
+    if periods:
+        period = max(periods)
+        result = _metric_by_period(profile, "annual_result").get(period)
+        if result is not None and (_amount(result.value) or (0, ""))[0] < 0:
+            out.append(SummarySentence(f"Net loss in {period} ({_unsigned(result.value)}).", ["annual_result"], [result], "signals"))
+        equity = _metric_by_period(profile, "total_equity").get(period)
+        if equity is not None and (_amount(equity.value) or (0, ""))[0] < 0:
+            out.append(SummarySentence(f"Negative equity in {period} ({_short_amount(equity.value)}).", ["total_equity"], [equity], "signals"))
+
+    newest_role: dict[str, tuple[str, Claim]] = {}
+    for claim in profile.leadership.leaders:
+        if claim.state != EvidenceState.AVAILABLE or not claim.value or not claim.effective_date:
+            continue
+        role = claim.value[:-1].rsplit(" (", 1)[-1].split(",")[0].strip().lower() if claim.value.endswith(")") else ""
+        group = "managing director" if role == "daglig leder" else "board" if role in _BOARD_ROLES else None
+        day = claim.effective_date[:10]
+        if group and within(day, _RECENT_DAYS) and (group not in newest_role or day > newest_role[group][0]):
+            newest_role[group] = (day, claim)
+    for group, (day, claim) in sorted(newest_role.items()):
+        out.append(SummarySentence(f"{group[:1].upper() + group[1:]} changed on {day}.", ["leader"], [claim], "signals"))
+
+    for claim in profile.activity.dated_activity:
+        rename = _RENAMED_RE.match(claim.value or "") if claim.state == EvidenceState.AVAILABLE else None
+        if rename and within(rename.group(2), _RECENT_DAYS):
+            out.append(SummarySentence(f"Renamed on {rename.group(2)} (was {rename.group(1)}).", ["dated_activity"], [claim], "signals"))
+            break
+
+    founded = profile.legal_identity.founded_date
+    founded_day = _optional_value(founded)
+    if founded_day and within(founded_day, _YOUNG_YEARS * 365):
+        out.append(SummarySentence(f"Young company: founded {founded_day[:10]}.", ["founded_date"], [founded], "signals"))
+
+    roles = [
+        c for c in profile.activity.hiring_signals
+        if c.state == EvidenceState.AVAILABLE and c.value and not c.value.startswith(CAREERS_VALUE_PREFIX)
+    ]
+    if roles:
+        out.append(SummarySentence(
+            f"Hiring now: {len(roles)} open job ad{'s' if len(roles) > 1 else ''}.", ["hiring_signal"], roles[:2], "signals",
+        ))
+    return out[:MAX_SIGNALS]
 
 
 def _lower_first(text: str) -> str:
@@ -926,7 +1065,7 @@ def _headline(profile: CompanyProfile) -> str:
         period = max(revenue)
         change = _revenue_change(profile)
         text = f"revenue {_short_amount(revenue[period].value)} ({period}"
-        if change and change[0] == period:
+        if change and change[0] == period and abs(change[2]) <= _MAX_CHANGE_PCT:
             text += f", {'up' if change[2] > 0.05 else 'down' if change[2] < -0.05 else 'flat'}"
             text += "" if abs(change[2]) <= 0.05 else f" {abs(change[2]):.0f}%"
         bits.append(text + ")")

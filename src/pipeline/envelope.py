@@ -23,10 +23,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlsplit
 
 from src.models.profile import Claim, CompanyProfile, EvidenceState
 from src.pipeline.registry_extras import ACCOUNT_METRIC_FIELDS
-from src.synthesis import build_summary
+from src.synthesis import PART_LABELS, build_summary
 
 _ERROR_STATES = {EvidenceState.FAILED, EvidenceState.BLOCKED}
 
@@ -140,6 +141,102 @@ def _with_reason(field_name: str, claim: Claim, profile: CompanyProfile) -> Clai
     return claim.model_copy(update={"reason": reason}) if reason else claim
 
 
+# --- the summary, with its sources visible ------------------------------------------------
+#
+# The brief scores synthesis on whether the profile "explains what the company does, what
+# changed and what remains unknown, with sources for its conclusions". The summary's text is
+# written in labelled parts that follow those words, each sentence followed by the numbers of
+# the sources it rests on ("[1][3]"), and the numbered sources are listed in plain words.
+
+def source_label(url: str, source_class: Optional[str], linked_from: Optional[str] = None) -> str:
+    """A source named in plain words: "Brønnøysund Register Centre: entity record",
+    "Register of Company Accounts: FY2025 accounts", "Company website (example.no)",
+    "NAV job board"."""
+    import re as _re
+
+    u = url or ""
+    if "regnskapsregisteret" in u:
+        year = _re.search(r"(?:år|%C3%A5r)=(\d{4})", u)
+        return f"Register of Company Accounts: FY{year.group(1)} accounts" if year else "Register of Company Accounts (Brønnøysund)"
+    if "data.brreg.no" in u:
+        if "/roller" in u:
+            return "Brønnøysund Register Centre: roles"
+        if "underenheter" in u:
+            return "Brønnøysund Register Centre: sub-units"
+        if "oppdateringer" in u:
+            return "Brønnøysund Register Centre: update log"
+        return "Brønnøysund Register Centre: entity record"
+    if u.startswith("signalpost-company-universe"):
+        return "Builderr company list (Brønnøysund 2025 snapshot)"
+    if "arbeidsplassen.nav.no" in u:
+        return "NAV job board (arbeidsplassen.nav.no)"
+    host = urlsplit(u).netloc.lower().removeprefix("www.") if "://" in u else u
+    if linked_from:
+        return f"Page linked from the company's website ({host})"
+    # Everything else read from a website is from the company's own, verified site.
+    return f"Company website ({host})" if "://" in u else host
+
+
+def _numbered_sources(groups: list[list[str]], evidence_by_id: dict[str, dict]) -> tuple[list[dict], list[list[int]]]:
+    """Number the distinct sources behind each group of evidence ids, in order of first use:
+    (the numbered list, each group's source numbers)."""
+    numbers: dict[str, int] = {}
+    listed: list[dict] = []
+    per_group: list[list[int]] = []
+    for ids in groups:
+        mine: list[int] = []
+        for evidence_id in ids:
+            entry = evidence_by_id.get(evidence_id)
+            if not entry:
+                continue
+            url = entry.get("source_url") or ""
+            if url not in numbers:
+                numbers[url] = len(numbers) + 1
+                listed.append({
+                    "n": numbers[url], "source": source_label(url, entry.get("source_class"), entry.get("linked_from")), "url": url,
+                    "retrieved_at": entry.get("retrieved_at"),
+                })
+            if numbers[url] not in mine:
+                mine.append(numbers[url])
+        per_group.append(sorted(mine))
+    return listed, per_group
+
+
+def _marks(numbers: list[int]) -> str:
+    return "".join(f"[{n}]" for n in numbers)
+
+
+def _labelled_text(as_of: str, parts: list[tuple[str, str]]) -> str:
+    """"As of D. What it does: ... [1] Money: ... [3] ..." from (part, cited text) pairs."""
+    out = [f"As of {as_of}."]
+    current = None
+    for part, text in parts:
+        if part != current:
+            out.append(f"{PART_LABELS.get(part, part)}:")
+            current = part
+        out.append(text)
+    return " ".join(out)
+
+
+def _markdown(as_of: str, parts: list[tuple[str, str]], sources: list[dict]) -> str:
+    lines = [f"**Summary as of {as_of}**", ""]
+    current, buffer = None, []
+    for part, text in parts + [("", "")]:
+        if part != current:
+            if buffer:
+                lines += [f"**{PART_LABELS.get(current, current)}.** " + " ".join(buffer), ""]
+            current, buffer = part, []
+        if text:
+            buffer.append(text)
+    if sources:
+        lines.append("**Sources**")
+        lines += [
+            f"{s['n']}. {s['source']}: {s['url']}" + (f" (retrieved {str(s['retrieved_at'])[:10]})" if s.get("retrieved_at") else "")
+            for s in sources
+        ]
+    return "\n".join(lines).strip()
+
+
 def to_envelope(
     profile: CompanyProfile,
     run_id: str,
@@ -218,6 +315,43 @@ def to_envelope(
             errors.append({"field": field_name, "state": claim.state.value, **({"reason": claim.reason} if claim.reason else {})})
 
     summary = build_summary(profile)
+
+    def evidence_ids_of(claims: list) -> list[str]:
+        return sorted(
+            {evidence_id_by_claim[id(c)] for c in claims if id(c) in evidence_id_by_claim},
+            key=lambda e: int(e.split("-")[1]),
+        )
+
+    evidence_by_id = {e["id"]: e for e in evidence_list}
+    sentence_ids = [evidence_ids_of(s.claims) for s in summary.sentences]
+    signal_ids = [evidence_ids_of(s.claims) for s in summary.signals]
+    sources, numbered = _numbered_sources(sentence_ids + signal_ids, evidence_by_id)
+    sentence_numbers, signal_numbers = numbered[: len(sentence_ids)], numbered[len(sentence_ids):]
+
+    # The labelled text: each sentence with its source numbers, the signals, then each gap
+    # with its reason.
+    parts: list[tuple[str, str]] = []
+    first = f"As of {summary.as_of}: "
+    for s, numbers in zip(summary.sentences, sentence_numbers):
+        if s.part == "unknown":
+            continue
+        text = s.text[len(first):] if s.text.startswith(first) else s.text
+        parts.append((s.part, (text + " " + _marks(numbers)).strip()))
+    if summary.signals:
+        parts.append(("signals", "; ".join(
+            (sig.text.rstrip(".") + " " + _marks(numbers)).strip() for sig, numbers in zip(summary.signals, signal_numbers)
+        ) + "."))
+    gaps = [f"can't tell {item}" for item in summary.cant_tell] + [
+        f"{d['item']} ({d['reason']})" if d.get("reason") else d["item"] for d in summary.unknown_detail
+    ]
+    if gaps:
+        parts.append(("unknown", "; ".join(gaps) + "."))
+    elif parts:
+        parts.append(("unknown", "nothing we looked for is missing."))
+    unknown_detail = [
+        {"item": item, "state": "ambiguous", "reason": None} for item in summary.cant_tell
+    ] + [{"item": d["item"], "state": "not_available", "reason": d.get("reason") or None} for d in summary.unknown_detail]
+
     return {
         "organisation_number": profile.org_number,
         "run": {
@@ -240,20 +374,30 @@ def to_envelope(
         "summary": {
             "as_of": summary.as_of,
             "headline": summary.headline,
-            "text": summary.text,
+            # Labelled parts (what it does, money, people and presence, what changed, key
+            # signals, what remains unknown), each sentence followed by its source numbers.
+            "text": _labelled_text(summary.as_of, parts),
+            # The same sentences without labels or source numbers.
+            "plain_text": summary.text,
             "sentences": [
                 {
                     "text": s.text,
+                    "part": s.part,
                     "fields": s.fields,
-                    "evidence_ids": sorted(
-                        {evidence_id_by_claim[id(c)] for c in s.claims if id(c) in evidence_id_by_claim},
-                        key=lambda e: int(e.split("-")[1]),
-                    ),
+                    "evidence_ids": ids,
+                    "sources": numbers,
                 }
-                for s in summary.sentences
+                for s, ids, numbers in zip(summary.sentences, sentence_ids, sentence_numbers)
             ],
+            "signals": [
+                {"text": s.text, "fields": s.fields, "evidence_ids": ids, "sources": numbers}
+                for s, ids, numbers in zip(summary.signals, signal_ids, signal_numbers)
+            ],
+            "sources": sources,
+            "markdown": _markdown(summary.as_of, parts, sources),
             "changes": summary.changes,
             "unknowns": summary.unknowns,
+            "unknown_detail": unknown_detail,
             "cant_tell": summary.cant_tell,
             "confidence": {"level": summary.confidence[0], "why": summary.confidence[1]},
         },

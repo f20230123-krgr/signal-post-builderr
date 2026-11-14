@@ -103,7 +103,7 @@ def test_the_viewer_embeds_the_submitted_envelopes_verbatim():
     data = json.loads(payload)
     assert data["envelopes"][0]["organisation_number"] == "923609016"
     embedded = data["envelopes"][0]["summary"]
-    assert " ".join(x["text"] for x in embedded["sentences"]) == envelope["summary"]["text"]
+    assert " ".join(x["text"] for x in embedded["sentences"]) == envelope["summary"]["plain_text"]
     assert embedded["sentences"] == envelope["summary"]["sentences"]
     assert data["envelopes"][0]["claims"] == [
         {k: v for k, v in c.items() if v is not None} for c in envelope["claims"]
