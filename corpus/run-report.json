@@ -1,21 +1,21 @@
 {
-  "run_id": "2026-11-13T19-12-20Z",
+  "run_id": "2026-11-14T08-51-06Z",
   "input_count": 1000,
   "profile_count": 1000,
   "universe_used": true,
   "chunk_size": 100,
   "chunk_count": 10,
-  "requests_used": 10896,
-  "outbound_requests_measured": 10896,
+  "requests_used": 10890,
+  "outbound_requests_measured": 10890,
   "outbound_requests_breakdown": {
-    "total": 10896,
-    "redirect_hops": 464,
+    "total": 10890,
+    "redirect_hops": 461,
     "server_error_responses": 24,
     "by_host": {
-      "data.brreg.no": 7256,
+      "data.brreg.no": 7257,
       "api.duckduckgo.com": 820,
-      "pam-stilling-feed.nav.no": 71,
-      "www.usbl.no": 26,
+      "pam-stilling-feed.nav.no": 70,
+      "www.usbl.no": 18,
       "www.fruits.co": 16,
       "www.insbo.no": 15,
       "www.storebrand.no": 14,
@@ -35,7 +35,7 @@
     "exa_first_round_only": false,
     "max_search_spend_usd": null
   },
-  "wall_clock_seconds": 1788.588,
+  "wall_clock_seconds": 2414.827,
   "degraded_providers": {},
   "search_keys": {
     "exa": "absent",
@@ -45,9 +45,9 @@
     "available": false
   },
   "nav_job_index": {
-    "pages_fetched": 59,
-    "requests_used": 60,
-    "active_ads_indexed": 8854,
+    "pages_fetched": 58,
+    "requests_used": 59,
+    "active_ads_indexed": 8559,
     "truncated_at_page_cap": false
   },
   "viewer": {
